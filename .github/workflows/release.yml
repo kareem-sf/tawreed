@@ -75,7 +75,11 @@ jobs:
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: cmd
-        run: .build-venv\Scripts\activate && pytest -q
+        # Windows cmd.exe's `CALL activate && pytest` runs pytest
+        # in a fresh subshell that has lost the venv's PATH
+        # mutation. Invoke pytest via the venv's Python directly
+        # so we don't depend on shell activation at all.
+        run: .build-venv\Scripts\python.exe -m pytest -q
 
       - name: Build (Linux/macOS)
         if: runner.os != 'Windows'
@@ -84,7 +88,10 @@ jobs:
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: cmd
-        run: .build-venv\Scripts\activate && pyinstaller tawreed.spec --noconfirm
+        # Same reasoning as the Test step: invoke the venv's
+        # Python directly so cmd.exe subshell semantics don't
+        # drop the activation.
+        run: .build-venv\Scripts\python.exe -m PyInstaller tawreed.spec --noconfirm
 
       - name: Show binary size (Linux/macOS)
         if: runner.os != 'Windows'
