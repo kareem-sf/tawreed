@@ -124,7 +124,9 @@ def test_e2e_processing_pipeline_with_valid_boq(monkeypatch, tmp_path, isolated_
     )
     _patch_openai_with_stream(monkeypatch, [flat_json])
 
-    final = _drain_stream(ai.analyze_boq_stream(md, "OpenAI", "placeholder-openai-key", "gpt-4o-mini", ""))
+    final = _drain_stream(
+        ai.analyze_boq_stream(md, "OpenAI", "placeholder-openai-key", "gpt-4o-mini", "")
+    )
     assert final is not None, "analyzer did not yield __DONE__ terminal"
     assert final.get("project_name") == "Test"
 
@@ -164,7 +166,9 @@ def test_e2e_handles_garbage_llm_response_gracefully(monkeypatch, tmp_path, isol
     _patch_openai_with_stream(monkeypatch, ["this is not json {{{"])
 
     final = _drain_stream(
-        ai.analyze_boq_stream("fake markdown", "OpenAI", "placeholder-openai-key", "gpt-4o-mini", "")
+        ai.analyze_boq_stream(
+            "fake markdown", "OpenAI", "placeholder-openai-key", "gpt-4o-mini", ""
+        )
     )
     assert final is not None, "analyzer did not yield __DONE__ on garbage LLM response"
     # The error envelope should be flagged — at minimum via an
@@ -190,7 +194,9 @@ def test_e2e_roundtrip_preserves_amount_formulas(monkeypatch, tmp_path, isolated
     )
     _patch_openai_with_stream(monkeypatch, [flat_json])
 
-    final = _drain_stream(ai.analyze_boq_stream(md, "OpenAI", "placeholder-openai-key", "gpt-4o-mini", ""))
+    final = _drain_stream(
+        ai.analyze_boq_stream(md, "OpenAI", "placeholder-openai-key", "gpt-4o-mini", "")
+    )
     assert final is not None
 
     items_payload = final.get("items", final)
