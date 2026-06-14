@@ -20,6 +20,7 @@ Layout::
 
     ~/.tawreed/
     ├── config.json          (provider, model, base_url — no secrets)
+    ├── ui_state.json        (window geometry, last visited page)
     ├── db/tawreed.db
     ├── outputs/
     │   └── <file>_<Tawreed_Output>.xlsx
@@ -106,6 +107,13 @@ CONFIG_PATH = os.path.join(TAWREED_DIR, "config.json")
 OUTPUTS_DIR = os.path.join(TAWREED_DIR, "outputs")
 LOGS_DIR = os.path.join(TAWREED_DIR, "logs")
 PID_FILE_PATH = os.path.join(TAWREED_DIR, "single-instance.pid")
+
+# Window-level UI state (geometry blob + last visited page).
+# Lives alongside config.json so the rule "all persistent state
+# under ~/.tawreed/" holds. See ``core/ui_state.py`` for the
+# read/write helpers — this is just the path constant so the
+# rest of the codebase has a single source of truth.
+UI_STATE_PATH = os.path.join(TAWREED_DIR, "ui_state.json")
 
 # When ``keyring`` can't find a backend (e.g. headless Linux), we
 # fall back to this file. The name starts with a dot so it's hidden

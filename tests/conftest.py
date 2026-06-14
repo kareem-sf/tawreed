@@ -63,6 +63,7 @@ def isolated_tawreed_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "OUTPUTS_DIR", str(tmp_path / "outputs"))
     monkeypatch.setattr(db, "LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setattr(db, "PID_FILE_PATH", str(tmp_path / "single-instance.pid"))
+    monkeypatch.setattr(db, "UI_STATE_PATH", str(tmp_path / "ui_state.json"))
     monkeypatch.setattr(db, "SECRET_FALLBACK_PATH", str(tmp_path / ".secret_fallback"))
     # Neutralise the legacy-location detection so a test never
     # accidentally picks up the developer's real machine state.

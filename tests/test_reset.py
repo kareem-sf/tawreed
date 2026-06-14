@@ -111,25 +111,19 @@ def test_reset_handles_missing_files_gracefully(isolated_tawreed_dir):
     assert report.outputs_deleted == 0
 
 
-def test_reset_clears_qsettings(monkeypatch):
-    """Mock QSettings so we don't pollute the user's real registry."""
-    from PySide6.QtCore import QSettings
+def test_reset_clears_ui_state(isolated_tawreed_dir):
+    """``reset_all()`` must also remove the persisted UI state file
+    so a future launch starts with the default window size and the
+    workspace page. Replaces the previous ``test_reset_clears_qsettings``
+    which asserted that the QSettings registry key was wiped.
+    """
+    ui_state_path = Path(db.UI_STATE_PATH)
+    ui_state_path.write_text('{"last_page": "settings"}', encoding="utf-8")
+    assert ui_state_path.exists()
 
-    calls = {"cleared": False}
-
-    class FakeSettings:
-        def clear(self):
-            calls["cleared"] = True
-
-        def sync(self):
-            pass
-
-    monkeypatch.setattr(QSettings, "__init__", lambda self, *a, **kw: None)
-    monkeypatch.setattr(QSettings, "clear", lambda self: calls.__setitem__("cleared", True))
-    monkeypatch.setattr(QSettings, "sync", lambda self: None)
-
-    assert reset_mod._clear_qsettings() is True
-    assert calls["cleared"] is True
+    report = reset_mod.reset_all()
+    assert report.ui_state_cleared is True
+    assert not ui_state_path.exists()
 
 
 def test_reset_returns_human_summary(isolated_tawreed_dir):

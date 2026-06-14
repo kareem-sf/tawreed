@@ -11,7 +11,13 @@ Pages live in ``gui/pages/``. To add a new page:
 3. Add a button in ``_build_nav()``.
 """
 
-from PySide6.QtCore import QSettings, Qt
+# Note: We deliberately do NOT import ``QSettings`` here. All
+# persisted UI state lives in ``~/.tawreed/ui_state.json`` via
+# ``core.ui_state``; the previous ``QSettings("sfkareem",
+# "Tawreed")`` calls were the only writer to the Windows
+# registry and have been removed so the architecture rule
+# "every persistent state under ~/.tawreed/" holds.
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -26,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import ui_state
 from core.i18n import I18n, get_i18n
 from gui.assets import LOGO_PNG_PATH
 from gui.pages.about_page import AboutPage
@@ -198,15 +205,18 @@ class MainWindow(QMainWindow):
     # ----- Window state persistence --------------------------------------
 
     def _restore_window_state(self) -> None:
-        settings = QSettings("sfkareem", "Tawreed")
-        geometry = settings.value("geometry")
-        if geometry is not None:
+        # Window state lives in ``~/.tawreed/ui_state.json`` (no
+        # QSettings, no registry). See ``core/ui_state.py`` for the
+        # storage details.
+        state = ui_state.get_ui_state()
+        geometry = state.get("geometry")
+        if geometry:
             self.restoreGeometry(geometry)
         else:
             self.resize(1180, 800)
         # Last-visited page (default: workspace). Use select_page so the
         # nav highlight and the page's refresh hook both fire.
-        last = settings.value("last_page", "workspace")
+        last = state.get("last_page", "workspace")
         if last in self._pages:
             self.select_page(last)
 
@@ -228,13 +238,19 @@ class MainWindow(QMainWindow):
     # ----- Window state persistence --------------------------------------
 
     def closeEvent(self, event) -> None:
-        settings = QSettings("sfkareem", "Tawreed")
-        settings.setValue("geometry", self.saveGeometry())
+        # Persist window geometry + current page. ``saveGeometry()``
+        # returns a QByteArray; ``core.ui_state`` base64-encodes it
+        # so the file is plain JSON and stays under ~/.tawreed/.
+        last_page = "workspace"
         current = self._stack.currentWidget()
         for key, widget in self._pages.items():
             if widget is current:
-                settings.setValue("last_page", key)
+                last_page = key
                 break
+        ui_state.save_ui_state(
+            geometry=bytes(self.saveGeometry()),
+            last_page=last_page,
+        )
         super().closeEvent(event)
 
     # ----- i18n -----------------------------------------------------------

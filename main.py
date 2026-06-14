@@ -85,13 +85,18 @@ def _run() -> int:
 
     # 2. Single-instance check.
     app = SingleApplication(sys.argv)
-    # Set QApplication identity before anything else that might
-    # use QStandardPaths — otherwise paths resolve to
-    # %LOCALAPPDATA%\python\... instead of %LOCALAPPDATA%\sfkareem\Tawreed\...
-    from tawreed_app import __appname__, __version__
+    # The previous version of this block called
+    # ``app.setOrganizationName("sfkareem")`` and
+    # ``app.setApplicationName(__appname__)`` here. Those calls
+    # existed solely to set the QSettings namespace — the only
+    # writer to the Windows registry, used for window geometry
+    # and last page. Both have been removed; persistent UI state
+    # now lives in ``~/.tawreed/ui_state.json`` (see
+    # ``core/ui_state.py``). Keeping the calls would still be
+    # harmless, but dropping them removes the last Qt-side
+    # reason to identify the application to the OS.
+    from tawreed_app import __version__
 
-    app.setOrganizationName("sfkareem")
-    app.setApplicationName(__appname__)
     app.setApplicationVersion(__version__)
     # Set the application icon globally. This is what actually
     # shows up in the title bar and taskbar at runtime — the

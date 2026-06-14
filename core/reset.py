@@ -7,12 +7,20 @@ Used by the Settings page "Reset everything" button. The reset:
    obfuscated fallback file, if no keyring is available).
 3. Deletes the SQLite database (history table).
 4. Removes the ``outputs/`` folder (cached Excel workbooks).
-5. Clears the QSettings window state (geometry, last page).
+5. Removes ``ui_state.json`` (window geometry, last page).
 
 The keyring wipe is the part that closes the v0.0.1
 "plaintext api_key" gap for users who used the Reset button
 after upgrading — without it, the key would stay in the
 Credential Manager and the reset would be a half-job.
+
+The ui_state wipe is the v0.0.2 follow-up that removes the
+last writer to the Windows registry: the previous build used
+``QSettings("sfkareem", "Tawreed")`` for window state, which
+wrote to ``HKCU\\SOFTWARE\\sfkareem\\Tawreed``. That path has
+been replaced with a plain JSON file under ``~/.tawreed/``;
+this reset removes it so the next launch starts with default
+window size and the workspace page.
 
 We are NOT removing the user's TAWREED_DIR itself so that re-launch
 creates a fresh one with the same default shape. Removing the parent
@@ -41,7 +49,7 @@ class ResetReport:
     api_keys_cleared: int = 0
     history_rows_deleted: int = 0
     outputs_deleted: int = 0
-    qsettings_cleared: bool = False
+    ui_state_cleared: bool = False
     notes: list[str] = field(default_factory=list)
 
     def human_summary(self) -> str:
@@ -54,7 +62,7 @@ class ResetReport:
             lines.append(f"• {self.history_rows_deleted} history row(s) cleared.")
         if self.outputs_deleted:
             lines.append(f"• {self.outputs_deleted} output file(s) deleted.")
-        if self.qsettings_cleared:
+        if self.ui_state_cleared:
             lines.append("• Window size and last page cleared.")
         if not lines:
             lines.append("• Nothing to clear (already fresh).")
@@ -132,20 +140,19 @@ def _clear_outputs() -> int:
     return count
 
 
-def _clear_qsettings() -> bool:
-    """Clear window geometry + last-page QSettings keys.
+def _clear_ui_state() -> bool:
+    """Remove the persisted ui_state.json (window geometry + page).
 
-    We use the QSettings ``clear()`` rather than removing the
-    backing file because Qt may have the file handle open and
-    ``clear()`` is the documented API.
+    Replaces the previous ``QSettings.clear()`` path. Returns
+    True if the file was deleted (or didn't exist) — False
+    only on a real I/O error, which we don't propagate because
+    a failed window-state wipe is not a reason to abort the
+    rest of the reset.
     """
     try:
-        from PySide6.QtCore import QSettings
+        from core import ui_state
 
-        s = QSettings("sfkareem", "Tawreed")
-        s.clear()
-        s.sync()
-        return True
+        return ui_state.clear_ui_state()
     except Exception:
         return False
 
@@ -164,5 +171,5 @@ def reset_all() -> ResetReport:
     report.api_keys_cleared = _clear_api_keys()
     report.history_rows_deleted = _clear_history_rows()
     report.outputs_deleted = _clear_outputs()
-    report.qsettings_cleared = _clear_qsettings()
+    report.ui_state_cleared = _clear_ui_state()
     return report
