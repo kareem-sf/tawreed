@@ -116,3 +116,40 @@ jobs:
             dist/Tawreed.exe
             dist/Tawreed
           if-no-files-found: error
+
+  publish:
+    # The `publish` job runs once all 3 platform builds have
+    # finished, downloads the per-platform artifacts, and
+    # attaches them to a GitHub Release for tag `v*`.
+    # On a `workflow_dispatch` (manual) run it still publishes
+    # so the v0.0.1 re-tag is reproducible.
+    name: Publish GitHub Release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required for softprops/action-gh-release to create the release
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Show downloaded artifacts
+        run: ls -la artifacts/
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ github.ref_name }}
+          generate_release_notes: true
+          # The per-platform artifacts each ship as a folder
+          # (tawreed-windows-latest/, tawreed-macos-latest/,
+          # tawreed-ubuntu-latest/). The actual binary lives at
+          # artifacts/<name>/Tawreed[.exe]. Attach those files
+          # so the release page has direct download links.
+          files: |
+            artifacts/tawreed-windows-latest/Tawreed.exe
+            artifacts/tawreed-macos-latest/Tawreed
+            artifacts/tawreed-ubuntu-latest/Tawreed
+          fail_on_unmatched_files: true
