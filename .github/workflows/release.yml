@@ -138,18 +138,42 @@ jobs:
       - name: Show downloaded artifacts
         run: ls -la artifacts/
 
+      - name: Rename binaries to avoid asset name collision
+        # macOS and Linux both produce a binary literally named
+        # `Tawreed` (no extension). If we attach them as-is,
+        # softprops stores one asset per filename and the
+        # second upload silently overwrites the first. Rename
+        # so each platform gets its own asset key in the
+        # release (`Tawreed-windows.exe`, `Tawreed-macos`,
+        # `Tawreed-linux`).
+        run: |
+          if [ -f artifacts/tawreed-windows-latest/Tawreed.exe ]; then
+            cp artifacts/tawreed-windows-latest/Tawreed.exe \
+               artifacts/tawreed-windows-latest/Tawreed-windows.exe
+          fi
+          if [ -f artifacts/tawreed-macos-latest/Tawreed ]; then
+            cp artifacts/tawreed-macos-latest/Tawreed \
+               artifacts/tawreed-macos-latest/Tawreed-macos
+          fi
+          if [ -f artifacts/tawreed-ubuntu-latest/Tawreed ]; then
+            cp artifacts/tawreed-ubuntu-latest/Tawreed \
+               artifacts/tawreed-ubuntu-latest/Tawreed-linux
+          fi
+          ls -la artifacts/tawreed-*/
+
       - name: Create / update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: v${{ github.ref_name }}
+          # github.ref_name already includes the leading `v`
+          # (e.g. `v0.0.1`), so the release name is just the
+          # ref name, not `v${{ github.ref_name }}` (which would
+          # produce `vv0.0.1`).
+          name: ${{ github.ref_name }}
           generate_release_notes: true
-          # The per-platform artifacts each ship as a folder
-          # (tawreed-windows-latest/, tawreed-macos-latest/,
-          # tawreed-ubuntu-latest/). The actual binary lives at
-          # artifacts/<name>/Tawreed[.exe]. Attach those files
-          # so the release page has direct download links.
+          # Attach the renamed per-platform binaries so each
+          # platform has a unique asset name in the release.
           files: |
-            artifacts/tawreed-windows-latest/Tawreed.exe
-            artifacts/tawreed-macos-latest/Tawreed
-            artifacts/tawreed-ubuntu-latest/Tawreed
+            artifacts/tawreed-windows-latest/Tawreed-windows.exe
+            artifacts/tawreed-macos-latest/Tawreed-macos
+            artifacts/tawreed-ubuntu-latest/Tawreed-linux
           fail_on_unmatched_files: true
