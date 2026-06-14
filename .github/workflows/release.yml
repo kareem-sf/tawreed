@@ -62,11 +62,17 @@ jobs:
       - name: Create build venv (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        # cmd.exe can't source the bash-style `activate` script
+        # shipped in `Scripts\` (no extension) — only the
+        # `.bat` version. Rather than depend on shell activation
+        # (which is fragile across GitHub's wrapping with CALL),
+        # invoke the venv's Python directly to install into it.
+        # The `if not exist` guard skips if the venv already
+        # exists from a previous step.
         run: |
-          python -m venv .build-venv
-          .build-venv\Scripts\activate
-          pip install -U pip
-          pip install -e ".[dev]"
+          if not exist .build-venv\Scripts\python.exe python -m venv .build-venv
+          .build-venv\Scripts\python.exe -m pip install -U pip
+          .build-venv\Scripts\python.exe -m pip install -e ".[dev]"
 
       - name: Test (Linux/macOS)
         if: runner.os != 'Windows'
