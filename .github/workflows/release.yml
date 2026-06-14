@@ -47,7 +47,13 @@ jobs:
       # is the #1 cause of "the binary works on my machine
       # but is 200 MB on CI". ``uv venv`` + reinstall every
       # time is the only way to make the build reproducible.
-      - name: Create build venv
+      # NOTE: each OS needs its own step with its own shell
+      # because venv activation paths differ (bin/activate on
+      # POSIX, Scripts\activate.bat on Windows) and the default
+      # shell on Windows runners is PowerShell, not cmd.
+      - name: Create build venv (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           python -m venv .build-venv
           . .build-venv/bin/activate
@@ -62,22 +68,27 @@ jobs:
           pip install -U pip
           pip install -e ".[dev]"
 
-      - name: Test
+      - name: Test (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
         run: . .build-venv/bin/activate && pytest -q
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: .build-venv\Scripts\activate && pytest -q
 
-      - name: Build
-        run: . .build-venv/bin/activate && pyinstaller tawreed.spec --noconfirm
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
+        run: . .build-venv/bin/activate && pyinstaller tawreed.spec --noconfirm
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: .build-venv\Scripts\activate && pyinstaller tawreed.spec --noconfirm
 
-      - name: Show binary size
+      - name: Show binary size (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
         run: ls -la dist/
       - name: Show binary size (Windows)
         if: runner.os == 'Windows'
