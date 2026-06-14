@@ -78,13 +78,13 @@ async def test_fetch_openai_uses_bearer_header(monkeypatch):
     fake = _FakeAsyncClient(json_body={"data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]})
     _patch_async_client(monkeypatch, fake)
 
-    result = await model_catalog.fetch_models("OpenAI", api_key="sk-test")
+    result = await model_catalog.fetch_models("OpenAI", api_key="placeholder-openai-key")
     assert result.source == "live"
     assert "gpt-4o" in result.models
     assert "gpt-4o-mini" in result.models
     # Bearer header was sent.
     (url, kwargs) = fake.calls[0]
-    assert kwargs["headers"]["Authorization"] == "Bearer sk-test"
+    assert kwargs["headers"]["Authorization"] == "Bearer placeholder-openai-key"
     assert url.endswith("/v1/models")
 
 
@@ -93,12 +93,12 @@ async def test_fetch_anthropic_uses_x_api_key_header(monkeypatch):
     fake = _FakeAsyncClient(json_body={"data": [{"id": "claude-3-5-sonnet-20241022"}]})
     _patch_async_client(monkeypatch, fake)
 
-    result = await model_catalog.fetch_models("Claude", api_key="ant-test")
+    result = await model_catalog.fetch_models("Claude", api_key="placeholder-anthropic-key")
     assert result.source == "live"
     assert "claude-3-5-sonnet-20241022" in result.models
     (url, kwargs) = fake.calls[0]
     assert "anthropic.com" in url
-    assert kwargs["headers"]["x-api-key"] == "ant-test"
+    assert kwargs["headers"]["x-api-key"] == "placeholder-anthropic-key"
     assert kwargs["headers"]["anthropic-version"] == "2023-06-01"
 
 
@@ -114,7 +114,7 @@ async def test_fetch_google_strips_models_prefix(monkeypatch):
     )
     _patch_async_client(monkeypatch, fake)
 
-    result = await model_catalog.fetch_models("Google", api_key="goog-test")
+    result = await model_catalog.fetch_models("Google", api_key="placeholder-google-key")
     assert result.source == "live"
     assert "gemini-1.5-pro" in result.models
     assert "gemini-1.5-flash" in result.models

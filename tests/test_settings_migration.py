@@ -119,7 +119,7 @@ def test_legacy_minimax_openai_promotes_to_compatible(isolated_config):
         {
             "provider": "OpenAI",
             "base_url": "https://api.minimax.io/v1",
-            "api_key": "sk-test-123",
+            "api_key": "placeholder-openai-key",
             "model": "MiniMax-M3",
         },
     )
@@ -129,7 +129,7 @@ def test_legacy_minimax_openai_promotes_to_compatible(isolated_config):
     assert s["model"] == "MiniMax-M3"
     # The plaintext api_key should have been migrated to the
     # keyring stub and read back from there.
-    assert s["api_key"] == "sk-test-123"
+    assert s["api_key"] == "placeholder-openai-key"
     # And it should no longer be sitting in config.json on disk.
     on_disk = json.loads(Path(db.CONFIG_PATH).read_text(encoding="utf-8"))
     assert "api_key" not in on_disk
@@ -143,7 +143,7 @@ def test_legitimate_openai_url_does_not_promote(isolated_config):
         {
             "provider": "OpenAI",
             "base_url": "https://api.openai.com/v1",
-            "api_key": "sk-real",
+            "api_key": "placeholder-real-key",
             "model": "gpt-4.1",
         },
     )
@@ -153,7 +153,7 @@ def test_legitimate_openai_url_does_not_promote(isolated_config):
     # The api_key still got migrated to keyring (this test
     # only checks the provider decision, but the migration is
     # still applied as a side effect).
-    assert s["api_key"] == "sk-real"
+    assert s["api_key"] == "placeholder-real-key"
 
 
 def test_other_custom_url_promotes_to_compatible(isolated_config):

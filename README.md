@@ -35,9 +35,35 @@ and aligned to the way a quantity surveyor actually reads the file.
 - **Bilingual UI** — Arabic and English, with layout direction
   switching between LTR and RTL based on the active language.
 
-<!-- TODO: add screenshot of the Workspace page -->
+### Workspace
+
+![Tawreed Workspace — drop a BOQ Excel and Process](docs/screenshots/workspace.png)
+
+### Settings
+
+![Tawreed Settings — provider, model, base URL, API key](docs/screenshots/settings.png)
 
 ## Install
+
+### From a release (recommended)
+
+Download the asset for your platform from the
+[Releases page](https://github.com/sfkareem/tawreed/releases) and
+double-click to run:
+
+| File | Platform | Notes |
+|------|----------|-------|
+| `Tawreed-windows.exe` | Windows 10/11 (64-bit) | single-file, ~41 MB |
+| `Tawreed-macos`       | macOS 11+ (Apple Silicon + Intel) | single-file, ~44 MB |
+| `Tawreed-linux`       | Linux x86_64 (glibc 2.31+) | single-file, ~90 MB |
+
+> **Windows SmartScreen**: the EXE is unsigned, so SmartScreen will
+> show "Windows protected your PC". Click **More info** → **Run
+> anyway** to proceed. See [docs/INSTALL.md](docs/INSTALL.md) for
+> the full per-platform notes.
+>
+> **macOS Gatekeeper**: right-click the binary the first time and
+> choose **Open** to bypass the unidentified-developer warning.
 
 ### From source (development)
 
@@ -49,17 +75,6 @@ python -m venv .venv
 # . .venv/bin/activate        # macOS / Linux
 pip install -e ".[dev]"
 ```
-
-### From a release
-
-Download `tawreed-windows.zip` (or `-macos.zip` / `-linux.tar.gz`)
-from the [Releases page](https://github.com/sfkareem/tawreed/releases),
-unzip, and run `Tawreed.exe` (or `Tawreed` on macOS / Linux).
-
-> **Windows SmartScreen**: the EXE is unsigned, so SmartScreen will
-> show "Windows protected your PC". Click **More info** → **Run
-> anyway** to proceed. See [docs/INSTALL.md](docs/INSTALL.md) for
-> the full per-platform notes.
 
 ## Run
 
@@ -74,26 +89,38 @@ This launches the desktop application. On first run, Tawreed will:
 3. Reveal the Workspace page, where you can drop in a BOQ Excel
    and click **Process**.
 
-## Build (Windows)
+## Build
+
+PyInstaller onefile build for the current platform:
 
 ```bash
-.venv/Scripts/pyinstaller tawreed.spec
+.venv/Scripts/pyinstaller tawreed.spec    # Windows
+.venv/bin/pyinstaller tawreed.spec        # macOS / Linux
 ```
 
-Output: `dist/Tawreed/Tawreed.exe` + `dist/Tawreed/_internal/`.
-Ship the whole `dist/Tawreed/` folder (or zip it for download).
+Output: `dist/Tawreed.exe` (Windows) or `dist/Tawreed` (macOS /
+Linux) — a single binary, no folder of DLLs to ship.
 
 ## State location
 
-All per-user state lives under `~/.tawreed/`:
+All per-user state lives under `~/.tawreed/`. **No data is written
+to the Windows Registry, `%APPDATA%`, the EXE directory, or any
+location outside your home folder.** See [SECURITY.md](SECURITY.md)
+for the full disclosure policy.
 
-| Path                       | Purpose                                    |
-|----------------------------|--------------------------------------------|
-| `~/.tawreed/config.json`   | User settings (provider, model, API key)   |
-| `~/.tawreed/db/tawreed.db` | Processing history (SQLite)                |
-| `~/.tawreed/outputs/`      | Generated work-package Excel files         |
-| `~/.tawreed/logs/`         | Rotating log files (`tawreed.log`, +`.1`, +`.2`, +`.3`) |
-| `~/.tawreed/single-instance.pid` | PID file for single-instance handshake |
+| Path                              | Purpose                                                |
+|-----------------------------------|--------------------------------------------------------|
+| `~/.tawreed/config.json`          | User settings: provider, model, base URL (no secrets)  |
+| `~/.tawreed/ui_state.json`        | Window geometry + last visited page                    |
+| `~/.tawreed/db/tawreed.db`        | Processing history (SQLite)                            |
+| `~/.tawreed/outputs/`             | Generated work-package Excel files                     |
+| `~/.tawreed/logs/`                | Rotating log files (`tawreed.log`, +`.1`, +`.2`, +`.3`) |
+| `~/.tawreed/single-instance.pid`  | PID file for single-instance handshake                 |
+| `~/.tawreed/.secret_fallback`     | ONLY present when the OS keyring is unavailable        |
+
+API keys are stored in the **OS credential store** (Windows
+Credential Manager, macOS Keychain, or Linux libsecret via the
+`keyring` Python package) — never on disk in plaintext.
 
 On Windows, `~` resolves to `%USERPROFILE%`, so the actual path is
 `C:\Users\<you>\.tawreed\`.

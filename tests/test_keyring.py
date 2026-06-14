@@ -29,7 +29,7 @@ def test_save_settings_writes_api_key_to_keyring_only(isolated_tawreed_dir):
     db.save_settings(
         {
             "provider": "OpenAI",
-            "api_key": "sk-test-abc",
+            "api_key": "placeholder-openai-key",
             "model": "gpt-4.1",
             "base_url": "https://api.openai.com/v1",
         }
@@ -40,10 +40,10 @@ def test_save_settings_writes_api_key_to_keyring_only(isolated_tawreed_dir):
     assert on_disk["provider"] == "OpenAI"
     assert on_disk["model"] == "gpt-4.1"
     # Via the API: the key is there.
-    assert db.get_api_key("OpenAI") == "sk-test-abc"
+    assert db.get_api_key("OpenAI") == "placeholder-openai-key"
     # And get_settings() returns it.
     s = db.get_settings()
-    assert s["api_key"] == "sk-test-abc"
+    assert s["api_key"] == "placeholder-openai-key"
 
 
 def test_per_provider_keys_are_isolated(isolated_tawreed_dir):
@@ -85,7 +85,7 @@ def test_legacy_plaintext_key_in_config_is_migrated_on_read(isolated_tawreed_dir
         json.dumps(
             {
                 "provider": "OpenAI",
-                "api_key": "sk-still-plaintext",
+                "api_key": "test-redacted-key",
                 "model": "gpt-4.1",
                 "base_url": "https://api.openai.com/v1",
             }
@@ -94,12 +94,12 @@ def test_legacy_plaintext_key_in_config_is_migrated_on_read(isolated_tawreed_dir
     )
     s = db.get_settings()
     # Returned dict has the key (for backward compat with the GUI).
-    assert s["api_key"] == "sk-still-plaintext"
+    assert s["api_key"] == "test-redacted-key"
     # Disk: key is gone.
     on_disk = json.loads(Path(db.CONFIG_PATH).read_text(encoding="utf-8"))
     assert "api_key" not in on_disk
     # Keyring: key is there.
-    assert db.get_api_key("OpenAI") == "sk-still-plaintext"
+    assert db.get_api_key("OpenAI") == "test-redacted-key"
 
 
 def test_get_settings_with_no_config_returns_empty_api_key(isolated_tawreed_dir):
