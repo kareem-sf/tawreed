@@ -2,7 +2,8 @@
 
 We never touch the real TAWREED_DIR — every test points core.db at
 a tmp_path so the user's actual config / history / outputs are
-untouched.
+untouched. The in-memory keyring stub from conftest.py keeps the
+test away from the developer's real OS credential store.
 """
 
 from __future__ import annotations
@@ -15,30 +16,14 @@ import pytest
 import core.db as db
 import core.reset as reset_mod
 
-
-@pytest.fixture
-def isolated_tawreed_dir(tmp_path, monkeypatch):
-    """Point core.db at a tmp dir and create the standard subfolders.
-
-    Also neutralises the legacy-location detection in ``core.db`` so
-    the migration code doesn't accidentally pick up the developer's
-    real machine state (e.g. the real ``dist/Tawreed/tawreed/`` from
-    their last smoke test) and copy it into the test sandbox.
-    """
-    monkeypatch.setattr(db, "TAWREED_DIR", str(tmp_path))
-    monkeypatch.setattr(db, "DB_DIR", str(tmp_path / "db"))
-    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "db" / "tawreed.db"))
-    monkeypatch.setattr(db, "CONFIG_PATH", str(tmp_path / "config.json"))
-    monkeypatch.setattr(db, "OUTPUTS_DIR", str(tmp_path / "outputs"))
-    monkeypatch.setattr(db, "_detect_legacy_locations", lambda: [])
-    for sub in ("db", "outputs"):
-        (tmp_path / sub).mkdir(exist_ok=True)
-    return tmp_path
+# Reuse the shared fixture from conftest.py so the keyring stub
+# is installed exactly the same way as for the rest of the suite.
+pytestmark = pytest.mark.usefixtures("isolated_tawreed_dir")
 
 
 def _write_config(p: Path) -> None:
     p.write_text(
-        '{"provider": "OpenAI", "api_key": "sk-test-abc123", "model": "MiniMax-M3"}',
+        '{"provider": "OpenAI", "api_key": "***", "model": "MiniMax-M3"}',
         encoding="utf-8",
     )
 
@@ -76,15 +61,34 @@ def test_reset_deletes_config(isolated_tawreed_dir):
     assert not cfg.exists()
 
 
+def test_reset_clears_api_keys_from_keyring(isolated_tawreed_dir):
+    """The v0.0.1 hardening: the 'Reset everything' button must
+    wipe the OS keyring too, otherwise the api_key survives in
+    Credential Manager and the reset is a half-job."""
+    db.set_api_key("OpenAI", "key-1")
+    db.set_api_key("Anthropic", "key-2")
+    db.set_api_key("OpenAI Compatible", "key-3")
+    assert db.get_api_key("OpenAI") == "key-1"
+    assert db.get_api_key("Anthropic") == "key-2"
+    assert db.get_api_key("OpenAI Compatible") == "key-3"
+
+    report = reset_mod.reset_all()
+    assert report.api_keys_cleared == 3
+    assert db.get_api_key("OpenAI") == ""
+    assert db.get_api_key("Anthropic") == ""
+    assert db.get_api_key("OpenAI Compatible") == ""
+
+
 def test_reset_truncates_history(isolated_tawreed_dir):
     _seed_history(5)
     report = reset_mod.reset_all()
     assert report.history_rows_deleted == 5
-    # Table still exists, just empty.
+    # The file is preserved (schema stays), but the table is empty.
     conn = sqlite3.connect(db.DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM history")
-    assert cur.fetchone()[0] == 0
+    (n,) = cur.fetchone()
+    assert n == 0
     conn.close()
 
 
@@ -134,17 +138,15 @@ def test_reset_returns_human_summary(isolated_tawreed_dir):
         if stale.is_file():
             stale.unlink()
     _write_config(Path(db.CONFIG_PATH))
+    db.set_api_key("OpenAI", "test-key")
     _seed_history(2)
     _seed_outputs(4)
-    import sys
-
-    sys.stderr.write("DEBUG OUTPUTS_DIR: " + str(db.OUTPUTS_DIR) + "\n")
-    sys.stderr.write("DEBUG contents: " + str(list(Path(db.OUTPUTS_DIR).iterdir())) + "\n")
-    sys.stderr.flush()
     report = reset_mod.reset_all()
-    sys.stderr.write("DEBUG outputs_deleted: " + str(report.outputs_deleted) + "\n")
-    sys.stderr.flush()
     s = report.human_summary()
+    # The summary calls out the keyring wipe explicitly (the
+    # "API key" copy is gone — it's now phrased as "API key(s)
+    # removed from the OS keyring"). The provider/model/base_url
+    # copy stays.
     assert "API key" in s
     assert "2 history row" in s
     assert "4 output file" in s

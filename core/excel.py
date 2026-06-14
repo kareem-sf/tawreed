@@ -510,7 +510,7 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
             def _to_num(v: Any) -> float:
                 if v is None:
                     return 0.0
-                if isinstance(v, (int, float)):
+                if isinstance(v, int | float):
                     return float(v)
                 try:
                     s = str(v).strip().replace(",", "").replace(" ", "")
@@ -724,7 +724,7 @@ def _to_list(item: Any) -> list[Any]:
             src.get("Qty", src.get("qty", 0)),
             src.get("Rate", src.get("rate", 0)),
         ]
-    if isinstance(item, (list, tuple)):
+    if isinstance(item, list | tuple):
         return list(item)
     return [item]
 

@@ -43,5 +43,28 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
+      # Pre-commit enforces the same lint/format rules that
+      # local development does. The previous v0.0.1 shipped with
+      # hardcoded "sk-..." test fixtures and plaintext api_key
+      # references because pre-commit wasn't wired into CI. Adding
+      # it here makes "I forgot to run pre-commit" a CI failure,
+      # not a release-blocker follow-up PR.
+      - name: Pre-commit
+        # SKIP is set in the `env:` block (cross-shell safe)
+        # rather than as a `VAR=val` prefix on the command line,
+        # because Windows runners use PowerShell, which doesn't
+        # understand the bash `VAR=val` prefix syntax.
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files --show-diff-on-failure
+        env:
+          # The local `pytest-fast` hook in .pre-commit-config.yaml
+          # is hard-coded to `.\.venv-test\Scripts\python.exe`
+          # (Windows path) and only meant for local dev. CI's
+          # own `Test` step below already runs the full test
+          # suite, so skip the duplicate local hook here.
+          SKIP: pytest-fast
+        continue-on-error: false
+
       - name: Test
         run: pytest -q

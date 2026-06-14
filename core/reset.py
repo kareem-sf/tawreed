@@ -2,10 +2,17 @@
 
 Used by the Settings page "Reset everything" button. The reset:
 
-1. Deletes ``config.json`` (provider, model, base_url, api_key).
-2. Deletes the SQLite database (history table).
-3. Removes the ``outputs/`` folder (cached Excel workbooks).
-4. Clears the QSettings window state (geometry, last page).
+1. Deletes ``config.json`` (provider, model, base_url, language).
+2. Removes all api_key entries from the OS keyring (and the
+   obfuscated fallback file, if no keyring is available).
+3. Deletes the SQLite database (history table).
+4. Removes the ``outputs/`` folder (cached Excel workbooks).
+5. Clears the QSettings window state (geometry, last page).
+
+The keyring wipe is the part that closes the v0.0.1
+"plaintext api_key" gap for users who used the Reset button
+after upgrading — without it, the key would stay in the
+Credential Manager and the reset would be a half-job.
 
 We are NOT removing the user's TAWREED_DIR itself so that re-launch
 creates a fresh one with the same default shape. Removing the parent
@@ -31,6 +38,7 @@ class ResetReport:
     """Summary of what was wiped, for the confirmation dialog."""
 
     config_deleted: bool = False
+    api_keys_cleared: int = 0
     history_rows_deleted: int = 0
     outputs_deleted: int = 0
     qsettings_cleared: bool = False
@@ -39,7 +47,9 @@ class ResetReport:
     def human_summary(self) -> str:
         lines = []
         if self.config_deleted:
-            lines.append("• API key, model, and provider settings cleared.")
+            lines.append("• Provider, model, and base URL settings cleared.")
+        if self.api_keys_cleared:
+            lines.append(f"• {self.api_keys_cleared} API key(s) removed from the OS keyring.")
         if self.history_rows_deleted:
             lines.append(f"• {self.history_rows_deleted} history row(s) cleared.")
         if self.outputs_deleted:
@@ -62,6 +72,11 @@ def _delete_config() -> bool:
         except OSError:
             return False
     return False
+
+
+def _clear_api_keys() -> int:
+    """Remove every api_key we wrote to the OS keyring / fallback file."""
+    return db.clear_all_api_keys()
 
 
 def _clear_history_rows() -> int:
@@ -146,6 +161,7 @@ def reset_all() -> ResetReport:
     """
     report = ResetReport()
     report.config_deleted = _delete_config()
+    report.api_keys_cleared = _clear_api_keys()
     report.history_rows_deleted = _clear_history_rows()
     report.outputs_deleted = _clear_outputs()
     report.qsettings_cleared = _clear_qsettings()

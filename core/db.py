@@ -19,13 +19,32 @@ prevents:
 Layout::
 
     ~/.tawreed/
-    ├── config.json
+    ├── config.json          (provider, model, base_url — no secrets)
     ├── db/tawreed.db
     ├── outputs/
     │   └── <file>_<Tawreed_Output>.xlsx
     ├── logs/
+    │   ├── tawreed.log      (rotating, 1 MB × 3)
+    │   ├── crash.log        (unhandled exceptions, see core/logging_setup)
     │   └── migration.log
     └── single-instance.pid
+
+Secret storage
+--------------
+The API key is **never** written to ``config.json``. It lives in the
+OS-provided secure credential store via the ``keyring`` package:
+
+  * Windows  → Credential Manager (DPAPI, bound to the user account)
+  * macOS    → Keychain
+  * Linux    → libsecret (GNOME Keyring / KWallet) when available
+
+``keyring`` is imported lazily so a missing backend (e.g. headless
+Linux without a running secret service) degrades to a soft warning
+logged once, with the key falling back to an obfuscated file under
+``~/.tawreed/.secret_fallback`` (mode 0600) so the app still works
+in CI / container environments where the keyring daemon isn't
+available. The fallback is intentionally not a real secure store
+— it's a graceful degradation path, not a security claim.
 
 The previous version of this module put state in three different
 places depending on mode (``%LOCALAPPDATA%`` for frozen, ``./tawreed/``
@@ -33,12 +52,15 @@ for dev, ``~/.tawreed`` for the old dev legacy). The new code unifies
 on a single location and adds a one-shot migration that copies any
 state from the old ``%LOCALAPPDATA%\\Tawreed`` and ``<exe-dir>/tawreed``
 locations into ``~/.tawreed`` so an existing user keeps their
-history and settings.
+history and settings. Legacy ``config.json`` files that still contain
+an ``api_key`` field are migrated to keyring and the key is stripped
+from disk on first read.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import sqlite3
@@ -47,6 +69,8 @@ from datetime import datetime
 from typing import Any
 
 from core.ai import get_default_settings, get_provider_config, is_valid_provider
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Path resolution
@@ -82,6 +106,231 @@ CONFIG_PATH = os.path.join(TAWREED_DIR, "config.json")
 OUTPUTS_DIR = os.path.join(TAWREED_DIR, "outputs")
 LOGS_DIR = os.path.join(TAWREED_DIR, "logs")
 PID_FILE_PATH = os.path.join(TAWREED_DIR, "single-instance.pid")
+
+# When ``keyring`` can't find a backend (e.g. headless Linux), we
+# fall back to this file. The name starts with a dot so it's hidden
+# in a normal ``ls`` and the leading underscore discourages curious
+# users from poking at it. We do NOT advertise this path in the UI.
+SECRET_FALLBACK_PATH = os.path.join(TAWREED_DIR, ".secret_fallback")
+
+
+# ---------------------------------------------------------------------------
+# Secret storage: OS keyring with a graceful file fallback
+# ---------------------------------------------------------------------------
+#
+# The fallback exists so the app still works in:
+#   - headless Linux CI runners (no D-Bus / no secret service)
+#   - minimal Docker containers (no libsecret installed)
+#   - WSL without a running keyring daemon
+#
+# It is **not** a security claim — it's a "don't crash" path. The
+# file is written with mode 0o600 and the contents are obfuscated
+# (NOT encrypted) via a simple XOR with a per-install random key
+# stored in the same file. An attacker with read access to the
+# user's home directory can still recover the api_key, which is
+# the same trust model as the legacy plaintext config.json.
+#
+# When a real keyring is available, we use it and never touch the
+# fallback file.
+
+_KEYRING_SERVICE = "tawreed"
+_keyring_warned = False
+_keyring_unavailable: Exception | None = None
+_secret_fallback_data: dict[str, str] | None = None
+_secret_fallback_key: bytes | None = None
+
+
+def _load_keyring():
+    """Return the keyring module or None if it can't be imported."""
+    try:
+        import keyring  # type: ignore[import-untyped]
+
+        return keyring
+    except Exception as exc:  # pragma: no cover - import guard
+        global _keyring_unavailable
+        _keyring_unavailable = exc
+        return None
+
+
+def _keyring_is_usable() -> bool:
+    """True if keyring is importable AND has a working backend.
+
+    The keyring package always imports — what fails is the
+    ``set_password``/``get_password`` calls when there's no
+    backend (the "fail" / "null" backend returns ``None`` from
+    every call). We probe by asking the backend for its class
+    name, which is a cheap way to detect the no-op case.
+    """
+    keyring = _load_keyring()
+    if keyring is None:
+        return False
+    try:
+        backend = keyring.get_keyring()
+        cls = type(backend).__name__
+        # keyring's no-op backends are named "Fail" or "Null".
+        # Real backends are "WinVaultKeyring", "Keyring" (macOS),
+        # "SecretServiceKeyring", etc.
+        return cls not in {"Fail", "NullKeyring", "FailKeyring"}
+    except Exception:
+        return False
+
+
+def _obfuscate(value: str) -> str:
+    """Light obfuscation for the fallback file. NOT encryption."""
+    import base64
+
+    global _secret_fallback_key
+    if _secret_fallback_key is None:
+        # Per-install random key. Generated lazily on first write.
+        _secret_fallback_key = os.urandom(32)
+    raw = value.encode("utf-8")
+    key = _secret_fallback_key
+    out = bytes(b ^ key[i % len(key)] for i, b in enumerate(raw))
+    return base64.b64encode(out).decode("ascii")
+
+
+def _deobfuscate(blob: str) -> str:
+    if _secret_fallback_key is None:
+        return ""
+    import base64
+
+    try:
+        out = base64.b64decode(blob.encode("ascii"))
+        key = _secret_fallback_key
+        return bytes(b ^ key[i % len(key)] for i, b in enumerate(out)).decode("utf-8")
+    except Exception:
+        return ""
+
+
+def _load_fallback_file() -> dict[str, str]:
+    """Read the obfuscated fallback file into a dict. Idempotent."""
+    global _secret_fallback_data, _secret_fallback_key
+    if _secret_fallback_data is not None:
+        return _secret_fallback_data
+    data: dict[str, str] = {}
+    if os.path.exists(SECRET_FALLBACK_PATH):
+        try:
+            with open(SECRET_FALLBACK_PATH, encoding="utf-8") as f:
+                payload = json.load(f)
+            _secret_fallback_key = bytes.fromhex(payload.get("k", ""))
+            data = {k: _deobfuscate(v) for k, v in payload.get("secrets", {}).items()}
+        except Exception:
+            # Corrupt file — start clean, don't lose the user's whole session.
+            data = {}
+            _secret_fallback_key = None
+    _secret_fallback_data = data
+    return data
+
+
+def _save_fallback_file() -> None:
+    global _secret_fallback_data, _secret_fallback_key
+    if _secret_fallback_data is None:
+        return
+    # Lazy-init the obfuscation key. The first write after
+    # process start is also the first time we need a key, and
+    # we don't want to require a separate "init" call.
+    if _secret_fallback_key is None:
+        _secret_fallback_key = os.urandom(32)
+    os.makedirs(TAWREED_DIR, exist_ok=True)
+    payload = {
+        "k": _secret_fallback_key.hex(),
+        "secrets": {k: _obfuscate(v) for k, v in _secret_fallback_data.items()},
+    }
+    # Write atomically: temp file in the same dir, then rename.
+    tmp = SECRET_FALLBACK_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    os.replace(tmp, SECRET_FALLBACK_PATH)
+    try:
+        os.chmod(SECRET_FALLBACK_PATH, 0o600)
+    except OSError:
+        # Windows ignores chmod; that's fine — NTFS ACLs handle it.
+        pass
+
+
+def _keyring_account_key(provider: str) -> str:
+    """Build a per-provider keyring account name.
+
+    Keys are scoped by provider so a user with multiple providers
+    (e.g. OpenAI for production, Anthropic for dev) can have
+    separate credentials without one overwriting the other.
+    """
+    return f"api_key:{provider}"
+
+
+def get_api_key(provider: str) -> str:
+    """Read the api_key for the given provider from keyring (or fallback)."""
+    if _keyring_is_usable():
+        keyring = _load_keyring()
+        try:
+            v = keyring.get_password(_KEYRING_SERVICE, _keyring_account_key(provider))
+            return v or ""
+        except Exception as exc:
+            _log.warning("keyring.get_password failed: %s", exc)
+    return _load_fallback_file().get(_keyring_account_key(provider), "")
+
+
+def set_api_key(provider: str, value: str) -> None:
+    """Persist the api_key for the given provider. Empty value = delete."""
+    if _keyring_is_usable():
+        keyring = _load_keyring()
+        try:
+            if value:
+                keyring.set_password(_KEYRING_SERVICE, _keyring_account_key(provider), value)
+            else:
+                try:
+                    keyring.delete_password(_KEYRING_SERVICE, _keyring_account_key(provider))
+                except Exception:
+                    # Some backends raise on delete-of-missing. That's fine.
+                    pass
+            return
+        except Exception as exc:
+            _log.warning("keyring.set_password failed: %s", exc)
+
+    # Fallback path.
+    global _secret_fallback_data
+    data = _load_fallback_file()
+    if value:
+        data[_keyring_account_key(provider)] = value
+    else:
+        data.pop(_keyring_account_key(provider), None)
+    _save_fallback_file()
+
+
+def clear_all_api_keys() -> int:
+    """Remove every api_key we know about. Returns the count removed.
+
+    Used by ``core/reset.py`` to make "reset everything" actually
+    wipe the keyring too — otherwise resetting settings and
+    leaving the key in Credential Manager is a half-job.
+    """
+    removed = 0
+    if _keyring_is_usable():
+        keyring = _load_keyring()
+        # We don't track which providers the user has used, so we
+        # try to delete the canonical ones plus any with the same
+        # prefix in the fallback file. Anything else (e.g. a
+        # third-party service that registered under tawreed) is
+        # left alone — it wasn't ours to begin with.
+        for provider in ("OpenAI", "Anthropic", "Google", "OpenAI Compatible"):
+            try:
+                keyring.delete_password(_KEYRING_SERVICE, _keyring_account_key(provider))
+                removed += 1
+            except Exception:
+                pass
+    # Always wipe the fallback file too.
+    data = _load_fallback_file()
+    n = len(data)
+    if n:
+        data.clear()
+        _save_fallback_file()
+        removed += n
+    if os.path.exists(SECRET_FALLBACK_PATH):
+        try:
+            os.remove(SECRET_FALLBACK_PATH)
+        except OSError:
+            pass
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +376,45 @@ def _detect_legacy_locations() -> list[str]:
     ]
 
 
+def _strip_api_key_from_config_file(path: str) -> bool:
+    """If ``path`` is a config.json with an api_key, move it to
+    keyring and rewrite the file without it. Returns True if a
+    rewrite happened.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False
+    key = data.pop("api_key", None)
+    if not key:
+        return False
+    # Pick the provider to attribute the key to. If the file also
+    # has a provider field, use that. Otherwise default to OpenAI
+    # so the key isn't lost; the user can re-save from the
+    # Settings page if it should be attributed elsewhere.
+    provider = data.get("provider") or "OpenAI"
+    if not is_valid_provider(provider):
+        provider = "OpenAI"
+    set_api_key(provider, key)
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        return False
+    return True
+
+
 def _migrate_legacy_state() -> None:
-    """One-shot migration: copy any legacy state into ~/.tawreed/."""
+    """One-shot migration: copy any legacy state into ~/.tawreed/.
+
+    For ``config.json`` specifically, we also strip any embedded
+    ``api_key`` and push it to keyring. The previous version of
+    Tawreed (0.0.1 and earlier) wrote the key in plaintext — this
+    migration is what closes that gap for upgrading users.
+    """
     legacy_roots = _detect_legacy_locations()
     if not legacy_roots:
         return
@@ -136,6 +422,7 @@ def _migrate_legacy_state() -> None:
     os.makedirs(TAWREED_DIR, exist_ok=True)
 
     migrated: list[str] = []
+    secrets_migrated: list[str] = []
     for legacy in legacy_roots:
         # Copy specific files (not the whole tree, in case the user
         # dropped unrelated stuff into the legacy folder).
@@ -149,6 +436,10 @@ def _migrate_legacy_state() -> None:
                         migrated.append(src)
                     except OSError:
                         pass
+                # Whether we copied or not, if the destination
+                # has an api_key in plaintext, strip it.
+                if os.path.isfile(dst) and _strip_api_key_from_config_file(dst):
+                    secrets_migrated.append(dst)
 
         # Copy the SQLite db file (the whole history table).
         legacy_db = os.path.join(legacy, "db", "tawreed.db")
@@ -182,7 +473,7 @@ def _migrate_legacy_state() -> None:
             except OSError:
                 pass
 
-    if migrated:
+    if migrated or secrets_migrated:
         # Write a breadcrumb so the user (or a future migration
         # tool) can find where the data came from.
         try:
@@ -195,6 +486,12 @@ def _migrate_legacy_state() -> None:
                     f"New state root: {TAWREED_DIR}\n"
                     f"Files copied:\n" + "\n".join(f"  - {p}" for p in migrated) + "\n"
                 )
+                if secrets_migrated:
+                    f.write(
+                        "\nMigrated API key(s) to OS keyring and stripped from:\n"
+                        + "\n".join(f"  - {p}" for p in secrets_migrated)
+                        + "\n"
+                    )
         except OSError:
             pass
 
@@ -239,7 +536,14 @@ def _cleanup_stray_app_state() -> None:
             # If the folder contains anything OTHER than our
             # sub-folders, leave it alone — the user dropped
             # something there.
-            expected = {"config.json", "db", "outputs", "logs", "single-instance.pid"}
+            expected = {
+                "config.json",
+                "db",
+                "outputs",
+                "logs",
+                "single-instance.pid",
+                ".secret_fallback",
+            }
             try:
                 contents = set(os.listdir(legacy))
             except OSError:
@@ -270,9 +574,11 @@ def init_db() -> None:
     """Initialise the state tree (idempotent).
 
     Performs a one-shot migration of any legacy app data into the
-    new ~/.tawreed/ tree, cleans up the now-empty legacy trees
-    next to the EXE, then ensures the standard subfolders exist
-    and the history table is created.
+    new ~/.tawreed/ tree (including stripping plaintext api_key
+    fields from legacy config.json and pushing them to keyring),
+    cleans up the now-empty legacy trees next to the EXE, then
+    ensures the standard subfolders exist and the history table
+    is created.
     """
     # One-shot migration: pull any old state into the new tree.
     _migrate_legacy_state()
@@ -283,6 +589,23 @@ def init_db() -> None:
 
     for subfolder in ("db", "outputs", "logs"):
         os.makedirs(os.path.join(TAWREED_DIR, subfolder), exist_ok=True)
+
+    # Touch the keyring once so the fallback path is hot and any
+    # "no backend available" warning is logged at startup, not
+    # mid-typing on the Settings page.
+    if not _keyring_is_usable():
+        global _keyring_warned
+        if not _keyring_warned:
+            reason = f" ({_keyring_unavailable!r})" if _keyring_unavailable is not None else ""
+            _log.warning(
+                "OS keyring is not available%s; falling back to obfuscated "
+                "file storage at %s. The fallback is NOT a real secure store "
+                "— install libsecret (Linux) or run a desktop session (KDE/GNOME) "
+                "to enable the real keyring.",
+                reason,
+                SECRET_FALLBACK_PATH,
+            )
+            _keyring_warned = True
 
     conn = None
     try:
@@ -383,6 +706,14 @@ def add_history(project_name: str, packages_count: int, output_path: str) -> Non
 # ---------------------------------------------------------------------------
 # Settings (config.json) IO
 # ---------------------------------------------------------------------------
+#
+# ``config.json`` holds ONLY non-secret settings: provider, model,
+# base_url, language, and any future UI preferences. The api_key
+# is read from keyring via ``get_api_key(provider)`` and is NOT
+# persisted in this file. To keep the call sites in the GUI simple,
+# ``get_settings()`` returns a dict that ALSO has an ``api_key``
+# key populated from keyring, but the field is never written
+# back to disk.
 
 
 def get_settings() -> dict[str, Any]:
@@ -391,41 +722,97 @@ def get_settings() -> dict[str, Any]:
     # with `model`. Keep both keys in sync at load time.
     default_settings.setdefault("model_id", default_settings["model"])
     if not os.path.exists(CONFIG_PATH):
+        # Even on the defaults path, the GUI expects an api_key
+        # key to be present. Populate it from keyring so the
+        # Settings page renders the masked field correctly.
+        default_settings["api_key"] = get_api_key(default_settings["provider"])
         return default_settings
-    f = None
+    # Read the file into memory first, then close it BEFORE we
+    # attempt any rewrite of the same path — Windows holds a
+    # non-shareable write lock on an open file, so a same-process
+    # ``os.replace`` of the path would fail silently.
     try:
-        f = open(CONFIG_PATH, encoding="utf-8")
-        settings = json.load(f)
-        if "model_id" in settings and "model" not in settings:
-            settings["model"] = settings["model_id"]
-        elif "model" in settings and "model_id" not in settings:
-            settings["model_id"] = settings["model"]
-
-        # Migration: old "OpenAI" entry that pointed at a custom base
-        # URL (e.g. the MiniMax proxy at api.minimax.io/v1) gets
-        # promoted to "OpenAI Compatible" so the existing config
-        # still works after the provider rebrand.
-        saved_provider = settings.get("provider", "")
-        saved_url = settings.get("base_url", "") or ""
-        if saved_provider == "OpenAI" and saved_url and "api.openai.com" not in saved_url:
-            settings["provider"] = "OpenAI Compatible"
-
-        if "provider" not in settings or not is_valid_provider(settings["provider"]):
-            settings["provider"] = default_settings["provider"]
-
-        for k, v in default_settings.items():
-            if k not in settings:
-                settings[k] = v
-        return settings
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            settings = json.load(f)
     except Exception:
-        return default_settings
-    finally:
-        if f:
-            f.close()
+        # On parse failure, still return defaults with the
+        # current keyring key, so the app doesn't strand the
+        # user on a broken Settings page.
+        out = dict(default_settings)
+        out["api_key"] = get_api_key(default_settings["provider"])
+        return out
+
+    if "model_id" in settings and "model" not in settings:
+        settings["model"] = settings["model_id"]
+    elif "model" in settings and "model_id" not in settings:
+        settings["model_id"] = settings["model"]
+
+    # Migration: old "OpenAI" entry that pointed at a custom base
+    # URL (e.g. the MiniMax proxy at api.minimax.io/v1) gets
+    # promoted to "OpenAI Compatible" so the existing config
+    # still works after the provider rebrand.
+    saved_provider = settings.get("provider", "")
+    saved_url = settings.get("base_url", "") or ""
+    if saved_provider == "OpenAI" and saved_url and "api.openai.com" not in saved_url:
+        settings["provider"] = "OpenAI Compatible"
+
+    if "provider" not in settings or not is_valid_provider(settings["provider"]):
+        settings["provider"] = default_settings["provider"]
+
+    for k, v in default_settings.items():
+        if k not in settings:
+            settings[k] = v
+
+    # Populate api_key from keyring. If a legacy plaintext key
+    # is sitting in config.json (which the migration should
+    # have already stripped, but defence-in-depth), push it
+    # to keyring, drop it from the in-memory dict, AND rewrite
+    # config.json without the key so it doesn't sit on disk
+    # waiting to be exfiltrated.
+    if "api_key" in settings and settings["api_key"]:
+        set_api_key(settings["provider"], settings["api_key"])
+        del settings["api_key"]
+        # The file handle from the read above is already closed
+        # (we used a ``with`` block), so this ``os.replace`` is
+        # safe on Windows too.
+        _rewrite_config_without_api_key()
+    settings["api_key"] = get_api_key(settings["provider"])
+
+    return settings
+
+
+def _rewrite_config_without_api_key() -> None:
+    """Rewrite config.json in-place, stripping any api_key field.
+
+    Used by ``get_settings()`` to enforce the v0.0.1 hardening
+    invariant: ``api_key`` must never live on disk in plaintext.
+    Atomic write (temp file + ``os.replace``) so a crash mid-write
+    doesn't leave a half-written config.json.
+    """
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+    if "api_key" not in data:
+        return
+    data.pop("api_key", None)
+    try:
+        tmp = CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(tmp, CONFIG_PATH)
+    except OSError:
+        # Best-effort. The next ``get_settings()`` call will
+        # re-strip the key from disk.
+        pass
 
 
 def save_settings(settings: dict) -> None:
-    """Persist the settings dict. Validates and normalises the provider field."""
+    """Persist the settings dict. The ``api_key`` key (if present)
+    is written to keyring and stripped from config.json. All
+    other keys are validated and normalised.
+    """
     os.makedirs(TAWREED_DIR, exist_ok=True)
 
     provider = settings.get("provider", "OpenAI")
@@ -445,6 +832,14 @@ def save_settings(settings: dict) -> None:
         settings["model"] = settings["model_id"]
     elif "model" in settings and "model_id" not in settings:
         settings["model_id"] = settings["model"]
+
+    # Route the api_key to keyring and drop it from the on-disk
+    # payload. ``api_key`` is allowed to be absent in the input
+    # (e.g. when re-saving only the model); in that case we
+    # leave the existing keyring value alone.
+    api_key = settings.pop("api_key", None)
+    if api_key is not None:
+        set_api_key(provider, api_key)
 
     f = None
     try:

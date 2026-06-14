@@ -30,7 +30,7 @@ from PySide6.QtWidgets import QApplication
 
 from core import db
 from core.i18n import get_i18n
-from core.logging_setup import setup_logging
+from core.logging_setup import install_crash_hook, setup_logging
 from gui import splash as splash_mod
 from gui.assets import APP_ICON_PATH
 from gui.main_window import MainWindow
@@ -66,8 +66,12 @@ def _excepthook(exc_type, exc_value, exc_tb):
 
 
 def _run() -> int:
-    # Install the unhandled-exception hook FIRST so any failure
-    # anywhere in the boot sequence ends up in the log.
+    # Install the crash-log hook FIRST so any failure during the
+    # boot sequence (qasync import, platform plugin load, even
+    # ``setup_logging`` itself) lands in ``crash.log`` even if
+    # the rotating file handler never comes up. The hook is
+    # idempotent and chained with our GUI ``_excepthook`` below.
+    install_crash_hook()
     sys.excepthook = _excepthook
 
     # 0. Logging — must be the very first thing, so any failure in

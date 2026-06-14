@@ -244,9 +244,9 @@ def test_write_then_read_preserves_arabic(tmp_path):
     pkg = next(s for s in wb.sheetnames if s.startswith("Pkg"))
     ws = wb[pkg]
     desc_cell = ws.cell(row=2, column=2).value
-    assert "نظام الإنذار" in (desc_cell or ""), (
-        f"Arabic description did not survive the roundtrip; got {desc_cell!r}"
-    )
+    assert "نظام الإنذار" in (
+        desc_cell or ""
+    ), f"Arabic description did not survive the roundtrip; got {desc_cell!r}"
 
 
 def test_write_excel_caps_description_column_width(tmp_path):
@@ -370,6 +370,6 @@ def test_write_excel_amount_is_formula(tmp_path):
     pkg = next(s for s in wb.sheetnames if s.startswith("Pkg"))
     ws = wb[pkg]
     amount_cell = ws.cell(row=2, column=6).value
-    assert isinstance(amount_cell, str) and amount_cell.startswith("="), (
-        f"Amount cell should be a formula like =IFERROR(D2*E2, 0); got {amount_cell!r}"
-    )
+    assert isinstance(amount_cell, str) and amount_cell.startswith(
+        "="
+    ), f"Amount cell should be a formula like =IFERROR(D2*E2, 0); got {amount_cell!r}"

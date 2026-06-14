@@ -40,11 +40,79 @@ from pathlib import Path
 # call so the file lands in the canonical state directory.
 DEFAULT_LOG_DIR = Path.home() / ".tawreed" / "logs"
 DEFAULT_LOG_FILE = DEFAULT_LOG_DIR / "tawreed.log"
+DEFAULT_CRASH_FILE = DEFAULT_LOG_DIR / "crash.log"
 DEFAULT_LEVEL = "INFO"
 MAX_BYTES = 1 * 1024 * 1024  # 1 MB per file
 BACKUP_COUNT = 3  # keep tawreed.log.1, .2, .3
 
 _CONFIGURED = False
+_CRASH_HOOK_INSTALLED = False
+
+
+def install_crash_hook(log_dir: Path | None = None) -> None:
+    """Install ``sys.excepthook`` and ``sys.unraisablehook`` that
+    write to ``~/.tawreed/logs/crash.log``.
+
+    This is the LAST-LINE-OF-DEFENCE for unhandled exceptions.
+    The user releases the EXE with ``console=False`` so the
+    usual "Traceback (most recent call last):" output never
+    appears anywhere; without this hook a crash is completely
+    silent — the user sees the app vanish and has nothing to
+    report.
+
+    The hook is installed at import time, BEFORE
+    ``setup_logging()`` runs, so it can capture errors that
+    happen during the first import phase (qasync, PySide6
+    platform plugin load, etc.). We append to crash.log (no
+    rotation; each crash is a few KB and the user can clean
+    up manually if needed).
+    """
+    global _CRASH_HOOK_INSTALLED
+    if _CRASH_HOOK_INSTALLED:
+        return
+    crash_path = Path(log_dir or os.environ.get("TAWREED_LOG_DIR", DEFAULT_LOG_DIR)) / "crash.log"
+
+    def _write_crash(prefix: str, exc_type, exc_value, exc_tb) -> None:
+        try:
+            crash_path.parent.mkdir(parents=True, exist_ok=True)
+            import traceback
+
+            with open(crash_path, "a", encoding="utf-8") as f:
+                f.write(
+                    f"\n--- {prefix} @ {os.environ.get('COMPUTERNAME', '?')} "
+                    f"pid={os.getpid()} ---\n"
+                )
+                if exc_type is not None:
+                    traceback.print_exception(exc_type, exc_value, exc_tb, file=f)
+        except Exception:
+            # If we can't even write the crash file, there's
+            # nothing left to do. Don't raise from inside the
+            # hook.
+            pass
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        # Don't intercept KeyboardInterrupt — the user pressing
+        # Ctrl+C is not a "crash".
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        _write_crash("UNHANDLED", exc_type, exc_value, exc_tb)
+        # Also call the previous hook so pytest / IDE debuggers
+        # still see the traceback in their own output.
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    def _unraisable_hook(unraisable):
+        _write_crash(
+            "UNRAISABLE",
+            unraisable.exc_type,
+            unraisable.exc_value,
+            unraisable.exc_traceback,
+        )
+        sys.__unraisablehook__(unraisable)
+
+    sys.excepthook = _excepthook
+    sys.unraisablehook = _unraisable_hook
+    _CRASH_HOOK_INSTALLED = True
 
 
 def setup_logging(

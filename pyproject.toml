@@ -36,6 +36,13 @@ dependencies = [
   "qasync>=0.27",
   "openai>=1.30,<3",
   "openpyxl>=3.1,<4",
+  # Secure credential storage. Windows uses the Credential Manager
+  # (DPAPI-bound to the user account), macOS uses Keychain, and Linux
+  # uses libsecret via the [secretstorage] extra. Keeping api_key out
+  # of the plaintext config.json is the v0.0.1 hardening item — see
+  # SECURITY.md for the disclosure policy.
+  "keyring>=25.0",
+  "secretstorage>=3.3 ; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]
@@ -121,4 +128,3 @@ ignore = [
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"  # preserve CRLF on Windows, LF on Linux/macOS
-

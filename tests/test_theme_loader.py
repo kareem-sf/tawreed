@@ -41,12 +41,12 @@ def test_token_map_covers_all_referenced_tokens() -> None:
     # Tokens only start with a known prefix.
     referenced = set(re.findall(r"@(color-[a-z-]+|radius-[a-z]+|type-[a-z]+)", qss))
     defined = set(_TOKEN_MAP.keys())
-    assert referenced.issubset(defined), (
-        f"QSS references tokens not in _TOKEN_MAP: {referenced - defined!r}"
-    )
-    assert defined.issubset(referenced), (
-        f"_TOKEN_MAP defines tokens the QSS doesn't use: {defined - referenced!r}"
-    )
+    assert referenced.issubset(
+        defined
+    ), f"QSS references tokens not in _TOKEN_MAP: {referenced - defined!r}"
+    assert defined.issubset(
+        referenced
+    ), f"_TOKEN_MAP defines tokens the QSS doesn't use: {defined - referenced!r}"
 
 
 def test_legacy_alias_works() -> None:
