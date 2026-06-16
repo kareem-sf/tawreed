@@ -5,6 +5,36 @@ All notable changes to Tawreed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-06-16
+
+### Added
+- **Language Toggle**: Added English ↔ Arabic language switcher in Settings page with automatic UI translation and RTL layout support
+- **Dark/Light Theme Toggle**: Added theme selection in Settings page with new light theme (tawreed_light.qss)
+- **Recent Files List**: Added a list of recently opened BOQ files in the Workspace page with click-to-open functionality
+- **Progress Bar**: Added a progress bar to the Workspace page to show processing status
+- **Toast Notifications**: Added non-blocking toast notifications for success/error feedback
+- **Keyboard Shortcuts**: Added keyboard shortcuts for common actions:
+  - `Esc`: Clear selection
+  - `Ctrl+O`: Open file dialog
+  - `Ctrl+P`: Start processing
+  - `Ctrl+L`: Clear console log
+- **Memory Optimization**: For Excel files >10MB, the parser now uses read_only mode and save_virtual_workbook for memory-efficient processing
+- **Retry Logic**: Added exponential backoff retry functionality for API calls and file operations
+- **Improved Error Recovery**: Better error handling for corrupt/malformed Excel files with user-friendly error messages
+- **Dependency Security Scanning**: Added pip-audit to CI workflow for vulnerability detection
+- **SBOM Generation**: Added Software Bill of Materials generation script (scripts/generate_sbom.py)
+- **Atomic Writes**: Ensured all config file writes use temp+rename pattern for crash safety
+- **Temp File Cleanup**: Added automatic cleanup of stale .tmp files on startup
+- **Enhanced Logging**: Added context-aware logging helpers for better debugging
+
+### Changed
+- **Settings Page**: Reorganized to include Language and Theme sections with dropdown selectors
+- **Excel Parsing**: Added file size detection and memory optimization for large files
+- **Config Persistence**: Added language and theme fields to config.json with proper validation
+
+### Fixed
+- **Language Toggle**: Fixed missing UI dropdown and persistence for language setting
+
 ## [0.0.1] - 2026-06-14
 
 ### Added
