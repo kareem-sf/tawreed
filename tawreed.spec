@@ -56,15 +56,18 @@ HIDDEN_IMPORTS = [
     "gui.single_app",
     "gui.widgets",
     "gui.widgets.chrome",
+    "gui.widgets.toast",
     "tawreed_app",
     "tawreed_app.__main__",
     "core",
     "core.ai",
+    "core.context_logging",
     "core.db",
     "core.excel",
     "core.i18n",
     "core.logging_setup",
     "core.model_catalog",
+    "core.retry_utils",
     "core.reset",
     # Optional LLM SDKs (Anthropic is implemented via raw httpx in
     # core/ai.py; Google Gemini goes through the OpenAI-compat
@@ -188,7 +191,8 @@ a = Analysis(
         ("tawreed_logo.ico", "."),
         ("tawreed_logo_transparent.png", "."),
         # Theme files — loaded at runtime by gui.styles.load_stylesheet.
-        ("gui/themes", "gui/themes"),
+        ("gui/themes/tawreed_dark.qss", "gui/themes"),
+        ("gui/themes/tawreed_light.qss", "gui/themes"),
     ],
     hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],
