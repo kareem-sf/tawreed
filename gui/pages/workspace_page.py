@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -136,6 +137,7 @@ class WorkspacePage(QWidget):
         self._last_output_path: str | None = None
         self._build_ui()
         self.file_selected.connect(self._on_file_selected)
+        self.setFocusPolicy(Qt.StrongFocus)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -162,9 +164,23 @@ class WorkspacePage(QWidget):
         self.drop_zone = _DropZone()
         input_card.addWidget(self.drop_zone)
 
+        # Recent files list
+        self.recent_files_label = QLabel("Recent Files:")
+        self.recent_files_label.setObjectName("hint")
+        self.recent_files_label.setVisible(False)
+        input_card.addWidget(self.recent_files_label)
+        
+        self.recent_files_container = QHBoxLayout()
+        self.recent_files_container.setSpacing(8)
+        self.recent_files_container.setContentsMargins(0, 0, 0, 0)
+        input_card.addLayout(self.recent_files_container)
+
         self.file_label = QLabel("No file selected")
         self.file_label.setObjectName("fileLabel")
         input_card.addWidget(self.file_label)
+        
+        # Populate recent files on startup
+        self._refresh_recent_files()
 
         actions = QHBoxLayout()
         actions.setSpacing(10)
@@ -217,6 +233,16 @@ class WorkspacePage(QWidget):
         console_actions.addWidget(self.clear_console_btn)
         console_card.addLayout(console_actions)
 
+        # Progress bar for large file processing
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("progressBar")
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
+        console_card.addWidget(self.progress_bar)
+
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.setObjectName("liveConsole")
@@ -225,6 +251,28 @@ class WorkspacePage(QWidget):
         layout.addWidget(console_card, stretch=1)
 
     # ----- file selection -------------------------------------------------
+
+    def _refresh_recent_files(self) -> None:
+        """Refresh the recent files list from disk."""
+        recent_files = db.get_recent_files()
+        
+        # Clear existing buttons
+        for i in reversed(range(self.recent_files_container.count())):
+            widget = self.recent_files_container.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+        
+        # Add new buttons
+        for file_path in recent_files:
+            btn = QPushButton(os.path.basename(file_path))
+            btn.setObjectName("ghostBtn")
+            btn.setToolTip(file_path)
+            btn.clicked.connect(lambda _, p=file_path: self._on_file_selected(p))
+            self.recent_files_container.addWidget(btn)
+        
+        # Show/hide label based on whether there are recent files
+        has_recent = len(recent_files) > 0
+        self.recent_files_label.setVisible(has_recent)
 
     def _on_file_selected(self, path: str) -> None:
         self.selected_file = path
@@ -236,6 +284,10 @@ class WorkspacePage(QWidget):
         self.status_pill.set_state("idle", "Ready")
         self.console_status.setText(f"Loaded: {name}")
         self.log(f"📄  Loaded {name}\n")
+        
+        # Add to recent files
+        db.add_recent_file(path)
+        self._refresh_recent_files()
 
     def browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -252,13 +304,58 @@ class WorkspacePage(QWidget):
         self.clear_btn.setEnabled(False)
         self.status_pill.set_state("idle", "Idle")
         self.console_status.setText("Awaiting input…")
+        self.progress_bar.setVisible(False)
 
     # ----- console helpers ------------------------------------------------
+
+    def keyPressEvent(self, event) -> None:
+        """Handle keyboard shortcuts."""
+        if event.key() == Qt.Key_Escape:
+            self._clear_selection()
+            event.accept()
+        elif event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_O:
+                self.browse_file()
+                event.accept()
+            elif event.key() == Qt.Key_P:
+                if self.process_btn.isEnabled():
+                    self.start_processing()
+                event.accept()
+            elif event.key() == Qt.Key_S:
+                # Save settings shortcut
+                event.ignore()  # Let it propagate to main window
+            elif event.key() == Qt.Key_L:
+                self.console.clear()
+                event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def log(self, text: str) -> None:
         self.console.insertPlainText(text)
         sb = self.console.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def set_progress(self, value: int, max_value: int = 100, visible: bool = True) -> None:
+        """Set the progress bar value and visibility."""
+        self.progress_bar.setVisible(visible)
+        if max_value > 0:
+            self.progress_bar.setMaximum(max_value)
+        self.progress_bar.setValue(value)
+
+    def reset_progress(self) -> None:
+        """Reset and hide the progress bar."""
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+
+    def _show_toast(self, message: str, duration: int = 3000) -> None:
+        """Show a toast notification from the main window."""
+        # Get the main window and show toast
+        from gui.main_window import MainWindow
+        from PySide6.QtWidgets import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, MainWindow):
+                widget.show_toast(message, duration)
+                break
 
     # ----- processing -----------------------------------------------------
 
@@ -282,6 +379,7 @@ class WorkspacePage(QWidget):
         self.status_pill.set_state("running", "Processing…")
         self.console_status.setText("Streaming AI output…")
         self.log("Initializing processor…\n")
+        self.set_progress(0, 100, True)
 
         # Disconnect any previous signal handlers so the page can be reused.
         self.signals = WorkerSignals()
@@ -331,10 +429,14 @@ class WorkspacePage(QWidget):
         self.clear_btn.setEnabled(True)
         self.status_pill.set_state("success", "Done")
         self.console_status.setText(f"Saved: {os.path.basename(output_path)}")
+        self.reset_progress()
         # Stash the path so the "Open Output" button can find it.
         self._last_output_path = output_path
         self.open_output_btn.setEnabled(True)
         self.open_folder_btn.setEnabled(True)
+
+        # Show toast notification
+        self._show_toast("✅ Processing complete!")
 
         # Confirmation dialog with two actions: open the file, or
         # reveal it in Explorer. Both are common next steps and
@@ -364,6 +466,7 @@ class WorkspacePage(QWidget):
         self.clear_btn.setEnabled(True)
         self.status_pill.set_state("error", "Error")
         self.console_status.setText(f"Error: {error_msg[:80]}")
+        self.reset_progress()
         self.open_output_btn.setEnabled(False)
         self.open_folder_btn.setEnabled(False)
         QMessageBox.critical(self, "Error", f"Failed to process BOQ:\n{error_msg}")

@@ -480,3 +480,18 @@ QMessageBox QLabel {
 QMessageBox QPushButton {
     min-width: 80px;
 }
+
+/* ---- Toast notifications ---- */
+QFrame#toast {
+    background-color: @color-bg-card-elev;
+    border: 1px solid @color-border;
+    border-radius: @radius-md;
+    padding: 0px;
+}
+QLabel#toastMessage {
+    color: @color-text;
+    font-size: 13px;
+}
+QLabel#toastIcon {
+    background-color: transparent;
+}

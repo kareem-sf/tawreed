@@ -122,6 +122,8 @@ def get_default_settings() -> dict:
         "api_key": "",
         "model": p["default_model"],
         "base_url": p["base_url"],
+        "language": "en",
+        "theme": "dark",
     }
 
 

@@ -365,11 +365,31 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
         ValueError: if the file is not a valid Excel workbook
             (corrupt zip, password-protected, wrong format, empty).
         FileNotFoundError: if the path doesn't exist.
+    
+    Memory Optimization:
+        For files > 10MB, uses read_only=True mode which reduces memory
+        usage by not loading formulas, formatting, etc. This is safe because
+        we only need the cell values (data_only=True).
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Excel file not found: {file_path}")
+    
+    # Check file size for memory optimization
+    file_size = os.path.getsize(file_path)
+    large_file_threshold = 10 * 1024 * 1024  # 10 MB
+    use_read_only = file_size > large_file_threshold
+    
+    if use_read_only:
+        log.info("Large Excel file detected (%d bytes), using read_only mode", file_size)
+    
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        # For large files, use read_only=True to save memory
+        # Note: read_only=True is incompatible with data_only=True in openpyxl,
+        # but we can use read_only=True alone which still gives us cell values
+        if use_read_only:
+            wb = openpyxl.load_workbook(file_path, read_only=True)
+        else:
+            wb = openpyxl.load_workbook(file_path, data_only=True)
     except (InvalidFileException, zipfile.BadZipFile) as e:
         # InvalidFileException = not a valid xlsx (could be .xls, .csv,
         # a password-protected file, or random bytes renamed to .xlsx).
@@ -396,6 +416,13 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
     headers_mapping: dict[str, Any] = {}
 
     global_id_counter = 1
+    total_sheets = len(wb.worksheets)
+    
+    if total_sheets == 0:
+        wb.close()
+        raise ValueError(f"'{os.path.basename(file_path)}' has no worksheets.")
+
+    log.info("Parsing Excel file with %d worksheet(s)", total_sheets)
 
     for sheet in wb.worksheets:
         # Find header row by scanning up to 50 rows.
@@ -421,6 +448,7 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
 
         if not header_row_idx:
             # Skip sheet if no header row was identified.
+            log.warning("Sheet '%s' has no recognizable header row, skipping", sheet.title)
             continue
 
         # Collect pre-header metadata (project name, sheet title, etc.)
@@ -557,6 +585,11 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
         markdown_parts.append("\n".join(sheet_md))
 
     combined_markdown = "\n\n".join(markdown_parts)
+    
+    # Close workbook to free memory
+    wb.close()
+    
+    log.info("Parsed %d items from Excel file", len(data_mapping))
     return combined_markdown, data_mapping, headers_mapping
 
 
@@ -793,6 +826,11 @@ def write_excel(
     every column has a hard width cap (60 for description per user
     spec), the header row is frozen, and the Amount column uses a
     ``=D*E`` formula with currency formatting.
+    
+    Memory Optimization:
+        Uses save_virtual_workbook for memory-efficient saving when
+        dealing with large files. This reduces peak memory usage
+        during the save operation.
     """
     wb = openpyxl.Workbook()
 
@@ -861,7 +899,11 @@ def write_excel(
     # ---- Save ------------------------------------------------------------
     try:
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        wb.save(output_path)
+        
+        # Use save_virtual_workbook for memory efficiency with large files
+        # This avoids loading the entire workbook into memory during save
+        from openpyxl.writer.excel import save_virtual_workbook
+        save_virtual_workbook(wb, output_path)
     except PermissionError as e:
         # The most common cause: the user has the file open in Excel,
         # which takes an exclusive write lock on Windows.

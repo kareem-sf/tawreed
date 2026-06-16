@@ -40,6 +40,7 @@ from gui.pages.history_page import HistoryPage
 from gui.pages.settings_page import SettingsPage
 from gui.pages.workspace_page import WorkspacePage
 from gui.styles import load_stylesheet
+from gui.widgets.toast import ToastManager
 from tawreed_app import __appname__, __version__
 
 
@@ -60,11 +61,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._i18n: I18n = get_i18n()
         self.setWindowTitle(f"{__appname__} — AI BOQ Processing")
-        self.setStyleSheet(load_stylesheet("dark"))
+        self.setStyleSheet(load_stylesheet())
 
         self._nav_buttons: dict[str, QPushButton] = {}
         self._nav_label_keys: dict[str, str] = {}  # key -> i18n key
         self._pages: dict[str, QWidget] = {}
+        self._toast_manager = ToastManager(self)
         self._build_ui()
         # _restore_window_state also selects the correct page.
         self._restore_window_state()
@@ -279,3 +281,17 @@ class MainWindow(QMainWindow):
                     # rest of the shell; the page itself can log
                     # if it wants to.
                     pass
+
+    # ----- Toast notifications -----------------------------------------------
+
+    def show_toast(self, message: str, duration: int = 3000) -> None:
+        """Show a toast notification."""
+        self._toast_manager.show_toast(message, duration)
+
+    def show_success_toast(self, message: str, duration: int = 3000) -> None:
+        """Show a success toast notification."""
+        self._toast_manager.show_success(message, duration)
+
+    def show_error_toast(self, message: str, duration: int = 5000) -> None:
+        """Show an error toast notification."""
+        self._toast_manager.show_error(message, duration)

@@ -81,3 +81,8 @@ config.json
 # ----- Logs -----
 *.log
 logs/
+
+# ----- SBOM -----
+sbom.json
+sbom.csv
+security-scan.json

@@ -38,6 +38,7 @@ from core.ai import (
     get_provider_names,
     is_valid_provider,
 )
+from core.i18n import SUPPORTED_LANGUAGES, get_i18n
 from core.model_catalog import fetch_models
 from gui.widgets import Card, PageHeader, StatusPill
 from gui.worker import check_connection
@@ -100,6 +101,43 @@ class SettingsPage(QWidget):
         self.model_status.set_state("idle", "Curated list")
         model_card.addWidget(self.model_status)
         layout.addWidget(model_card)
+
+        # ----- Language card -----
+        language_card = Card("Language")
+        self.language_combo = QComboBox()
+        # Add language options with display names
+        language_display = {
+            "en": "English",
+            "ar": "العربية",
+        }
+        for lang_code in SUPPORTED_LANGUAGES:
+            self.language_combo.addItem(language_display.get(lang_code, lang_code), userData=lang_code)
+        self.language_combo.currentIndexChanged.connect(self._on_language_changed)
+        language_card.addWidget(self.language_combo)
+        
+        self.language_hint = QLabel("Switch between English and Arabic user interface")
+        self.language_hint.setObjectName("hint")
+        self.language_hint.setWordWrap(True)
+        language_card.addWidget(self.language_hint)
+        layout.addWidget(language_card)
+
+        # ----- Theme card -----
+        theme_card = Card("Theme")
+        self.theme_combo = QComboBox()
+        theme_display = {
+            "dark": "Dark",
+            "light": "Light",
+        }
+        for theme_code in ["dark", "light"]:
+            self.theme_combo.addItem(theme_display.get(theme_code, theme_code), userData=theme_code)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        theme_card.addWidget(self.theme_combo)
+        
+        self.theme_hint = QLabel("Switch between dark and light color schemes")
+        self.theme_hint.setObjectName("hint")
+        self.theme_hint.setWordWrap(True)
+        theme_card.addWidget(self.theme_hint)
+        layout.addWidget(theme_card)
 
         # ----- Connection card -----
         conn_card = Card("Connection")
@@ -187,6 +225,18 @@ class SettingsPage(QWidget):
             self._populate_models_for_provider(provider, select_model=settings.get("model", ""))
             self.base_url_input.setText(settings.get("base_url", ""))
             self.api_key_input.setText(settings.get("api_key", ""))
+            
+            # Load language setting
+            language = settings.get("language", "en")
+            lang_idx = self.language_combo.findData(language)
+            if lang_idx >= 0:
+                self.language_combo.setCurrentIndex(lang_idx)
+            
+            # Load theme setting
+            theme = settings.get("theme", "dark")
+            theme_idx = self.theme_combo.findData(theme)
+            if theme_idx >= 0:
+                self.theme_combo.setCurrentIndex(theme_idx)
         finally:
             self._loading = False
 
@@ -195,6 +245,8 @@ class SettingsPage(QWidget):
         model = self.model_combo.currentText().strip()
         base_url = self.base_url_input.text().strip()
         api_key = self.api_key_input.text().strip()
+        language = self.language_combo.currentData() or "en"
+        theme = self.theme_combo.currentData() or "dark"
 
         cfg = get_provider_config(provider)
         if cfg.get("requires_base_url") and not base_url:
@@ -216,9 +268,23 @@ class SettingsPage(QWidget):
             "api_key": api_key,
             "model": model,
             "base_url": base_url,
+            "language": language,
+            "theme": theme,
         }
         try:
             db.save_settings(payload)
+            # Update the global i18n instance to reflect the new language
+            i18n = get_i18n()
+            i18n.set_language(language)
+            # Update the theme
+            from gui.styles import set_theme, load_stylesheet
+            set_theme(theme)
+            # Re-apply stylesheet to main window if available
+            from gui.main_window import MainWindow
+            for widget in QApplication.topLevelWidgets():
+                if isinstance(widget, MainWindow):
+                    widget.setStyleSheet(load_stylesheet())
+                    break
         except Exception as e:
             QMessageBox.critical(self, "Save failed", f"Could not save settings:\n{e}")
             return
@@ -227,6 +293,29 @@ class SettingsPage(QWidget):
         # Re-apply the style for the new objectName.
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
+
+    def _on_language_changed(self, _index: int) -> None:
+        """Handle language dropdown change - update i18n immediately."""
+        if self._loading:
+            return
+        language = self.language_combo.currentData() or "en"
+        i18n = get_i18n()
+        i18n.set_language(language)
+
+    def _on_theme_changed(self, _index: int) -> None:
+        """Handle theme dropdown change - update theme immediately."""
+        if self._loading:
+            return
+        theme = self.theme_combo.currentData() or "dark"
+        from gui.styles import set_theme, load_stylesheet
+        set_theme(theme)
+        # Re-apply stylesheet to main window if available
+        from gui.main_window import MainWindow
+        from PySide6.QtWidgets import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, MainWindow):
+                widget.setStyleSheet(load_stylesheet())
+                break
 
     # ----- Provider / model wiring ----------------------------------------
 

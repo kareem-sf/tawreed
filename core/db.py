@@ -595,6 +595,9 @@ def init_db() -> None:
     # frozen builds. Best-effort; never raises.
     _cleanup_stray_app_state()
 
+    # Clean up any stale temp files from previous crashes
+    cleanup_temp_files()
+
     for subfolder in ("db", "outputs", "logs"):
         os.makedirs(os.path.join(TAWREED_DIR, subfolder), exist_ok=True)
 
@@ -771,6 +774,22 @@ def get_settings() -> dict[str, Any]:
         if k not in settings:
             settings[k] = v
 
+    # Validate and normalize language setting
+    if "language" not in settings:
+        settings["language"] = default_settings["language"]
+    else:
+        # Ensure language is supported
+        from core.i18n import SUPPORTED_LANGUAGES
+        if settings["language"] not in SUPPORTED_LANGUAGES:
+            settings["language"] = default_settings["language"]
+
+    # Validate and normalize theme setting
+    if "theme" not in settings:
+        settings["theme"] = default_settings.get("theme", "dark")
+    else:
+        if settings["theme"] not in ("dark", "light"):
+            settings["theme"] = default_settings.get("theme", "dark")
+
     # Populate api_key from keyring. If a legacy plaintext key
     # is sitting in config.json (which the migration should
     # have already stripped, but defence-in-depth), push it
@@ -841,6 +860,21 @@ def save_settings(settings: dict) -> None:
     elif "model" in settings and "model_id" not in settings:
         settings["model_id"] = settings["model"]
 
+    # Validate and normalize language setting
+    from core.i18n import SUPPORTED_LANGUAGES
+    if "language" not in settings:
+        settings["language"] = "en"
+    else:
+        if settings["language"] not in SUPPORTED_LANGUAGES:
+            settings["language"] = "en"
+
+    # Validate and normalize theme setting
+    if "theme" not in settings:
+        settings["theme"] = "dark"
+    else:
+        if settings["theme"] not in ("dark", "light"):
+            settings["theme"] = "dark"
+
     # Route the api_key to keyring and drop it from the on-disk
     # payload. ``api_key`` is allowed to be absent in the input
     # (e.g. when re-saving only the model); in that case we
@@ -849,22 +883,32 @@ def save_settings(settings: dict) -> None:
     if api_key is not None:
         set_api_key(provider, api_key)
 
-    f = None
+    # Atomic write: temp file + rename to prevent corruption on crash
+    os.makedirs(TAWREED_DIR, exist_ok=True)
+    tmp_path = CONFIG_PATH + ".tmp"
     try:
-        f = open(CONFIG_PATH, "w", encoding="utf-8")
-        json.dump(settings, f, indent=4, ensure_ascii=False)
-    finally:
-        if f:
-            f.close()
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=4, ensure_ascii=False)
+        os.replace(tmp_path, CONFIG_PATH)
+    except OSError:
+        # Best-effort cleanup of temp file
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
-def update_settings(provider: str, api_key: str, model: str, base_url: str) -> None:
+def update_settings(provider: str, api_key: str, model: str, base_url: str, language: str = "en", theme: str = "dark") -> None:
     settings = {
         "provider": provider,
         "api_key": api_key,
         "model": model,
         "model_id": model,
         "base_url": base_url,
+        "language": language,
+        "theme": theme,
     }
     save_settings(settings)
 
@@ -872,3 +916,83 @@ def update_settings(provider: str, api_key: str, model: str, base_url: str) -> N
 def get_outputs_dir() -> str:
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
     return os.path.abspath(OUTPUTS_DIR)
+
+
+# Recent files tracking
+RECENT_FILES_PATH = os.path.join(TAWREED_DIR, "recent_files.json")
+MAX_RECENT_FILES = 5
+
+
+def _get_recent_files() -> list[str]:
+    """Read the list of recent files from disk."""
+    if not os.path.exists(RECENT_FILES_PATH):
+        return []
+    try:
+        with open(RECENT_FILES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [f for f in data if isinstance(f, str) and os.path.exists(f)]
+        return []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _save_recent_files(files: list[str]) -> None:
+    """Save the list of recent files to disk."""
+    os.makedirs(TAWREED_DIR, exist_ok=True)
+    tmp_path = RECENT_FILES_PATH + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(files, f)
+        os.replace(tmp_path, RECENT_FILES_PATH)
+    except OSError:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def add_recent_file(file_path: str) -> None:
+    """Add a file to the recent files list."""
+    recent = _get_recent_files()
+    # Remove if already exists
+    if file_path in recent:
+        recent.remove(file_path)
+    # Add to beginning
+    recent.insert(0, file_path)
+    # Trim to max
+    recent = recent[:MAX_RECENT_FILES]
+    _save_recent_files(recent)
+
+
+def get_recent_files() -> list[str]:
+    """Get the list of recent files."""
+    return _get_recent_files()
+
+
+def clear_recent_files() -> None:
+    """Clear the recent files list."""
+    _save_recent_files([])
+
+
+def cleanup_temp_files() -> int:
+    """Remove stale .tmp files from the state directory.
+    
+    Returns the number of temp files removed.
+    """
+    if not os.path.isdir(TAWREED_DIR):
+        return 0
+    
+    removed = 0
+    for root, dirs, files in os.walk(TAWREED_DIR):
+        for fname in files:
+            if fname.endswith(".tmp"):
+                fpath = os.path.join(root, fname)
+                try:
+                    os.remove(fpath)
+                    removed += 1
+                    _log.debug("Removed stale temp file: %s", fpath)
+                except OSError as e:
+                    _log.warning("Could not remove temp file %s: %s", fpath, e)
+    return removed
