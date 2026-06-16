@@ -1,0 +1,72 @@
+# Pre-commit hooks for Tawreed.
+#
+# Install once after cloning:
+#     pip install pre-commit
+#     pre-commit install
+#
+# The hooks run on every `git commit` and block the commit if any
+# of them fail. The ruff + formatting + trailing-whitespace hooks
+# auto-fix; the gitleaks + detect-private-key hooks require manual
+# cleanup (you can't autofix a leaked secret).
+#
+# To run all hooks against the whole repo (not just staged files):
+#     pre-commit run --all-files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        # trailing whitespace is forbidden in the source tree
+        # (the previous codebase had a mix of CRLF/LF and stray
+        # spaces on blank lines).
+      - id: end-of-file-fixer
+        # Every file ends with a newline.
+      - id: check-yaml
+        # .github/workflows/*.yml must be valid YAML (catches the
+        # 'leading text above `name:`' bug from earlier PRs).
+      - id: check-toml
+      - id: check-added-large-files
+        # Don't commit anything > 1 MB without thinking about it.
+        # (PyInstaller build artefacts and .exe binaries are the
+        # common offenders.)
+        args: ['--maxkb=1024']
+      - id: check-merge-conflict
+        # Catches unmerged <<<<<<< markers.
+      - id: detect-private-key
+        # SSH / PEM / OpenAI key formats are NEVER allowed in the
+        # repo. Belt-and-braces for the gitleaks hook below.
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        # `ruff check` — the fast Python linter that replaces
+        # flake8, isort, pyupgrade, and a dozen others. Config in
+        # pyproject.toml [tool.ruff].
+        args: ['--fix']
+      - id: ruff-format
+        # `ruff format` — the formatter that replaces Black.
+        # Opinionated, no config needed beyond line-length.
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        # The host security policy treats any committed secret as
+        # a release blocker. gitleaks looks for OpenAI, Anthropic,
+        # Google, GitHub, AWS, Stripe, and a few hundred other
+        # provider key patterns.
+
+  - repo: local
+    hooks:
+      - id: pytest-fast
+        # Run the fast test suite on every commit. Use the
+        # .venv-test Python so the same venv CI uses is exercised
+        # locally. Slow tests (the REAL_BOQ opt-in) are skipped.
+        name: pytest (fast)
+        entry: ./.venv-test/Scripts/python.exe -m pytest -q -m "not slow"
+        language: system
+        types: [python]
+        pass_filenames: false
+        # Only run if Python files changed (this hook's
+        # `types: [python]` handles that automatically).
