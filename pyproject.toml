@@ -65,7 +65,7 @@ Issues = "https://github.com/sfkareem/tawreed/issues"
 [tool.setuptools]
 # The package is tawreed_app/, and the gui/ and core/ directories at the
 # root are also packages. Tell setuptools to find them all.
-packages = ["tawreed_app", "gui", "gui.pages", "core"]
+packages = ["tawreed_app", "gui", "gui.pages", "gui.widgets", "core"]
 
 [tool.setuptools.package-data]
 # The .qss theme files ship inside the gui/ package. The key MUST
