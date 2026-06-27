@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-06-28
+
 ### Fixed
 - **Crash Handler i18n**: Fixed crash handler to use translated error messages instead of hard-coded English strings, ensuring consistent bilingual experience for Arabic users
 - **Complete i18n Coverage**: Added missing translation keys and routed remaining hard-coded strings through i18n system:
@@ -23,9 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Worker Integration**: Updated worker to pass i18n context to Excel functions for proper error message translation
 
 ## [0.0.5] - 2026-06-27
-
-### Fixed
-- **Reset Keyring Bug**: Fixed `clear_all_api_keys()` to use provider registry instead of hardcoded provider names, ensuring all providers (including Claude) are properly cleared during reset
 - **Settings Save Bug**: Fixed duplicate QApplication imports that could cause runtime errors in the settings page
 - **Model Parameter Consistency**: Standardized on `model_id` parameter name across the codebase for improved maintainability and reduced confusion
 - **i18n Completeness**: Added missing Arabic translations for message box strings and fixed key naming consistency
@@ -133,5 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`HKCU\SOFTWARE\sfkareem\Tawreed`). The previous QSettings-based
   path was the only writer to the registry and has been removed.
 
+[0.0.6]: https://github.com/sfkareem/tawreed/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/sfkareem/tawreed/compare/v0.0.1...v0.0.5
 [0.0.1]: https://github.com/sfkareem/tawreed/releases/tag/v0.0.1
