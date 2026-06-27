@@ -44,10 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **i18n Consistency**: Removed duplicate translation keys and completed final hard-coded strings cleanup
 - **Language Toggle**: Fixed missing UI dropdown and persistence for language setting
 - **Settings Save**: Fixed NameError by importing QApplication before reapplying stylesheet
-- **Reset Function**: Fixed incorrect key clearing (now clears Claude key instead of Anthropic)
+- **Reset Function**: Fixed incorrect key clearing (now clears all provider keys using provider registry instead of hardcoded list)
 - **File Type Mismatch**: Fixed UI to correctly advertise .xlsx-only support instead of .xlsx/.xls
 - **i18n Consistency**: Eliminated mixed-language UI by ensuring all pages use the translation system
 - **RTL Layout**: Improved right-to-left layout support for Arabic interface
+
+## [0.0.5] - 2026-06-27
+
+### Fixed
+- **Reset Keyring Bug**: Fixed `clear_all_api_keys()` to use provider registry instead of hardcoded provider names, ensuring all providers (including Claude) are properly cleared during reset
+- **Settings Save Bug**: Fixed duplicate QApplication imports that could cause runtime errors in the settings page
 
 ## [0.0.1] - 2026-06-14
 
