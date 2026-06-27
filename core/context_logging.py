@@ -127,8 +127,7 @@ def log_processing_complete(
         input_size = os.path.getsize(file_path) / (1024 * 1024)
         output_size = os.path.getsize(output_path) / (1024 * 1024)
         log.info(
-            "Processing complete: input=%s (%.2f MB), output=%s (%.2f MB), "
-            "items=%d, packages=%d",
+            "Processing complete: input=%s (%.2f MB), output=%s (%.2f MB), items=%d, packages=%d",
             os.path.basename(file_path),
             input_size,
             os.path.basename(output_path),

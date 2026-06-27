@@ -149,12 +149,12 @@ class SettingsPage(QWidget):
 
         self.base_url_input = QLineEdit()
         self.base_url_input.setPlaceholderText(self._i18n.tr("base_url_placeholder"))
-        form.addRow("Base URL", self.base_url_input)
+        form.addRow(self._i18n.tr("base_url_label"), self.base_url_input)
 
         self.api_key_input = QLineEdit()
         self.api_key_input.setEchoMode(QLineEdit.Password)
         self.api_key_input.setPlaceholderText(self._i18n.tr("api_key_placeholder"))
-        form.addRow("API Key", self.api_key_input)
+        form.addRow(self._i18n.tr("api_key_label"), self.api_key_input)
 
         self.show_key_cb = QCheckBox(self._i18n.tr("show_api_key_checkbox"))
         self.show_key_cb.toggled.connect(
