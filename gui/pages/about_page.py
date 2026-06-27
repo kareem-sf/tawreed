@@ -128,7 +128,9 @@ class AboutPage(QWidget):
         stack_card.addLayout(
             _row(self._i18n.tr("about_language"), self._i18n.tr("about_python_version"))
         )
-        stack_card.addLayout(_row(self._i18n.tr("about_ui_framework"), "PySide6 (Qt for Python)"))
+        stack_card.addLayout(
+            _row(self._i18n.tr("about_ui_framework"), self._i18n.tr("about_ui_framework_value"))
+        )
         stack_card.addLayout(
             _row(self._i18n.tr("about_llm_providers"), self._i18n.tr("about_llm_providers_list"))
         )
