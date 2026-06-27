@@ -131,6 +131,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "about_open_repository": "Open Repository",
         "about_author_website": "Author Website",
         "about_copyright_license": "Released under the",
+        "about_python_version": "Python 3.10+",
+        "about_data_stack": "openpyxl · pandas · SQLite",
+        "about_packaging_type": "PyInstaller (onedir)",
         # Main window
         "app_logo_text": "TAWREED",
         "app_tagline": "AI BOQ work packages",
@@ -287,6 +290,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "about_open_repository": "فتح المستودع",
         "about_author_website": "موقع المؤلف",
         "about_copyright_license": "تم الإصداره بموجب رخصة",
+        "about_python_version": "Python 3.10+",
+        "about_data_stack": "openpyxl · pandas · SQLite",
+        "about_packaging_type": "PyInstaller (onedir)",
         # Main window
         "app_logo_text": "توريد",
         "app_tagline": "حزم عمل BOQ بالذكاء الاصطناعي",
