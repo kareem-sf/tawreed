@@ -905,6 +905,7 @@ def write_excel(
         # save_virtual_workbook is not available in openpyxl 3.1.x, so we fall back to wb.save()
         try:
             from openpyxl.writer.excel import save_virtual_workbook
+
             save_virtual_workbook(wb, output_path)
         except ImportError:
             # Fallback to regular save for older openpyxl versions

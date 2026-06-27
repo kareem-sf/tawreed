@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from core import db
+from core.i18n import get_i18n
 from gui.widgets import Card, PageHeader, StatusPill
 
 
@@ -43,6 +44,7 @@ class HistoryPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._i18n = get_i18n()
         self._build_ui()
         self.refresh()
 
@@ -55,8 +57,8 @@ class HistoryPage(QWidget):
         header_row = QHBoxLayout()
         header_row.setSpacing(12)
         header = PageHeader(
-            "Processing History",
-            "Every run is logged locally. Double-click a row to open the output Excel.",
+            self._i18n.tr("history_page_title"),
+            self._i18n.tr("history_page_subtitle"),
         )
         header_row.addWidget(header, stretch=1)
         self.status_pill = StatusPill()
@@ -68,11 +70,11 @@ class HistoryPage(QWidget):
         actions_card = Card()
         actions = QHBoxLayout()
         actions.setSpacing(10)
-        self.refresh_btn = QPushButton("↻  Refresh")
+        self.refresh_btn = QPushButton(self._i18n.tr("refresh_button"))
         self.refresh_btn.clicked.connect(self.refresh)
-        self.open_btn = QPushButton("Open Selected")
+        self.open_btn = QPushButton(self._i18n.tr("open_selected_button"))
         self.open_btn.clicked.connect(self.open_selected)
-        self.delete_btn = QPushButton("Delete Selected")
+        self.delete_btn = QPushButton(self._i18n.tr("delete_selected_button"))
         self.delete_btn.setObjectName("dangerBtn")
         self.delete_btn.clicked.connect(self.delete_selected)
         actions.addWidget(self.refresh_btn)
@@ -120,8 +122,8 @@ class HistoryPage(QWidget):
             history = db.get_history()
         except Exception as e:
             self.table.setRowCount(0)
-            self.status_label.setText(f"Failed to load history: {e}")
-            self.status_pill.set_state("error", "Load failed")
+            self.status_label.setText(f"{self._i18n.tr('failed_to_load_history')}: {e}")
+            self.status_pill.set_state("error", self._i18n.tr("load_failed"))
             return
 
         self.table.setRowCount(len(history))
@@ -145,10 +147,8 @@ class HistoryPage(QWidget):
                 f"{len(history)} run(s) recorded.  Last: {history[0].get('timestamp', '—')}"
             )
         else:
-            self.status_pill.set_state("idle", "Empty")
-            self.status_label.setText(
-                "No processing history yet. Run a BOQ from the Workspace to see results here."
-            )
+            self.status_pill.set_state("idle", self._i18n.tr("empty_history"))
+            self.status_label.setText(self._i18n.tr("no_history_yet"))
 
     # ----- actions --------------------------------------------------------
 
@@ -166,8 +166,8 @@ class HistoryPage(QWidget):
         if not os.path.exists(path):
             QMessageBox.warning(
                 self,
-                "File missing",
-                f"Output file no longer exists:\n{path}",
+                self._i18n.tr("file_missing"),
+                f"{self._i18n.tr('output_file_missing')}\n{path}",
             )
             return
         try:
@@ -178,23 +178,26 @@ class HistoryPage(QWidget):
             else:
                 subprocess.Popen(["xdg-open", path])
         except Exception as e:
-            QMessageBox.critical(self, "Open failed", f"Could not open the file:\n{e}")
+            QMessageBox.critical(
+                self, self._i18n.tr("open_failed"), f"{self._i18n.tr('could_not_open_file')}\n{e}"
+            )
 
     def delete_selected(self) -> None:
         from core import db as db_mod
 
         rows = self.table.selectionModel().selectedRows()
         if not rows:
-            QMessageBox.information(self, "Nothing selected", "Pick a row first.")
+            QMessageBox.information(
+                self, self._i18n.tr("nothing_selected"), self._i18n.tr("pick_row_first")
+            )
             return
         row = rows[0].row()
         entry_id = int(self.table.item(row, self.COL_ID).text())
         proj = self.table.item(row, self.COL_PROJ).text()
         confirm = QMessageBox.question(
             self,
-            "Delete run?",
-            f'Remove "{proj}" (id={entry_id}) from history?\n\n'
-            "The output Excel file on disk is NOT touched — only the database row is deleted.",
+            self._i18n.tr("delete_run_question"),
+            self._i18n.tr("delete_run_confirm").format(proj=proj, entry_id=entry_id),
             QMessageBox.Yes | QMessageBox.Cancel,
             QMessageBox.Cancel,
         )

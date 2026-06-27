@@ -121,7 +121,7 @@ class ToastManager(QWidget):
 
         toast.move(
             screen_geom.width() - toast.width() - 20,
-            screen_geom.height() - y_offset - toast.height()
+            screen_geom.height() - y_offset - toast.height(),
         )
 
         toast.show()

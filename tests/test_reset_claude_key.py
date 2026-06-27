@@ -1,9 +1,9 @@
 """Test that reset clears the Claude provider key correctly."""
 
+import json
 import os
 import tempfile
-import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from core import db
 from core.reset import reset_all
@@ -31,10 +31,9 @@ def test_clear_all_api_keys_includes_claude():
         mock_keyring.delete_password = mock_delete_password
 
         # Call the function
-        result = db.clear_all_api_keys()
+        db.clear_all_api_keys()
 
         # Verify Claude was included in the deletion attempts
-        claude_key = db._keyring_account_key("Claude")
         assert any(
             "Claude" in provider for provider in deleted_providers
         ), f"Claude provider key should be cleared. Deleted providers: {deleted_providers}"
@@ -86,10 +85,9 @@ def test_reset_all_clears_claude_key():
                     json.dump({"provider": "Claude", "model": "claude-3-opus-20240229"}, f)
 
                 # Call reset_all
-                report = reset_all()
+                reset_all()
 
                 # Verify Claude was included in the deletion attempts
-                claude_key = db._keyring_account_key("Claude")
                 assert any(
                     "Claude" in provider for provider in deleted_providers
                 ), f"Claude provider key should be cleared during reset. Deleted providers: {deleted_providers}"

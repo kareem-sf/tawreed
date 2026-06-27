@@ -18,7 +18,6 @@ import asyncio
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -50,6 +49,7 @@ class SettingsPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._i18n = get_i18n()
         self._loading = False  # guard against signal loops while populating UI
         self._build_ui()
         self._load_settings()
@@ -112,7 +112,9 @@ class SettingsPage(QWidget):
             "ar": "العربية",
         }
         for lang_code in SUPPORTED_LANGUAGES:
-            self.language_combo.addItem(language_display.get(lang_code, lang_code), userData=lang_code)
+            self.language_combo.addItem(
+                language_display.get(lang_code, lang_code), userData=lang_code
+            )
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         language_card.addWidget(self.language_combo)
 
@@ -167,9 +169,9 @@ class SettingsPage(QWidget):
 
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
-        self.test_btn = QPushButton("Test Connection")
+        self.test_btn = QPushButton(self._i18n.tr("test_connection"))
         self.test_btn.clicked.connect(self._test_connection)
-        self.save_btn = QPushButton("Save Settings")
+        self.save_btn = QPushButton(self._i18n.tr("save_settings"))
         self.save_btn.setObjectName("primaryBtn")
         self.save_btn.clicked.connect(self._save_settings)
         action_row.addWidget(self.test_btn)
@@ -194,7 +196,7 @@ class SettingsPage(QWidget):
         warning.setObjectName("hint")
         warning.setWordWrap(True)
         danger_row.addWidget(warning, stretch=1)
-        self.reset_btn = QPushButton("Reset everything…")
+        self.reset_btn = QPushButton(self._i18n.tr("reset_everything"))
         self.reset_btn.setObjectName("dangerBtn")
         self.reset_btn.clicked.connect(self._confirm_reset)
         danger_row.addWidget(self.reset_btn)
@@ -279,15 +281,18 @@ class SettingsPage(QWidget):
             i18n.set_language(language)
             # Update the theme
             from gui.styles import load_stylesheet, set_theme
+
             set_theme(theme)
             # Re-apply stylesheet to main window if available
             from PySide6.QtWidgets import QApplication
 
             for widget in QApplication.topLevelWidgets():
-                    widget.setStyleSheet(load_stylesheet())
-                    break
+                widget.setStyleSheet(load_stylesheet())
+                break
         except Exception as e:
-            QMessageBox.critical(self, "Save failed", f"Could not save settings:\n{e}")
+            QMessageBox.critical(
+                self, self._i18n.tr("save_failed"), f"{self._i18n.tr('save_failed')}:\n{e}"
+            )
             return
         self.status_label.setObjectName("statusLabelSuccess")
         self.status_label.setText("✓ Settings saved.")
@@ -309,11 +314,13 @@ class SettingsPage(QWidget):
             return
         theme = self.theme_combo.currentData() or "dark"
         from gui.styles import load_stylesheet, set_theme
+
         set_theme(theme)
         # Re-apply stylesheet to main window if available
         from PySide6.QtWidgets import QApplication
 
         from gui.main_window import MainWindow
+
         for widget in QApplication.topLevelWidgets():
             if isinstance(widget, MainWindow):
                 widget.setStyleSheet(load_stylesheet())
@@ -479,8 +486,9 @@ class SettingsPage(QWidget):
                 QMessageBox.critical(self, "Test failed", f"Test error: {e}")
                 return
             if success:
+                self.status_label.setObjectName("statusLabelSuccess")
                 self.status_label.setText("✓ Connection successful.")
-                QMessageBox.information(self, "Success", "Connection successful!")
+                QMessageBox.information(self, "Success", self._i18n.tr("connection_successful"))
             else:
                 self.status_label.setText("✗ Connection failed. Check key, URL, and model.")
                 QMessageBox.critical(
@@ -497,15 +505,8 @@ class SettingsPage(QWidget):
         """Two-step confirmation: dialog → typed phrase."""
         confirm = QMessageBox(self)
         confirm.setIcon(QMessageBox.Warning)
-        confirm.setWindowTitle("Reset everything?")
-        confirm.setText(
-            "This will permanently delete:\n"
-            "  • Your API key and provider settings\n"
-            "  • All processing history\n"
-            "  • Generated Excel output files\n"
-            "  • Saved window state\n\n"
-            "This cannot be undone."
-        )
+        confirm.setWindowTitle(self._i18n.tr("reset_everything_question"))
+        confirm.setText(self._i18n.tr("reset_confirm_details"))
         confirm.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
         confirm.setDefaultButton(QMessageBox.Cancel)
         if confirm.exec() != QMessageBox.Yes:
@@ -516,8 +517,8 @@ class SettingsPage(QWidget):
 
         phrase, ok = QInputDialog.getText(
             self,
-            "Type RESET to confirm",
-            'Type "RESET" in capitals to confirm:',
+            self._i18n.tr("reset_confirm_title"),
+            self._i18n.tr("reset_confirm_body"),
         )
         if not ok or phrase.strip() != "RESET":
             self.status_label.setText("Reset cancelled.")

@@ -53,6 +53,7 @@ def get_project_dependencies():
 
     try:
         import tomllib
+
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
 
@@ -131,9 +132,13 @@ def generate_cyclonedx_sbom(dependencies, output_format="json"):
     elif output_format == "csv":
         # Simple CSV format
         lines = ["Name,Version,Type,PURL"]
-        lines.append(f"{PROJECT_NAME},{PROJECT_VERSION},application,pkg:pypi/{PROJECT_NAME}@{PROJECT_VERSION}")
+        lines.append(
+            f"{PROJECT_NAME},{PROJECT_VERSION},application,pkg:pypi/{PROJECT_NAME}@{PROJECT_VERSION}"
+        )
         for dep in dependencies:
-            lines.append(f"{dep['name']},{dep['version']},library,pkg:pypi/{dep['name']}@{dep['version']}")
+            lines.append(
+                f"{dep['name']},{dep['version']},library,pkg:pypi/{dep['name']}@{dep['version']}"
+            )
         return "\n".join(lines)
     else:
         raise ValueError(f"Unsupported format: {output_format}")
@@ -143,8 +148,12 @@ def main():
     parser = argparse.ArgumentParser(description="Generate SBOM for Tawreed")
     parser.add_argument("--format", choices=["json", "csv"], default="json", help="Output format")
     parser.add_argument("--output", "-o", type=str, default="sbom.json", help="Output file")
-    parser.add_argument("--source", choices=["pip", "pyproject"], default="pyproject",
-                        help="Source of dependencies (pip for installed, pyproject for declared)")
+    parser.add_argument(
+        "--source",
+        choices=["pip", "pyproject"],
+        default="pyproject",
+        help="Source of dependencies (pip for installed, pyproject for declared)",
+    )
     args = parser.parse_args()
 
     # Get dependencies

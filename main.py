@@ -121,6 +121,7 @@ def _run() -> int:
         saved_theme = settings.get("theme", "dark")
         if saved_theme != "dark":
             from gui.styles import set_theme
+
             set_theme(saved_theme)
     except Exception:
         # If settings can't be loaded, use system default

@@ -130,7 +130,6 @@ _TOKEN_MAP_DARK = {
     "color-bg-card": COLOR_BG_CARD,
     "color-bg-card-elev": COLOR_BG_CARD_ELEV,
     "color-bg-input": COLOR_BG_INPUT,
-    "color-bg-input-focus": COLOR_BG_INPUT_FOCUS,
     "color-bg-input-focus": COLOR_BG_INPUT_FOCUS,  # For hover states
     "color-border": COLOR_BORDER,
     "color-border-input": COLOR_BORDER_INPUT,
@@ -161,8 +160,7 @@ _TOKEN_MAP_LIGHT = {
     "color-bg-card": COLOR_BG_CARD_LIGHT,
     "color-bg-card-elev": COLOR_BG_CARD_ELEV_LIGHT,
     "color-bg-input": COLOR_BG_INPUT_LIGHT,
-    "color-bg-input-focus": COLOR_BG_INPUT_FOCUS_LIGHT,
-    "color-bg-input-focus": COLOR_BG_INPUT_FOCUS_LIGHT,
+    "color-bg-input-focus": COLOR_BG_INPUT_FOCUS_LIGHT,  # For hover states
     "color-border": COLOR_BORDER_LIGHT,
     "color-border-input": COLOR_BORDER_INPUT_LIGHT,
     "color-border-input-focus": COLOR_BORDER_INPUT_FOCUS_LIGHT,
@@ -221,8 +219,10 @@ def load_stylesheet(theme: str | None = None) -> str:
         raw = fh.read()
 
     # Get the token map for the current theme
-    token_map = _get_token_map() if actual_theme == _current_theme else (
-        _TOKEN_MAP_LIGHT if actual_theme == "light" else _TOKEN_MAP_DARK
+    token_map = (
+        _get_token_map()
+        if actual_theme == _current_theme
+        else (_TOKEN_MAP_LIGHT if actual_theme == "light" else _TOKEN_MAP_DARK)
     )
 
     def _sub(match: re.Match[str]) -> str:  # type: ignore[name-defined]

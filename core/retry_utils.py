@@ -15,7 +15,7 @@ from typing import Any, TypeVar
 
 log = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 # Default retry configuration
 DEFAULT_MAX_RETRIES = 3
@@ -32,10 +32,13 @@ RETRYABLE_EXCEPTIONS = (
 )
 
 
-def calculate_delay(attempt: int, base_delay: float = DEFAULT_BASE_DELAY,
-                   exponential_base: float = DEFAULT_EXPONENTIAL_BASE,
-                   max_delay: float = DEFAULT_MAX_DELAY,
-                   jitter: float = DEFAULT_JITTER) -> float:
+def calculate_delay(
+    attempt: int,
+    base_delay: float = DEFAULT_BASE_DELAY,
+    exponential_base: float = DEFAULT_EXPONENTIAL_BASE,
+    max_delay: float = DEFAULT_MAX_DELAY,
+    jitter: float = DEFAULT_JITTER,
+) -> float:
     """Calculate delay for a retry attempt using exponential backoff with jitter.
 
     Args:
@@ -49,7 +52,7 @@ def calculate_delay(attempt: int, base_delay: float = DEFAULT_BASE_DELAY,
         Delay in seconds before next retry
     """
     # Exponential backoff: base_delay * (exponential_base ^ attempt)
-    delay = base_delay * (exponential_base ** attempt)
+    delay = base_delay * (exponential_base**attempt)
 
     # Add jitter to prevent thundering herd
     jitter_range = delay * jitter
@@ -106,7 +109,9 @@ def retry_sync(
                         # No more retries, re-raise
                         log.warning(
                             "Retry failed after %d attempts for %s: %s",
-                            max_retries + 1, func.__name__, e
+                            max_retries + 1,
+                            func.__name__,
+                            e,
                         )
                         raise
 
@@ -117,7 +122,11 @@ def retry_sync(
 
                     log.info(
                         "Retry %d/%d for %s after %.2fs: %s",
-                        attempt + 1, max_retries, func.__name__, delay, e
+                        attempt + 1,
+                        max_retries,
+                        func.__name__,
+                        delay,
+                        e,
                     )
 
                     # Call on_retry callback if provided
@@ -187,7 +196,9 @@ async def retry_async(
                         # No more retries, re-raise
                         log.warning(
                             "Async retry failed after %d attempts for %s: %s",
-                            max_retries + 1, func.__name__, e
+                            max_retries + 1,
+                            func.__name__,
+                            e,
                         )
                         raise
 
@@ -198,7 +209,11 @@ async def retry_async(
 
                     log.info(
                         "Async retry %d/%d for %s after %.2fs: %s",
-                        attempt + 1, max_retries, func.__name__, delay, e
+                        attempt + 1,
+                        max_retries,
+                        func.__name__,
+                        delay,
+                        e,
                     )
 
                     # Call on_retry callback if provided

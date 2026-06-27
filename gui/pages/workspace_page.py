@@ -59,10 +59,11 @@ class _DropZone(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(4)
-        self._title = QLabel("Drop a BOQ Excel file here")
+        i18n = get_i18n()
+        self._title = QLabel(i18n.tr("drop_zone_title"))
         self._title.setObjectName("dropZoneTitle")
         self._title.setAlignment(Qt.AlignCenter)
-        self._subtitle = QLabel("or click to browse  ·  .xlsx only")
+        self._subtitle = QLabel(i18n.tr("drop_zone_subtitle"))
         self._subtitle.setObjectName("dropZoneSubtitle")
         self._subtitle.setAlignment(Qt.AlignCenter)
         layout.addStretch()
@@ -281,7 +282,7 @@ class WorkspacePage(QWidget):
         self.file_label.setToolTip(path)
         self.process_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
-        self.status_pill.set_state("idle", "Ready")
+        self.status_pill.set_state("idle", self._i18n.tr("ready"))
         self.console_status.setText(f"Loaded: {name}")
         self.log(f"📄  Loaded {name}\n")
 
@@ -298,12 +299,12 @@ class WorkspacePage(QWidget):
 
     def _clear_selection(self) -> None:
         self.selected_file = None
-        self.file_label.setText("No file selected")
+        self.file_label.setText(self._i18n.tr("no_file_selected"))
         self.file_label.setToolTip("")
         self.process_btn.setEnabled(False)
         self.clear_btn.setEnabled(False)
-        self.status_pill.set_state("idle", "Idle")
-        self.console_status.setText("Awaiting input…")
+        self.status_pill.set_state("idle", self._i18n.tr("idle"))
+        self.console_status.setText(self._i18n.tr("awaiting_input"))
         self.progress_bar.setVisible(False)
 
     # ----- console helpers ------------------------------------------------
@@ -378,8 +379,8 @@ class WorkspacePage(QWidget):
         self.browse_btn.setEnabled(False)
         self.clear_btn.setEnabled(False)
         self.console.clear()
-        self.status_pill.set_state("running", "Processing…")
-        self.console_status.setText("Streaming AI output…")
+        self.status_pill.set_state("running", self._i18n.tr("processing"))
+        self.console_status.setText(self._i18n.tr("streaming_ai"))
         self.log("Initializing processor…\n")
         self.set_progress(0, 100, True)
 
@@ -429,7 +430,7 @@ class WorkspacePage(QWidget):
         self.process_btn.setEnabled(True)
         self.browse_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
-        self.status_pill.set_state("success", "Done")
+        self.status_pill.set_state("success", self._i18n.tr("done"))
         self.console_status.setText(f"Saved: {os.path.basename(output_path)}")
         self.reset_progress()
         # Stash the path so the "Open Output" button can find it.
@@ -438,7 +439,7 @@ class WorkspacePage(QWidget):
         self.open_folder_btn.setEnabled(True)
 
         # Show toast notification
-        self._show_toast("✅ Processing complete!")
+        self._show_toast(self._i18n.tr("processing_complete"))
 
         # Confirmation dialog with two actions: open the file, or
         # reveal it in Explorer. Both are common next steps and
@@ -447,11 +448,11 @@ class WorkspacePage(QWidget):
 
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Information)
-        box.setWindowTitle("Complete")
-        box.setText("Successfully generated Work Packages!")
+        box.setWindowTitle(self._i18n.tr("complete"))
+        box.setText(self._i18n.tr("successfully_generated"))
         box.setInformativeText(f"Saved to:\n{output_path}")
-        open_btn = box.addButton("Open Excel", QMessageBox.AcceptRole)
-        reveal_btn = box.addButton("Show in Folder", QMessageBox.ActionRole)
+        open_btn = box.addButton(self._i18n.tr("open_excel"), QMessageBox.AcceptRole)
+        reveal_btn = box.addButton(self._i18n.tr("show_in_folder"), QMessageBox.ActionRole)
         box.addButton(QMessageBox.Close)
         box.setDefaultButton(open_btn)
         box.exec()
@@ -466,12 +467,14 @@ class WorkspacePage(QWidget):
         self.process_btn.setEnabled(True)
         self.browse_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
-        self.status_pill.set_state("error", "Error")
+        self.status_pill.set_state("error", self._i18n.tr("error"))
         self.console_status.setText(f"Error: {error_msg[:80]}")
         self.reset_progress()
         self.open_output_btn.setEnabled(False)
         self.open_folder_btn.setEnabled(False)
-        QMessageBox.critical(self, "Error", f"Failed to process BOQ:\n{error_msg}")
+        QMessageBox.critical(
+            self, self._i18n.tr("error"), f"{self._i18n.tr('failed_to_process')}\n{error_msg}"
+        )
 
     # ----- output helpers ------------------------------------------------
 

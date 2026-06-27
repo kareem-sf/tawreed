@@ -780,6 +780,7 @@ def get_settings() -> dict[str, Any]:
     else:
         # Ensure language is supported
         from core.i18n import SUPPORTED_LANGUAGES
+
         if settings["language"] not in SUPPORTED_LANGUAGES:
             settings["language"] = default_settings["language"]
 
@@ -862,6 +863,7 @@ def save_settings(settings: dict) -> None:
 
     # Validate and normalize language setting
     from core.i18n import SUPPORTED_LANGUAGES
+
     if "language" not in settings:
         settings["language"] = "en"
     else:
@@ -900,7 +902,14 @@ def save_settings(settings: dict) -> None:
         raise
 
 
-def update_settings(provider: str, api_key: str, model: str, base_url: str, language: str = "en", theme: str = "dark") -> None:
+def update_settings(
+    provider: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    language: str = "en",
+    theme: str = "dark",
+) -> None:
     settings = {
         "provider": provider,
         "api_key": api_key,
