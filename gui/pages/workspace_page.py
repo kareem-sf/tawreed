@@ -353,6 +353,7 @@ class WorkspacePage(QWidget):
         from PySide6.QtWidgets import QApplication
 
         from gui.main_window import MainWindow
+
         for widget in QApplication.topLevelWidgets():
             if isinstance(widget, MainWindow):
                 widget.show_toast(message, duration)
