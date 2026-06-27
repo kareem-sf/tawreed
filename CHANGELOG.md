@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-06-27
+
 ### Added
 - **Language Toggle**: Added English ↔ Arabic language switcher in Settings page with automatic UI translation and RTL layout support
 - **Dark/Light Theme Toggle**: Added theme selection in Settings page with new light theme (tawreed_light.qss)
@@ -100,5 +102,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`HKCU\SOFTWARE\sfkareem\Tawreed`). The previous QSettings-based
   path was the only writer to the registry and has been removed.
 
-
+[0.0.2]: https://github.com/sfkareem/tawreed/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/sfkareem/tawreed/releases/tag/v0.0.1
