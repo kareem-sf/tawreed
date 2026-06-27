@@ -185,6 +185,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "test_failed_message": "Test failed",
         "delete_run_question": "Remove run?",
         "could_not_open_file": "Could not open the file",
+        "unexpected_error_title": "Tawreed — unexpected error",
+        "unexpected_error_message": "An unhandled error occurred:\n\n{error}\n\nDetails have been saved to:\n{log_path}",
     },
     "ar": {
         "app_title": "توريد",
@@ -337,6 +339,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "test_failed_message": "فشل الاختبار",
         "delete_run_question": "إزالة التشغيل؟",
         "could_not_open_file": "تعذر فتح الملف",
+        "unexpected_error_title": "توريد — خطأ غير متوقع",
+        "unexpected_error_message": "حدث خطأ غير متوقع:\n\n{error}\n\nتم حفظ التفاصيل في:\n{log_path}",
         "refresh_models_button_text": "↻  تحديث النماذج",
     },
 }
