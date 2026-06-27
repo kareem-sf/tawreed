@@ -115,5 +115,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`HKCU\SOFTWARE\sfkareem\Tawreed`). The previous QSettings-based
   path was the only writer to the registry and has been removed.
 
-[0.0.2]: https://github.com/sfkareem/tawreed/compare/v0.0.1...v0.0.2
+[0.0.5]: https://github.com/sfkareem/tawreed/compare/v0.0.1...v0.0.5
 [0.0.1]: https://github.com/sfkareem/tawreed/releases/tag/v0.0.1
