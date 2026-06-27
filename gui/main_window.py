@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
             )
             logo_label.setPixmap(pixmap)
         else:
-            logo_label.setText("TAWREED")
+            logo_label.setText(self._i18n.tr("app_logo_text"))
             logo_label.setObjectName("navBrandFallback")
         logo_label.setAlignment(Qt.AlignCenter)
         brand_layout.addWidget(logo_label)

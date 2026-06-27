@@ -68,7 +68,7 @@ class AboutPage(QWidget):
             )
             mark.setPixmap(pix)
         else:
-            mark.setText("T")
+            mark.setText(self._i18n.tr("author_mark"))
             mark.setObjectName("navBrandFallback")
         mark.setAlignment(Qt.AlignCenter)
         body.addWidget(mark)
