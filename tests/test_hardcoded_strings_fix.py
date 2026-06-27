@@ -87,8 +87,26 @@ def test_no_hardcoded_success_title():
     )
 
 
-def test_success_title_translation_exists():
-    """Test that success_title translation key exists in both languages."""
+def test_no_hardcoded_file_missing_title():
+    """Test that 'File missing' string doesn't appear as hard-coded message box title in workspace_page.py."""
+    with open("gui/pages/workspace_page.py", encoding="utf-8") as f:
+        content = f.read()
+
+    # Check for hard-coded "File missing" in QMessageBox calls
+    import re
+
+    # Look for patterns like QMessageBox.warning(..., "File missing", ...)
+    pattern = r'QMessageBox\.(information|warning|critical|question)\([^)]*"File missing"[^)]*\)'
+    matches = re.findall(pattern, content, re.DOTALL)
+
+    assert len(matches) == 0, (
+        f"workspace_page.py should not contain hard-coded 'File missing' message box titles. "
+        f"Found {len(matches)} occurrences. Use self._i18n.tr('file_missing') instead."
+    )
+
+
+def test_file_missing_translation_exists():
+    """Test that file_missing translation key exists in both languages."""
     from core.i18n import get_i18n
 
     i18n = get_i18n()
@@ -99,13 +117,13 @@ def test_success_title_translation_exists():
     try:
         # Test English
         i18n.set_language("en")
-        english_title = i18n.tr("success_title")
-        assert english_title == "Success", f"Expected 'Success', got '{english_title}'"
+        english_title = i18n.tr("file_missing")
+        assert english_title == "File missing", f"Expected 'File missing', got '{english_title}'"
 
         # Test Arabic
         i18n.set_language("ar")
-        arabic_title = i18n.tr("success_title")
-        assert arabic_title == "نجاح", f"Expected 'نجاح', got '{arabic_title}'"
+        arabic_title = i18n.tr("file_missing")
+        assert arabic_title == "الملف مفقود", f"Expected 'الملف مفقود', got '{arabic_title}'"
     finally:
         # Restore original language
         i18n.set_language(original_lang)

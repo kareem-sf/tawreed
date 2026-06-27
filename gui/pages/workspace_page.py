@@ -486,8 +486,8 @@ class WorkspacePage(QWidget):
         if not path or not os.path.exists(path):
             QMessageBox.warning(
                 self,
-                "File missing",
-                f"The output file no longer exists:\n{path}",
+                self._i18n.tr("file_missing"),
+                f"{self._i18n.tr('output_file_missing')}\n{path}",
             )
             return
         try:
@@ -508,8 +508,8 @@ class WorkspacePage(QWidget):
         if not path or not os.path.exists(path):
             QMessageBox.warning(
                 self,
-                "File missing",
-                f"The output file no longer exists:\n{path}",
+                self._i18n.tr("file_missing"),
+                f"{self._i18n.tr('output_file_missing')}\n{path}",
             )
             return
         try:
