@@ -187,7 +187,7 @@ class WorkspacePage(QWidget):
         actions.setSpacing(10)
         self.browse_btn = QPushButton(self._i18n.tr("select_file"))
         self.browse_btn.clicked.connect(self.browse_file)
-        self.clear_btn = QPushButton("Clear")
+        self.clear_btn = QPushButton(self._i18n.tr("clear"))
         self.clear_btn.setObjectName("ghostBtn")
         self.clear_btn.setEnabled(False)
         self.clear_btn.clicked.connect(self._clear_selection)
@@ -197,14 +197,14 @@ class WorkspacePage(QWidget):
         self.process_btn.clicked.connect(self.start_processing)
         # "Open output" and "Show in folder" are enabled only after
         # a successful run — see on_processing_finished().
-        self.open_output_btn = QPushButton("Open Output")
+        self.open_output_btn = QPushButton(self._i18n.tr("open_output"))
         self.open_output_btn.setObjectName("ghostBtn")
         self.open_output_btn.setEnabled(False)
         self.open_output_btn.setToolTip(
             "Open the most recently generated Excel in your default app"
         )
         self.open_output_btn.clicked.connect(self._open_last_output)
-        self.open_folder_btn = QPushButton("Show in Folder")
+        self.open_folder_btn = QPushButton(self._i18n.tr("show_in_folder"))
         self.open_folder_btn.setObjectName("ghostBtn")
         self.open_folder_btn.setEnabled(False)
         self.open_folder_btn.setToolTip(
@@ -225,10 +225,10 @@ class WorkspacePage(QWidget):
         console_card = Card("Live Console")
         console_actions = QHBoxLayout()
         console_actions.setSpacing(8)
-        self.console_status = QLabel("Awaiting input…")
+        self.console_status = QLabel(self._i18n.tr("awaiting_input"))
         self.console_status.setObjectName("hint")
         console_actions.addWidget(self.console_status, stretch=1)
-        self.clear_console_btn = QPushButton("Clear Log")
+        self.clear_console_btn = QPushButton(self._i18n.tr("clear_log"))
         self.clear_console_btn.setObjectName("ghostBtn")
         self.clear_console_btn.clicked.connect(lambda: self.console.clear())
         console_actions.addWidget(self.clear_console_btn)
@@ -542,3 +542,8 @@ class WorkspacePage(QWidget):
         """
         self.browse_btn.setText(self._i18n.tr("select_file"))
         self.process_btn.setText("▶  " + self._i18n.tr("process_button"))
+        self.clear_btn.setText(self._i18n.tr("clear"))
+        self.open_output_btn.setText(self._i18n.tr("open_output"))
+        self.open_folder_btn.setText(self._i18n.tr("show_in_folder"))
+        self.clear_console_btn.setText(self._i18n.tr("clear_log"))
+        self.console_status.setText(self._i18n.tr("awaiting_input"))
