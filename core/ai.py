@@ -358,7 +358,7 @@ def analyze_boq_stream(
     yield ("__DONE__", parsed_data)
 
 
-async def test_connection(provider: str, api_key: str, model: str, base_url: str = "") -> bool:
+async def test_connection(provider: str, api_key: str, model_id: str, base_url: str = "") -> bool:
     try:
         url = base_url if provider == "OpenAI Compatible" else PROVIDERS[provider]["base_url"]
         if not url:
@@ -371,7 +371,7 @@ async def test_connection(provider: str, api_key: str, model: str, base_url: str
                 "content-type": "application/json",
             }
             data = {
-                "model": model,
+                "model": model_id,
                 "max_tokens": 10,
                 "messages": [{"role": "user", "content": "Hello"}],
             }
@@ -389,7 +389,7 @@ async def test_connection(provider: str, api_key: str, model: str, base_url: str
                 headers["Authorization"] = f"Bearer {api_key}"
 
             data = {
-                "model": model,
+                "model": model_id,
                 "messages": [{"role": "user", "content": "Hello"}],
                 "max_tokens": 10,
             }
