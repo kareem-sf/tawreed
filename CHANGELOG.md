@@ -52,6 +52,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CHANGELOG Cleanup**: Fixed duplicate version references in CHANGELOG
 - **Workspace i18n**: Fixed hard-coded "File missing" message box titles to use translation system
 
+## [0.0.4] - 2026-06-27
+
+### Added
+- **Complete i18n Support**: All application pages (Workspace, History, Settings, About) now support bilingual English/Arabic UI with automatic RTL layout switching
+- **Comprehensive Arabic Translations**: Added 72 new translation keys covering all UI elements across all pages
+
+### Changed
+- **Settings Page**: All hard-coded strings now routed through i18n system for complete bilingual support
+- **About Page**: All hard-coded strings now routed through i18n system
+- **Workspace Page**: All hard-coded strings now routed through i18n system  
+- **History Page**: All hard-coded strings now routed through i18n system
+
+### Fixed
+- **i18n Consistency**: Eliminated mixed-language UI by ensuring all pages use the translation system
+- **RTL Layout**: Improved right-to-left layout support for Arabic interface
+
+## [0.0.3] - 2026-06-27
+
+### Added
+- **Language Toggle**: Added English ↔ Arabic language switcher in Settings page with automatic UI translation and RTL layout support
+- **Dark/Light Theme Toggle**: Added theme selection in Settings page with new light theme (tawreed_light.qss)
+- **Recent Files List**: Added a list of recently opened BOQ files in the Workspace page with click-to-open functionality
+- **Progress Bar**: Added a progress bar to the Workspace page to show processing status
+- **Toast Notifications**: Added non-blocking toast notifications for success/error feedback
+- **Keyboard Shortcuts**: Added keyboard shortcuts for common actions:
+  - `Esc`: Clear selection
+  - `Ctrl+O`: Open file dialog
+  - `Ctrl+P`: Start processing
+  - `Ctrl+L`: Clear console log
+- **Memory Optimization**: For Excel files >10MB, the parser now uses read_only mode and save_virtual_workbook for memory-efficient processing
+- **Retry Logic**: Added exponential backoff retry functionality for API calls and file operations
+- **Improved Error Recovery**: Better error handling for corrupt/malformed Excel files with user-friendly error messages
+- **Dependency Security Scanning**: Added pip-audit to CI workflow for vulnerability detection
+- **SBOM Generation**: Added Software Bill of Materials generation script (scripts/generate_sbom.py)
+- **Atomic Writes**: Ensured all config file writes use temp+rename pattern for crash safety
+- **Temp File Cleanup**: Added automatic cleanup of stale .tmp files on startup
+- **Enhanced Logging**: Added context-aware logging helpers for better debugging
+
+### Changed
+- **Settings Page**: Reorganized to include Language and Theme sections with dropdown selectors
+- **Excel Parsing**: Added file size detection and memory optimization for large files
+- **Config Persistence**: Added language and theme fields to config.json with proper validation
+
+### Fixed
+- **Language Toggle**: Fixed missing UI dropdown and persistence for language setting
+- **Settings Save**: Fixed NameError by importing QApplication before reapplying stylesheet
+- **Reset Function**: Fixed incorrect key clearing (now clears Claude key instead of Anthropic)
+- **File Type Mismatch**: Fixed UI to correctly advertise .xlsx-only support instead of .xlsx/.xls
+
 ## [0.0.5] - 2026-06-27
 
 ### Fixed
