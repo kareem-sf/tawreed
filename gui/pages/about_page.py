@@ -126,7 +126,7 @@ class AboutPage(QWidget):
         # ----- Stack card -----
         stack_card = Card(self._i18n.tr("about_built_with"))
         stack_card.addLayout(
-            _row(self._i18n.tr("about_language"), self._i18n.tr("about_python_version"))
+            _row(self._i18n.tr("about_language"), self._i18n.tr("about_language_value"))
         )
         stack_card.addLayout(
             _row(self._i18n.tr("about_ui_framework"), self._i18n.tr("about_ui_framework_value"))
@@ -134,9 +134,11 @@ class AboutPage(QWidget):
         stack_card.addLayout(
             _row(self._i18n.tr("about_llm_providers"), self._i18n.tr("about_llm_providers_list"))
         )
-        stack_card.addLayout(_row(self._i18n.tr("about_data"), self._i18n.tr("about_data_stack")))
         stack_card.addLayout(
-            _row(self._i18n.tr("about_packaging"), self._i18n.tr("about_packaging_type"))
+            _row(self._i18n.tr("about_data"), self._i18n.tr("about_llm_providers_value"))
+        )
+        stack_card.addLayout(
+            _row(self._i18n.tr("about_packaging"), self._i18n.tr("about_packaging_value"))
         )
         layout.addWidget(stack_card)
 
@@ -155,7 +157,11 @@ class AboutPage(QWidget):
 
         # ----- Footer -----
         footer = QLabel(
-            f"© {__author__}. {self._i18n.tr('about_copyright_license')}: {__license__}."
+            self._i18n.tr("about_footer_format").format(
+                author=__author__,
+                license_text=self._i18n.tr("about_copyright_license"),
+                license=__license__,
+            )
         )
         footer.setObjectName("footer")
         footer.setAlignment(Qt.AlignCenter)
