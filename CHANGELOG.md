@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Model Parameter Consistency**: Standardized on `model_id` parameter name across the codebase for improved maintainability and reduced confusion
+
 ## [0.0.4] - 2026-06-27
 
 ### Added
