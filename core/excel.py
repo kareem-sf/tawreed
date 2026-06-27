@@ -351,7 +351,7 @@ def detect_columns(header_cells: list[Any]) -> dict[str, int]:
     return result
 
 
-def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
+def parse_excel(file_path: str, i18n=None) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Parse an input Excel file, returning markdown + data + headers.
 
     The output ``data_mapping`` uses the canonical English key names
@@ -372,7 +372,11 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
         we only need the cell values (data_only=True).
     """
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Excel file not found: {file_path}")
+        raise FileNotFoundError(
+            i18n.tr("excel_file_not_found").format(file_path=file_path)
+            if i18n
+            else f"Excel file not found: {file_path}"
+        )
 
     # Check file size for memory optimization
     file_size = os.path.getsize(file_path)
@@ -409,7 +413,11 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
                 f"Cannot read '{os.path.basename(file_path)}' — "
                 f"the file is locked. Close it in Excel and try again."
             ) from e
-        raise ValueError(f"Cannot read '{os.path.basename(file_path)}': {e}") from e
+        raise ValueError(
+            i18n.tr("cannot_read_excel").format(file_name=os.path.basename(file_path), error=e)
+            if i18n
+            else f"Cannot read '{os.path.basename(file_path)}': {e}"
+        ) from e
 
     markdown_parts: list[str] = []
     data_mapping: dict[str, Any] = {}
@@ -420,7 +428,11 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
 
     if total_sheets == 0:
         wb.close()
-        raise ValueError(f"'{os.path.basename(file_path)}' has no worksheets.")
+        raise ValueError(
+            i18n.tr("excel_no_worksheets").format(file_name=os.path.basename(file_path))
+            if i18n
+            else f"'{os.path.basename(file_path)}' has no worksheets."
+        )
 
     log.info("Parsing Excel file with %d worksheet(s)", total_sheets)
 
@@ -814,6 +826,7 @@ def write_excel(
     project_name: str,
     date: str,
     layout_style: str = "root",
+    i18n=None,
 ) -> None:
     """Generate the deliverable Excel workbook.
 
@@ -915,14 +928,20 @@ def write_excel(
         # which takes an exclusive write lock on Windows.
         log.exception("write_excel: permission denied writing %s", output_path)
         raise OSError(
-            f"Cannot write '{os.path.basename(output_path)}' — "
+            i18n.tr("cannot_write_excel_permission").format(file_name=os.path.basename(output_path))
+            if i18n
+            else f"Cannot write '{os.path.basename(output_path)}' — "
             f"the file is open in Excel or another program has it locked. "
             f"Close it and try again."
         ) from e
     except OSError as e:
         # Disk full, path too long, network share offline, etc.
         log.exception("write_excel: OS error writing %s", output_path)
-        raise OSError(f"Cannot write '{os.path.basename(output_path)}': {e}") from e
+        raise OSError(
+            i18n.tr("cannot_write_excel").format(file_name=os.path.basename(output_path), error=e)
+            if i18n
+            else f"Cannot write '{os.path.basename(output_path)}': {e}"
+        ) from e
 
 
 def parse_excel_boq(file_path: str) -> tuple[str, dict, dict]:

@@ -163,7 +163,7 @@ class BOQProcessor:
                 self._i18n.tr("parsing_excel") if self._i18n else "Parsing Excel BOQ file..."
             )
             markdown_content, data_mapping, headers_mapping = await asyncio.to_thread(
-                parse_excel, self.file_path
+                parse_excel, self.file_path, self._i18n
             )
             self.signals.log.emit(
                 self._i18n.tr("successfully_parsed").format(count=len(data_mapping))
@@ -254,7 +254,13 @@ class BOQProcessor:
             )
 
             await asyncio.to_thread(
-                write_excel, output_file, data_mapping, item_categories, project_name, date
+                write_excel,
+                output_file,
+                data_mapping,
+                item_categories,
+                project_name,
+                date,
+                self._i18n,
             )
 
             await asyncio.to_thread(

@@ -471,7 +471,7 @@ class SettingsPage(QWidget):
 
         self.test_btn.setEnabled(False)
         self.test_btn.setText(self._i18n.tr("testing_connection"))
-        self.status_label.setText("Testing connection…")
+        self.status_label.setText(self._i18n.tr("testing_connection_status"))
 
         try:
             loop = asyncio.get_event_loop()

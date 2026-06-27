@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Crash Handler i18n**: Fixed crash handler to use translated error messages instead of hard-coded English strings, ensuring consistent bilingual experience for Arabic users
+- **Complete i18n Coverage**: Added missing translation keys and routed remaining hard-coded strings through i18n system:
+  - Excel error messages (file not found, read errors, no worksheets, write errors)
+  - Settings page "Testing connection…" status message
+  - All error messages now respect user language preference with proper fallback support
+
+### Added
+- **Excel i18n Support**: Added 6 new translation keys covering all Excel operation error messages
+- **Comprehensive Tests**: Added test suite for Excel i18n error handling and fallback behavior
+
+### Changed
+- **Excel Module**: Modified `parse_excel()` and `write_excel()` to accept optional `i18n` parameter for translated error messages
+- **Worker Integration**: Updated worker to pass i18n context to Excel functions for proper error message translation
 
 ## [0.0.5] - 2026-06-27
 
