@@ -169,7 +169,7 @@ class WorkspacePage(QWidget):
         self.recent_files_label.setObjectName("hint")
         self.recent_files_label.setVisible(False)
         input_card.addWidget(self.recent_files_label)
-        
+
         self.recent_files_container = QHBoxLayout()
         self.recent_files_container.setSpacing(8)
         self.recent_files_container.setContentsMargins(0, 0, 0, 0)
@@ -178,7 +178,7 @@ class WorkspacePage(QWidget):
         self.file_label = QLabel("No file selected")
         self.file_label.setObjectName("fileLabel")
         input_card.addWidget(self.file_label)
-        
+
         # Populate recent files on startup
         self._refresh_recent_files()
 
@@ -255,13 +255,13 @@ class WorkspacePage(QWidget):
     def _refresh_recent_files(self) -> None:
         """Refresh the recent files list from disk."""
         recent_files = db.get_recent_files()
-        
+
         # Clear existing buttons
         for i in reversed(range(self.recent_files_container.count())):
             widget = self.recent_files_container.itemAt(i).widget()
             if widget:
                 widget.deleteLater()
-        
+
         # Add new buttons
         for file_path in recent_files:
             btn = QPushButton(os.path.basename(file_path))
@@ -269,7 +269,7 @@ class WorkspacePage(QWidget):
             btn.setToolTip(file_path)
             btn.clicked.connect(lambda _, p=file_path: self._on_file_selected(p))
             self.recent_files_container.addWidget(btn)
-        
+
         # Show/hide label based on whether there are recent files
         has_recent = len(recent_files) > 0
         self.recent_files_label.setVisible(has_recent)
@@ -284,7 +284,7 @@ class WorkspacePage(QWidget):
         self.status_pill.set_state("idle", "Ready")
         self.console_status.setText(f"Loaded: {name}")
         self.log(f"📄  Loaded {name}\n")
-        
+
         # Add to recent files
         db.add_recent_file(path)
         self._refresh_recent_files()
@@ -350,8 +350,9 @@ class WorkspacePage(QWidget):
     def _show_toast(self, message: str, duration: int = 3000) -> None:
         """Show a toast notification from the main window."""
         # Get the main window and show toast
-        from gui.main_window import MainWindow
         from PySide6.QtWidgets import QApplication
+
+        from gui.main_window import MainWindow
         for widget in QApplication.topLevelWidgets():
             if isinstance(widget, MainWindow):
                 widget.show_toast(message, duration)

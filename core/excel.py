@@ -365,7 +365,7 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
         ValueError: if the file is not a valid Excel workbook
             (corrupt zip, password-protected, wrong format, empty).
         FileNotFoundError: if the path doesn't exist.
-    
+
     Memory Optimization:
         For files > 10MB, uses read_only=True mode which reduces memory
         usage by not loading formulas, formatting, etc. This is safe because
@@ -373,15 +373,15 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Excel file not found: {file_path}")
-    
+
     # Check file size for memory optimization
     file_size = os.path.getsize(file_path)
     large_file_threshold = 10 * 1024 * 1024  # 10 MB
     use_read_only = file_size > large_file_threshold
-    
+
     if use_read_only:
         log.info("Large Excel file detected (%d bytes), using read_only mode", file_size)
-    
+
     try:
         # For large files, use read_only=True to save memory
         # Note: read_only=True is incompatible with data_only=True in openpyxl,
@@ -417,7 +417,7 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
 
     global_id_counter = 1
     total_sheets = len(wb.worksheets)
-    
+
     if total_sheets == 0:
         wb.close()
         raise ValueError(f"'{os.path.basename(file_path)}' has no worksheets.")
@@ -585,10 +585,10 @@ def parse_excel(file_path: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
         markdown_parts.append("\n".join(sheet_md))
 
     combined_markdown = "\n\n".join(markdown_parts)
-    
+
     # Close workbook to free memory
     wb.close()
-    
+
     log.info("Parsed %d items from Excel file", len(data_mapping))
     return combined_markdown, data_mapping, headers_mapping
 
@@ -826,7 +826,7 @@ def write_excel(
     every column has a hard width cap (60 for description per user
     spec), the header row is frozen, and the Amount column uses a
     ``=D*E`` formula with currency formatting.
-    
+
     Memory Optimization:
         Uses save_virtual_workbook for memory-efficient saving when
         dealing with large files. This reduces peak memory usage
@@ -902,11 +902,12 @@ def write_excel(
         
         # Use save_virtual_workbook for memory efficiency with large files
         # This avoids loading the entire workbook into memory during save
+        # save_virtual_workbook is not available in openpyxl 3.1.x, so we fall back to wb.save()
         try:
             from openpyxl.writer.excel import save_virtual_workbook
             save_virtual_workbook(wb, output_path)
         except ImportError:
-            # Fallback to regular save if save_virtual_workbook is not available
+            # Fallback to regular save for older openpyxl versions
             wb.save(output_path)
     except PermissionError as e:
         # The most common cause: the user has the file open in Excel,

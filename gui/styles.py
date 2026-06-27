@@ -131,7 +131,7 @@ _TOKEN_MAP_DARK = {
     "color-bg-card-elev": COLOR_BG_CARD_ELEV,
     "color-bg-input": COLOR_BG_INPUT,
     "color-bg-input-focus": COLOR_BG_INPUT_FOCUS,
-    "color-bg-input-hover": COLOR_BG_INPUT_FOCUS,  # For hover states
+    "color-bg-input-focus": COLOR_BG_INPUT_FOCUS,  # For hover states
     "color-border": COLOR_BORDER,
     "color-border-input": COLOR_BORDER_INPUT,
     "color-border-input-focus": COLOR_BORDER_INPUT_FOCUS,
@@ -162,7 +162,7 @@ _TOKEN_MAP_LIGHT = {
     "color-bg-card-elev": COLOR_BG_CARD_ELEV_LIGHT,
     "color-bg-input": COLOR_BG_INPUT_LIGHT,
     "color-bg-input-focus": COLOR_BG_INPUT_FOCUS_LIGHT,
-    "color-bg-input-hover": COLOR_BG_INPUT_FOCUS_LIGHT,
+    "color-bg-input-focus": COLOR_BG_INPUT_FOCUS_LIGHT,
     "color-border": COLOR_BORDER_LIGHT,
     "color-border-input": COLOR_BORDER_INPUT_LIGHT,
     "color-border-input-focus": COLOR_BORDER_INPUT_FOCUS_LIGHT,
@@ -209,7 +209,7 @@ def load_stylesheet(theme: str | None = None) -> str:
     """
     # Use provided theme or current theme
     actual_theme = theme if theme is not None else _current_theme
-    
+
     if actual_theme == "dark":
         path = _DARK_THEME_PATH
     elif actual_theme == "light":
@@ -240,5 +240,6 @@ def load_stylesheet(theme: str | None = None) -> str:
 # ``SETTINGS_DIALOG_STYLE`` as module-level strings. We keep them as
 # eager-loaded values for one release so any third-party widget that
 # still imports them works. They will be removed in a later cleanup PR.
+_TOKEN_MAP = _TOKEN_MAP_DARK
 MAIN_WINDOW_STYLE = load_stylesheet("dark")
 SETTINGS_DIALOG_STYLE = MAIN_WINDOW_STYLE

@@ -110,14 +110,14 @@ def _run() -> int:
     # The i18n object also emits language_changed for any QObject
     # that wants to retranslate itself on the fly.
     i18n = get_i18n()
-    
+
     # Load saved language and theme from config (if exists)
     try:
         settings = db.get_settings()
         saved_language = settings.get("language", "en")
         if saved_language != i18n.language:
             i18n.set_language(saved_language)
-        
+
         saved_theme = settings.get("theme", "dark")
         if saved_theme != "dark":
             from gui.styles import set_theme
@@ -125,7 +125,7 @@ def _run() -> int:
     except Exception:
         # If settings can't be loaded, use system default
         pass
-    
+
     app.setLayoutDirection(Qt.RightToLeft if i18n.is_rtl() else Qt.LeftToRight)
     i18n.language_changed.connect(
         lambda _lang: app.setLayoutDirection(Qt.RightToLeft if i18n.is_rtl() else Qt.LeftToRight)
