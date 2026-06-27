@@ -41,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Model Parameter Consistency**: Standardized on `model_id` parameter name across the codebase for improved maintainability and reduced confusion
 - **i18n Completeness**: Added missing Arabic translations for message box strings and fixed key naming consistency
-- **i18n Consistency**: Removed duplicate translation keys and completed final hard-coded strings cleanup
+- **i18n Completeness**: Removed duplicate translation keys and completed final hard-coded strings cleanup
+- **Workspace i18n**: Fixed remaining hard-coded console status messages (Loaded:/Saved:/Error: prefixes)
 - **Language Toggle**: Fixed missing UI dropdown and persistence for language setting
 - **File Type Mismatch**: Fixed UI to correctly advertise .xlsx-only support instead of .xlsx/.xls
 - **i18n Consistency**: Eliminated mixed-language UI by ensuring all pages use the translation system
