@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Settings i18n**: Fixed hard-coded "Success" message box title to use translation system
 - **Settings Save Bug**: Fixed QApplication import to prevent NameError in settings page
 - **CHANGELOG Cleanup**: Fixed duplicate version references in CHANGELOG
+- **Workspace i18n**: Fixed hard-coded "File missing" message box titles to use translation system
 
 ## [0.0.5] - 2026-06-27
 
