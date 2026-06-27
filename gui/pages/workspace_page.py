@@ -284,7 +284,7 @@ class WorkspacePage(QWidget):
         self.process_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
         self.status_pill.set_state("idle", self._i18n.tr("ready"))
-        self.console_status.setText(f"Loaded: {name}")
+        self.console_status.setText(f"{self._i18n.tr('loaded_prefix')} {name}")
         self.log(f"📄  Loaded {name}\n")
 
         # Add to recent files
@@ -432,7 +432,9 @@ class WorkspacePage(QWidget):
         self.browse_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
         self.status_pill.set_state("success", self._i18n.tr("done"))
-        self.console_status.setText(f"Saved: {os.path.basename(output_path)}")
+        self.console_status.setText(
+            f"{self._i18n.tr('saved_prefix')} {os.path.basename(output_path)}"
+        )
         self.reset_progress()
         # Stash the path so the "Open Output" button can find it.
         self._last_output_path = output_path
@@ -469,7 +471,7 @@ class WorkspacePage(QWidget):
         self.browse_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
         self.status_pill.set_state("error", self._i18n.tr("error"))
-        self.console_status.setText(f"Error: {error_msg[:80]}")
+        self.console_status.setText(f"{self._i18n.tr('error_prefix')} {error_msg[:80]}")
         self.reset_progress()
         self.open_output_btn.setEnabled(False)
         self.open_folder_btn.setEnabled(False)
