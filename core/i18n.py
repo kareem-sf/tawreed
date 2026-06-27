@@ -83,6 +83,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "reset_everything": "Reset everything…",
         "save_failed": "Save failed",
         "connection_successful": "Connection successful!",
+        "success_title": "Success",
         "reset_everything_question": "Reset everything?",
         "reset_confirm_details": "This will delete:\n  • Your API key\n  • Configuration settings\n  • Processing history\n  • Output files\n  • Saved window state\n\nType RESET to confirm.",
         # History page
@@ -231,6 +232,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "reset_everything": "إعادة ضبط الكل…",
         "save_failed": "فشل الحفظ",
         "connection_successful": "نجح الاتصال!",
+        "success_title": "نجاح",
         "reset_everything_question": "إعادة ضبط الكل؟",
         "reset_confirm_details": "سيؤدي هذا إلى حذف:\n  • مفتاح API الخاص بك\n  • إعدادات التكوين\n  • سجل المعالجة\n  • ملفات الإخراج\n  • حالة النافذة المحفوظة\n\nاكتب RESET للتأكيد.",
         # History page
