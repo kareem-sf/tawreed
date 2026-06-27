@@ -80,7 +80,7 @@ class _DropZone(QFrame):
 
     def _open_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select BOQ Excel File", "", "Excel Files (*.xlsx)"
+            self, self._i18n.tr("file_dialog_title"), "", "Excel Files (*.xlsx)"
         )
         if path:
             # Walk up to the QWidget that owns a file_selected handler.
@@ -175,7 +175,7 @@ class WorkspacePage(QWidget):
         self.recent_files_container.setContentsMargins(0, 0, 0, 0)
         input_card.addLayout(self.recent_files_container)
 
-        self.file_label = QLabel("No file selected")
+        self.file_label = QLabel(self._i18n.tr("no_file_selected"))
         self.file_label.setObjectName("fileLabel")
         input_card.addWidget(self.file_label)
 
@@ -223,7 +223,7 @@ class WorkspacePage(QWidget):
         layout.addWidget(input_card)
 
         # ----- Console card -----
-        console_card = Card("Live Console")
+        console_card = Card(self._i18n.tr("console_card_title"))
         console_actions = QHBoxLayout()
         console_actions.setSpacing(8)
         self.console_status = QLabel(self._i18n.tr("awaiting_input"))
@@ -293,7 +293,7 @@ class WorkspacePage(QWidget):
 
     def browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select BOQ Excel File", "", "Excel Files (*.xlsx)"
+            self, self._i18n.tr("file_dialog_title"), "", "Excel Files (*.xlsx)"
         )
         if path:
             self._on_file_selected(path)
@@ -556,3 +556,6 @@ class WorkspacePage(QWidget):
         self.open_folder_btn.setText(self._i18n.tr("show_in_folder"))
         self.clear_console_btn.setText(self._i18n.tr("clear_log"))
         self.console_status.setText(self._i18n.tr("awaiting_input"))
+        # Update file label if no file is selected
+        if not self.selected_file:
+            self.file_label.setText(self._i18n.tr("no_file_selected"))
