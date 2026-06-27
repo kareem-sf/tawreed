@@ -149,9 +149,8 @@ class WorkspacePage(QWidget):
         header_row = QHBoxLayout()
         header_row.setSpacing(12)
         header = PageHeader(
-            "BOQ Processor",
-            "Drop a Bill of Quantities Excel file and let Tawreed categorize "
-            "the items into high-level work packages.",
+            self._i18n.tr("workspace_page_title"),
+            self._i18n.tr("workspace_page_subtitle"),
         )
         header_row.addWidget(header, stretch=1)
         self.status_pill = StatusPill()
@@ -166,7 +165,7 @@ class WorkspacePage(QWidget):
         input_card.addWidget(self.drop_zone)
 
         # Recent files list
-        self.recent_files_label = QLabel("Recent Files:")
+        self.recent_files_label = QLabel(self._i18n.tr("recent_files_label"))
         self.recent_files_label.setObjectName("hint")
         self.recent_files_label.setVisible(False)
         input_card.addWidget(self.recent_files_label)
@@ -370,8 +369,8 @@ class WorkspacePage(QWidget):
         if not settings or not settings.get("api_key"):
             QMessageBox.warning(
                 self,
-                "Settings Required",
-                "Please configure an API key in Settings first.",
+                self._i18n.tr("settings_required_title"),
+                self._i18n.tr("settings_required_message"),
             )
             return
 

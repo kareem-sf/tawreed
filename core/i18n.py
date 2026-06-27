@@ -78,6 +78,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "reset_everything_question": "Reset everything?",
         "reset_confirm_details": "This will delete:\n  • Your API key\n  • Configuration settings\n  • Processing history\n  • Output files\n  • Saved window state\n\nType RESET to confirm.",
         # History page
+        "workspace_page_title": "BOQ Processor",
+        "workspace_page_subtitle": "Drop a Bill of Quantities Excel file and let Tawreed categorize the items into high-level work packages.",
+        "recent_files_label": "Recent Files:",
+        "settings_required_title": "Settings Required",
+        "settings_required_message": "Please configure an API key in Settings first.",
         "history_page_title": "Processing History",
         "history_page_subtitle": "Every run is logged locally. Double-click a row to open the output Excel.",
         "refresh_button": "↻  Refresh",
@@ -200,6 +205,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "reset_everything_question": "إعادة ضبط الكل؟",
         "reset_confirm_details": "سيؤدي هذا إلى حذف:\n  • مفتاح API الخاص بك\n  • إعدادات التكوين\n  • سجل المعالجة\n  • ملفات الإخراج\n  • حالة النافذة المحفوظة\n\nاكتب RESET للتأكيد.",
         # History page
+        "workspace_page_title": "معالج جدول الكميات",
+        "workspace_page_subtitle": "اسحب وأفلت ملف Excel لجدول الكميات ودع توريد يصنف العناصر إلى حزم عمل عالية المستوى.",
+        "recent_files_label": "الملفات الأخيرة:",
+        "settings_required_title": "الإعدادات مطلوبة",
+        "settings_required_message": "الرجاء تكوين مفتاح API في الإعدادات أولًا.",
         "history_page_title": "سجل المعالجة",
         "history_page_subtitle": "كل عملية مسجلة محليًا. انقر نقرًا مزدوجًا على صف لفتح ملف Excel الإخراج.",
         "refresh_button": "↻  تحديث",
