@@ -494,7 +494,9 @@ class WorkspacePage(QWidget):
             else:
                 subprocess.Popen(["xdg-open", path])
         except Exception as e:
-            QMessageBox.critical(self, "Open failed", f"Could not open the file:\n{e}")
+            QMessageBox.critical(
+                self, self._i18n.tr("open_failed"), f"{self._i18n.tr('could_not_open_file')}\n{e}"
+            )
 
     def _reveal_in_folder(self, path: str) -> None:
         """Open the containing folder in Explorer / Finder / file manager,
@@ -515,7 +517,11 @@ class WorkspacePage(QWidget):
             else:
                 subprocess.Popen(["xdg-open", os.path.dirname(path)])
         except Exception as e:
-            QMessageBox.critical(self, "Reveal failed", f"Could not open the folder:\n{e}")
+            QMessageBox.critical(
+                self,
+                self._i18n.tr("reveal_failed"),
+                f"{self._i18n.tr('could_not_open_folder')}\n{e}",
+            )
 
     def _open_last_output(self) -> None:
         """Slot for the in-page "Open Output" button."""

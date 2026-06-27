@@ -161,7 +161,9 @@ class HistoryPage(QWidget):
     def open_selected(self) -> None:
         path = self._selected_output_path()
         if not path:
-            QMessageBox.information(self, "Nothing selected", "Pick a row first.")
+            QMessageBox.information(
+                self, self._i18n.tr("nothing_selected"), self._i18n.tr("pick_row_first")
+            )
             return
         if not os.path.exists(path):
             QMessageBox.warning(

@@ -97,8 +97,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "file_missing": "File missing",
         "output_file_missing": "Output file no longer exists:",
         "open_failed": "Open failed",
-        "could_not_open_file": "Could not open the file:",
-        "delete_run_question": "Delete run?",
+        "reveal_failed": "Reveal failed",
+        "could_not_open_folder": "Could not open the folder",
         "delete_run_confirm": 'Remove "{proj}" (id={entry_id}) from history?\n\nThe output Excel file on disk is NOT touched — only the database row is deleted.',
         # About page
         "about_page_subtitle": "AI-driven BOQ work-package extraction for construction quantity surveyors.",
@@ -122,6 +122,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "about_open_repository": "Open Repository",
         "about_author_website": "Author Website",
         "about_copyright_license": "Released under the",
+        # Main window
+        "app_logo_text": "TAWREED",
+        "app_tagline": "AI BOQ work packages",
+        "app_brand": "Tawreed",
+        "author_mark": "T",
         # Settings page
         "settings_page_title": "Settings",
         "settings_page_subtitle": "Configure the LLM provider used to categorize BOQ items. Switching providers automatically updates the model list and base URL.",
@@ -158,6 +163,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "reset_complete_message": "✓ Everything reset.",
         "reset_complete_title": "Reset complete",
         "reset_complete_details": "Tawreed has been reset.\n\n{details}",
+        # Settings page status messages
+        "settings_saved": "✓ Settings saved.",
+        "fetching_models": "Fetching…",
+        "refresh_models_button_text": "↻  Refresh Models",
+        "testing_connection": "Testing…",
+        "test_connection_button_text": "Test Connection",
+        "connection_successful_status": "✓ Connection successful.",
+        "connection_failed_status": "✗ Connection failed. Check key, URL, and model.",
+        "reset_cancelled": "Reset cancelled.",
     },
     "ar": {
         "app_title": "توريد",
@@ -224,8 +238,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "file_missing": "الملف مفقود",
         "output_file_missing": "ملف الإخراج لم يعد موجودًا:",
         "open_failed": "فشل الفتح",
-        "could_not_open_file": "تعذر فتح الملف:",
-        "delete_run_question": "حذف العملية؟",
+        "reveal_failed": "فشل الكشف",
+        "could_not_open_folder": "تعذر فتح المجلد",
         "delete_run_confirm": 'إزالة "{proj}" (id={entry_id}) من السجل؟\n\nملف Excel الإخراج على القرص لم يتم لمسه — فقط صف قاعدة البيانات يتم حذفه.',
         # About page
         "about_page_subtitle": "استخراج حزم العمل من جدول الكميات باستخدام الذكاء الاصطناعي للمساحين الكميين في البناء.",
@@ -249,6 +263,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "about_open_repository": "فتح المستودع",
         "about_author_website": "موقع المؤلف",
         "about_copyright_license": "تم الإصداره بموجب رخصة",
+        # Main window
+        "app_logo_text": "توريد",
+        "app_tagline": "حزم عمل BOQ بالذكاء الاصطناعي",
+        "app_brand": "توريد",
+        "author_mark": "ت",
         # Settings page
         "settings_page_title": "الإعدادات",
         "settings_page_subtitle": "ضبط مزود نموذج اللغة الكبيرة المستخدم لتصنيف عناصر جدول الكميات. يؤدي تغيير المزود إلى تحديث قائمة النماذج وعناوين URL تلقائيًا.",
@@ -280,11 +299,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "test_api_key_required": "أدخل مفتاح API لاختبار الاتصال.",
         "test_model_required": "اختر أو اكتب اسم نموذج أولًا.",
         "connection_failed_title": "فشل الاتصال",
-        "connection_failed_message": "تعذر الوصول إلى API. تحقق من المفتاح وعنوان URL ونموذج الاسم.",
-        "reset_failed_title": "فشل إعادة الضبط",
+        "connection_failed_message": "خطأ في الاختبار",
         "reset_complete_message": "✓ تم إعادة ضبط كل شيء.",
         "reset_complete_title": "تمت إعادة الضبط",
         "reset_complete_details": "تم إعادة ضبط توريد.\n\n{details}",
+        "settings_saved": "✓ تم حفظ الإعدادات.",
+        "connection_failed_status": "✗ فشل الاتصال. تحقق من المفتاح وعنوان URL والنموذج.",
+        "connection_successful_status": "✓ تم الاتصال بنجاح.",
+        "test_connection_button_text": "اختبار الاتصال",
+        "testing_connection": "جارٍ الاختبار…",
+        "fetching_models": "جارٍ جلب النماذج…",
+        "reset_failed_title": "فشل إعادة الضبط",
+        "reset_cancelled": "تم إلغاء إعادة الضبط.",
+        "refresh_models_button_text": "↻  تحديث النماذج",
     },
 }
 

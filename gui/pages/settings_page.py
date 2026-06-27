@@ -493,7 +493,11 @@ class SettingsPage(QWidget):
                 success = future.result()
             except Exception as e:
                 self.status_label.setText(f"Test error: {e}")
-                QMessageBox.critical(self, "Test failed", f"Test error: {e}")
+                QMessageBox.critical(
+                    self,
+                    self._i18n.tr("test_failed_title"),
+                    f"{self._i18n.tr('test_failed_message')}:\n{e}",
+                )
                 return
             if success:
                 self.status_label.setObjectName("statusLabelSuccess")
