@@ -320,7 +320,7 @@ def clear_all_api_keys() -> int:
         # prefix in the fallback file. Anything else (e.g. a
         # third-party service that registered under tawreed) is
         # left alone — it wasn't ours to begin with.
-        for provider in ("OpenAI", "Anthropic", "Google", "OpenAI Compatible"):
+        for provider in ("OpenAI", "Claude", "Google", "OpenAI Compatible"):
             try:
                 keyring.delete_password(_KEYRING_SERVICE, _keyring_account_key(provider))
                 removed += 1

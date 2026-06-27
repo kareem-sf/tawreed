@@ -66,10 +66,10 @@ def test_reset_clears_api_keys_from_keyring(isolated_tawreed_dir):
     wipe the OS keyring too, otherwise the api_key survives in
     Credential Manager and the reset is a half-job."""
     db.set_api_key("OpenAI", "key-1")
-    db.set_api_key("Anthropic", "key-2")
+    db.set_api_key("Claude", "key-2")
     db.set_api_key("OpenAI Compatible", "key-3")
     assert db.get_api_key("OpenAI") == "key-1"
-    assert db.get_api_key("Anthropic") == "key-2"
+    assert db.get_api_key("Claude") == "key-2"
     assert db.get_api_key("OpenAI Compatible") == "key-3"
 
     report = reset_mod.reset_all()
