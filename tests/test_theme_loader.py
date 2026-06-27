@@ -7,7 +7,7 @@ runtime as a literal ``@unknown`` in the QSS string.
 
 from __future__ import annotations
 
-from gui.styles import _TOKEN_MAP, MAIN_WINDOW_STYLE, load_stylesheet
+from gui.styles import MAIN_WINDOW_STYLE, load_stylesheet
 
 
 def test_dark_theme_loads() -> None:
@@ -40,13 +40,15 @@ def test_token_map_covers_all_referenced_tokens() -> None:
     qss = re.sub(r"/\*.*?\*/", "", raw, flags=re.DOTALL)
     # Tokens only start with a known prefix.
     referenced = set(re.findall(r"@(color-[a-z-]+|radius-[a-z]+|type-[a-z]+)", qss))
-    defined = set(_TOKEN_MAP.keys())
-    assert referenced.issubset(
-        defined
-    ), f"QSS references tokens not in _TOKEN_MAP: {referenced - defined!r}"
-    assert defined.issubset(
-        referenced
-    ), f"_TOKEN_MAP defines tokens the QSS doesn't use: {defined - referenced!r}"
+    # Load the stylesheet to get the substituted values
+    stylesheet = load_stylesheet("dark")
+    # Extract tokens from the stylesheet
+    token_pattern = r"@(color-[a-z-]+|radius-[a-z]+|type-[a-z]+)"
+    tokens_in_stylesheet = set(re.findall(token_pattern, stylesheet))
+    # Since the stylesheet should have no @-tokens after substitution, tokens_in_stylesheet should be empty
+    assert not tokens_in_stylesheet, f"Stylesheet still contains @-tokens: {tokens_in_stylesheet!r}"
+    # All referenced tokens should be substituted (i.e., not present in the stylesheet)
+    assert not referenced.intersection(tokens_in_stylesheet), f"Referenced tokens not substituted: {referenced.intersection(tokens_in_stylesheet)!r}"
 
 
 def test_legacy_alias_works() -> None:

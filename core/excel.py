@@ -902,8 +902,12 @@ def write_excel(
         
         # Use save_virtual_workbook for memory efficiency with large files
         # This avoids loading the entire workbook into memory during save
-        from openpyxl.writer.excel import save_virtual_workbook
-        save_virtual_workbook(wb, output_path)
+        try:
+            from openpyxl.writer.excel import save_virtual_workbook
+            save_virtual_workbook(wb, output_path)
+        except ImportError:
+            # Fallback to regular save if save_virtual_workbook is not available
+            wb.save(output_path)
     except PermissionError as e:
         # The most common cause: the user has the file open in Excel,
         # which takes an exclusive write lock on Windows.
