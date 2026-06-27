@@ -45,10 +45,10 @@ log = logging.getLogger(__name__)
 
 
 class _DropZone(QFrame):
-    """A clickable / drag-droppable file picker.
+    """Drop zone for BOQ Excel files (.xlsx only).
 
-    Emits ``file_selected`` when the user picks a path via the file
-    dialog (button click) or by dragging an .xlsx onto the surface.
+    Shows a drag-and-drop surface with a title and subtitle. When a file is dropped
+    or the browse dialog (button click) or by dragging an .xlsx onto the surface.
     """
 
     def __init__(self, parent=None) -> None:
@@ -62,7 +62,7 @@ class _DropZone(QFrame):
         self._title = QLabel("Drop a BOQ Excel file here")
         self._title.setObjectName("dropZoneTitle")
         self._title.setAlignment(Qt.AlignCenter)
-        self._subtitle = QLabel("or click to browse  ·  .xlsx / .xls")
+        self._subtitle = QLabel("or click to browse  ·  .xlsx only")
         self._subtitle.setObjectName("dropZoneSubtitle")
         self._subtitle.setAlignment(Qt.AlignCenter)
         layout.addStretch()
@@ -79,7 +79,7 @@ class _DropZone(QFrame):
 
     def _open_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select BOQ Excel File", "", "Excel Files (*.xlsx *.xls)"
+            self, "Select BOQ Excel File", "", "Excel Files (*.xlsx)"
         )
         if path:
             # Walk up to the QWidget that owns a file_selected handler.
@@ -291,7 +291,7 @@ class WorkspacePage(QWidget):
 
     def browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select BOQ Excel File", "", "Excel Files (*.xlsx *.xls)"
+            self, "Select BOQ Excel File", "", "Excel Files (*.xlsx)"
         )
         if path:
             self._on_file_selected(path)
