@@ -69,6 +69,7 @@ def run_analysis(
     system_prompt: str,
     user_prompt: str,
     signals: WorkerSignals,
+    i18n=None,
 ) -> dict:
     """Drive the streaming LLM call and forward tokens to the UI.
 
@@ -103,7 +104,9 @@ def run_analysis(
 
             if is_thought:
                 if last_was_thought is not True:
-                    signals.log.emit("\n[Thinking] ")
+                    signals.log.emit(
+                        "\n[" + (i18n.tr("thinking_marker") if i18n else "Thinking") + "] "
+                    )
                     last_was_thought = True
                 signals.log.emit(token)
             else:
@@ -114,11 +117,18 @@ def run_analysis(
     except Exception as e:
         # The generator raised mid-iteration. Wrap into a structured
         # error so the caller can show it; don't crash the worker.
+        error_msg = (
+            i18n.tr("stream_consumer_error").format(
+                error_type=type(e).__name__, error_message=str(e)
+            )
+            if i18n
+            else f"Stream consumer error: {type(e).__name__}: {e}"
+        )
         return {
             "project_name": "Tawreed Project",
             "date": "",
             "items": {},
-            "error": f"Stream consumer error: {type(e).__name__}: {e}",
+            "error": error_msg,
         }
 
     if not parsed:
@@ -126,40 +136,57 @@ def run_analysis(
         # user closed the console mid-run, or the upstream call
         # returned an empty stream). Surface a clean error rather
         # than letting the workspace show the old generic message.
+        error_msg = (
+            i18n.tr("stream_ended_without_sentinel")
+            if i18n
+            else "AI stream ended without a __DONE__ sentinel. The model may have disconnected mid-response."
+        )
         return {
             "project_name": "Tawreed Project",
             "date": "",
             "items": {},
-            "error": (
-                "AI stream ended without a __DONE__ sentinel. "
-                "The model may have disconnected mid-response."
-            ),
+            "error": error_msg,
         }
     return parsed
 
 
 class BOQProcessor:
-    def __init__(self, file_path: str, signals: WorkerSignals):
+    def __init__(self, file_path: str, signals: WorkerSignals, i18n=None):
         self.file_path = file_path
         self.signals = signals
         self.settings = db.get_settings()
+        self._i18n = i18n
 
     async def process(self):
         try:
-            self.signals.log.emit("Parsing Excel BOQ file...")
+            self.signals.log.emit(
+                self._i18n.tr("parsing_excel") if self._i18n else "Parsing Excel BOQ file..."
+            )
             markdown_content, data_mapping, headers_mapping = await asyncio.to_thread(
                 parse_excel, self.file_path
             )
-            self.signals.log.emit(f"Successfully parsed {len(data_mapping)} items from Excel.")
+            self.signals.log.emit(
+                self._i18n.tr("successfully_parsed").format(count=len(data_mapping))
+                if self._i18n
+                else f"Successfully parsed {len(data_mapping)} items from Excel."
+            )
 
             api_key = self.settings.get("api_key", "")
             model_id = self.settings.get("model_id") or self.settings.get("model", "gpt-4.1-mini")
             base_url = self.settings.get("base_url", "https://api.openai.com/v1")
 
             if not api_key:
-                raise ValueError("API Key is missing. Please configure it in Settings.")
+                raise ValueError(
+                    self._i18n.tr("api_key_missing_error")
+                    if self._i18n
+                    else "API Key is missing. Please configure it in Settings."
+                )
 
-            self.signals.log.emit(f"Sending request to AI Model ({model_id})...")
+            self.signals.log.emit(
+                self._i18n.tr("sending_request").format(model_id=model_id)
+                if self._i18n
+                else f"Sending request to AI Model ({model_id})..."
+            )
 
             system_prompt = (
                 "You are an expert Quantity Surveyor and Construction Estimator.\n"
@@ -182,7 +209,14 @@ class BOQProcessor:
             user_prompt = f"Analyze and categorize these BOQ items:\n\n{markdown_content}"
 
             parsed_data = await asyncio.to_thread(
-                run_analysis, api_key, base_url, model_id, system_prompt, user_prompt, self.signals
+                run_analysis,
+                api_key,
+                base_url,
+                model_id,
+                system_prompt,
+                user_prompt,
+                self.signals,
+                self._i18n,
             )
 
             # The streaming layer embeds any non-fatal error in the
@@ -197,15 +231,27 @@ class BOQProcessor:
             date = parsed_data.get("date", "")
             item_categories = parsed_data.get("items", {})
 
-            self.signals.log.emit(f"\nAI identified project: {project_name}")
-            self.signals.log.emit(f"Categorized {len(item_categories)} items into work packages.")
+            self.signals.log.emit(
+                self._i18n.tr("ai_identified_project").format(project_name=project_name)
+                if self._i18n
+                else f"\nAI identified project: {project_name}"
+            )
+            self.signals.log.emit(
+                self._i18n.tr("categorized_items").format(count=len(item_categories))
+                if self._i18n
+                else f"Categorized {len(item_categories)} items into work packages."
+            )
 
             output_dir = db.get_outputs_dir()
             base_name = os.path.basename(self.file_path)
             name_without_ext, _ = os.path.splitext(base_name)
             output_file = os.path.join(output_dir, f"{name_without_ext}_Tawreed_Output.xlsx")
 
-            self.signals.log.emit(f"Generating output workbook: {output_file}")
+            self.signals.log.emit(
+                self._i18n.tr("generating_output").format(output_file=output_file)
+                if self._i18n
+                else f"Generating output workbook: {output_file}"
+            )
 
             await asyncio.to_thread(
                 write_excel, output_file, data_mapping, item_categories, project_name, date

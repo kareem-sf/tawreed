@@ -391,7 +391,7 @@ class WorkspacePage(QWidget):
         self.signals.finished.connect(self.on_processing_finished)
         self.signals.error.connect(self.on_processing_error)
 
-        processor = BOQProcessor(self.selected_file, self.signals)
+        processor = BOQProcessor(self.selected_file, self.signals, self._i18n)
 
         try:
             loop = asyncio.get_event_loop()
@@ -427,7 +427,9 @@ class WorkspacePage(QWidget):
             self.on_processing_error(f"{type(exc).__name__}: {exc}")
 
     def on_processing_finished(self, output_path: str) -> None:
-        self.log(f"\n\n🎉 Processing complete!\nOutput saved to: {output_path}\n")
+        self.log(
+            f"\n\n🎉 {self._i18n.tr('processing_complete')}\n{self._i18n.tr('output_saved_to').format(path=output_path)}\n"
+        )
         self.process_btn.setEnabled(True)
         self.browse_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
@@ -453,7 +455,7 @@ class WorkspacePage(QWidget):
         box.setIcon(QMessageBox.Information)
         box.setWindowTitle(self._i18n.tr("complete"))
         box.setText(self._i18n.tr("successfully_generated"))
-        box.setInformativeText(f"Saved to:\n{output_path}")
+        box.setInformativeText(f"{self._i18n.tr('saved_to').format(path=output_path)}")
         open_btn = box.addButton(self._i18n.tr("open_excel"), QMessageBox.AcceptRole)
         reveal_btn = box.addButton(self._i18n.tr("show_in_folder"), QMessageBox.ActionRole)
         box.addButton(QMessageBox.Close)
@@ -466,7 +468,7 @@ class WorkspacePage(QWidget):
             self._reveal_in_folder(output_path)
 
     def on_processing_error(self, error_msg: str) -> None:
-        self.log(f"\n\n❌ Error during processing:\n{error_msg}\n")
+        self.log(f"\n\n❌ {self._i18n.tr('error_during_processing')}\n{error_msg}\n")
         self.process_btn.setEnabled(True)
         self.browse_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
