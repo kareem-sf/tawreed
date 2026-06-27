@@ -38,8 +38,10 @@ def test_clear_all_api_keys_includes_claude():
             f"Claude provider key should be cleared. Deleted providers: {deleted_providers}"
         )
 
-        # Verify all expected providers were attempted
-        expected_providers = ["OpenAI", "Claude", "Google", "OpenAI Compatible"]
+        # Verify all expected providers were attempted (from registry)
+        from core.ai import get_provider_names
+
+        expected_providers = get_provider_names()
         for provider in expected_providers:
             account_key = db._keyring_account_key(provider)
             assert any(account_key in deleted for deleted in deleted_providers), (
@@ -98,42 +100,47 @@ def test_reset_all_clears_claude_key():
 
 
 def test_provider_names_match_ai_module():
-    """Test that provider names in db.py match those in ai.py."""
-    from core.ai import PROVIDERS
+    """Test that clear_all_api_keys uses provider names from ai.py."""
+    from core.ai import PROVIDERS, get_provider_names
 
     # Get provider names from ai.py
     ai_providers = set(PROVIDERS.keys())
+    registry_providers = set(get_provider_names())
 
-    # Get provider names hardcoded in clear_all_api_keys
-    # We need to extract them from the function
-    import inspect
-
-    source = inspect.getsource(db.clear_all_api_keys)
-
-    # The providers are in a tuple in the for loop
-    # Extract the line with the for loop
-    for line in source.split("\n"):
-        if "for provider in" in line and "OpenAI" in line:
-            # Extract the tuple content
-            start = line.find("(") + 1
-            end = line.find(")")
-            providers_tuple = line[start:end]
-            # Split by commas and clean up quotes
-            db_providers = [p.strip().strip("\"'") for p in providers_tuple.split(",")]
-            break
-
-    # Convert to set for comparison
-    db_providers_set = set(db_providers)
-
-    # Check that all providers in db.py are in ai.py
-    missing_in_ai = db_providers_set - ai_providers
-    assert not missing_in_ai, f"Providers in db.py but not in ai.py: {missing_in_ai}"
-
-    # Check that all providers in ai.py are in db.py (except possibly some)
-    # This is less strict as db.py might not need all providers
-    print(f"Providers in ai.py: {ai_providers}")
-    print(f"Providers in db.py clear_all_api_keys: {db_providers_set}")
+    # They should match exactly
+    assert ai_providers == registry_providers, (
+        f"Provider names mismatch: ai.py={ai_providers}, registry={registry_providers}"
+    )
 
     # Most importantly, verify Claude is in both
     assert "Claude" in ai_providers, "Claude should be in ai.py PROVIDERS"
-    assert "Claude" in db_providers_set, "Claude should be in db.py clear_all_api_keys"
+    assert "Claude" in registry_providers, "Claude should be in provider registry"
+
+    # Test that clear_all_api_keys actually uses the registry
+    with (
+        patch("core.db._load_keyring") as mock_load_keyring,
+        patch("core.db._keyring_is_usable") as mock_keyring_is_usable,
+    ):
+        # Setup mock keyring
+        mock_keyring = MagicMock()
+        mock_load_keyring.return_value = mock_keyring
+        mock_keyring_is_usable.return_value = True
+
+        # Mock the delete_password method to track calls
+        deleted_providers = []
+
+        def mock_delete_password(service, account):
+            deleted_providers.append(account)
+            return None
+
+        mock_keyring.delete_password = mock_delete_password
+
+        # Call the function
+        db.clear_all_api_keys()
+
+        # Verify all providers from registry were attempted
+        for provider in registry_providers:
+            account_key = db._keyring_account_key(provider)
+            assert any(account_key in deleted for deleted in deleted_providers), (
+                f"{provider} provider key should be cleared"
+            )
