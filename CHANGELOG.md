@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-06-27
+
+### Added
+- **Complete i18n Support**: All application pages (Workspace, History, Settings, About) now support bilingual English/Arabic UI with automatic RTL layout switching
+- **Comprehensive Arabic Translations**: Added 72 new translation keys covering all UI elements across all pages
+
+### Changed
+- **Settings Page**: All hard-coded strings now routed through i18n system for complete bilingual support
+- **About Page**: All hard-coded strings now routed through i18n system
+- **Workspace Page**: All hard-coded strings now routed through i18n system  
+- **History Page**: All hard-coded strings now routed through i18n system
+
+### Fixed
+- **i18n Consistency**: Eliminated mixed-language UI by ensuring all pages use the translation system
+- **RTL Layout**: Improved right-to-left layout support for Arabic interface
+
 ## [0.0.3] - 2026-06-28
 
 ### Added
