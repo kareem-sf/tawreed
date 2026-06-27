@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **File Type Mismatch**: Fixed UI to correctly advertise .xlsx-only support instead of .xlsx/.xls
 - **i18n Consistency**: Eliminated mixed-language UI by ensuring all pages use the translation system
 - **RTL Layout**: Improved right-to-left layout support for Arabic interface
+- **Settings i18n**: Fixed hard-coded "Success" message box title to use translation system
 
 ## [0.0.5] - 2026-06-27
 
