@@ -153,7 +153,9 @@ class MainWindow(QMainWindow):
         stripe.setFixedHeight(2)
         rail_layout.addWidget(stripe)
 
-        footer = QLabel(f"v{__version__}  ·  {__appname__}")
+        footer = QLabel(
+            self._i18n.tr("main_footer_format").format(version=__version__, appname=__appname__)
+        )
         footer.setObjectName("navFooter")
         footer.setAlignment(Qt.AlignCenter)
         rail_layout.addWidget(footer)

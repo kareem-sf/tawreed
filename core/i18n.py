@@ -137,6 +137,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "about_llm_providers_value": "openpyxl · pandas · SQLite",
         "about_packaging_value": "PyInstaller (onedir)",
         "about_footer_format": "© {author}. {license_text}: {license}.",
+        "main_footer_format": "v{version}  ·  {appname}",
         "app_brand": "Tawreed",
         "author_mark": "T",
         # Settings page
@@ -296,6 +297,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "about_llm_providers_value": "openpyxl · pandas · SQLite",
         "about_packaging_value": "PyInstaller (onedir)",
         "about_footer_format": "© {author}. {license_text}: {license}.",
+        "main_footer_format": "v{version}  ·  {appname}",
         "app_brand": "توريد",
         "author_mark": "ت",
         # Settings page
