@@ -899,7 +899,7 @@ def write_excel(
     # ---- Save ------------------------------------------------------------
     try:
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        
+
         # Use save_virtual_workbook for memory efficiency with large files
         # This avoids loading the entire workbook into memory during save
         # save_virtual_workbook is not available in openpyxl 3.1.x, so we fall back to wb.save()
