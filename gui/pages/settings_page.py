@@ -499,7 +499,9 @@ class SettingsPage(QWidget):
             if success:
                 self.status_label.setObjectName("statusLabelSuccess")
                 self.status_label.setText(self._i18n.tr("connection_successful_status"))
-                QMessageBox.information(self, "Success", self._i18n.tr("connection_successful"))
+                QMessageBox.information(
+                    self, self._i18n.tr("success_title"), self._i18n.tr("connection_successful")
+                )
             else:
                 self.status_label.setText(self._i18n.tr("connection_failed_status"))
                 QMessageBox.critical(
