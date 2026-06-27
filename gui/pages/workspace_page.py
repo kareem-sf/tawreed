@@ -80,7 +80,7 @@ class _DropZone(QFrame):
 
     def _open_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, self._i18n.tr("file_dialog_title"), "", "Excel Files (*.xlsx)"
+            self, self._i18n.tr("file_dialog_title"), "", self._i18n.tr("file_dialog_filter")
         )
         if path:
             # Walk up to the QWidget that owns a file_selected handler.
@@ -293,7 +293,7 @@ class WorkspacePage(QWidget):
 
     def browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, self._i18n.tr("file_dialog_title"), "", "Excel Files (*.xlsx)"
+            self, self._i18n.tr("file_dialog_title"), "", self._i18n.tr("file_dialog_filter")
         )
         if path:
             self._on_file_selected(path)

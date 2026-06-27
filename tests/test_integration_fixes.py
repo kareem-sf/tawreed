@@ -151,11 +151,12 @@ def test_file_type_consistency():
     i18n_en.set_language("en")
 
     # Check that file dialog filter is correct
-    import inspect
+    from core.i18n import get_i18n
 
-    from gui.pages.workspace_page import WorkspacePage
-
-    # Get the file dialog filter from the source
-    source = inspect.getsource(WorkspacePage.browse_file)
-    assert "*.xlsx" in source
-    assert ".xls" not in source or "*.xlsx" in source  # Allow .xls in comments but not as filter
+    # Get the file dialog filter from i18n
+    i18n = get_i18n()
+    file_filter = i18n.tr("file_dialog_filter")
+    assert "*.xlsx" in file_filter
+    assert (
+        ".xls" not in file_filter or "*.xlsx" in file_filter
+    )  # Allow .xls in comments but not as filter
