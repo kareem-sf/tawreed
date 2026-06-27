@@ -63,14 +63,13 @@ class SettingsPage(QWidget):
 
         layout.addWidget(
             PageHeader(
-                "Settings",
-                "Configure the LLM provider used to categorize BOQ items. "
-                "Switching providers automatically updates the model list and base URL.",
+                self._i18n.tr("settings_page_title"),
+                self._i18n.tr("settings_page_subtitle"),
             )
         )
 
         # ----- Provider card -----
-        provider_card = Card("LLM Provider")
+        provider_card = Card(self._i18n.tr("provider_card_title"))
         self.provider_combo = QComboBox()
         for name in get_provider_names():
             cfg = get_provider_config(name)
@@ -85,14 +84,14 @@ class SettingsPage(QWidget):
         layout.addWidget(provider_card)
 
         # ----- Model card -----
-        model_card = Card("Model")
+        model_card = Card(self._i18n.tr("model_card_title"))
         model_row = QHBoxLayout()
         model_row.setSpacing(8)
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)  # custom OpenAI-Compatible lets user type
         self.model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.refresh_btn = QPushButton("↻  Refresh Models")
-        self.refresh_btn.setToolTip("Fetch the live list from the provider's /models endpoint")
+        self.refresh_btn = QPushButton(self._i18n.tr("refresh_models_button"))
+        self.refresh_btn.setToolTip(self._i18n.tr("refresh_models_tooltip"))
         self.refresh_btn.clicked.connect(self._refresh_models)
         model_row.addWidget(self.model_combo, stretch=1)
         model_row.addWidget(self.refresh_btn)
@@ -104,7 +103,7 @@ class SettingsPage(QWidget):
         layout.addWidget(model_card)
 
         # ----- Language card -----
-        language_card = Card("Language")
+        language_card = Card(self._i18n.tr("language_card_title"))
         self.language_combo = QComboBox()
         # Add language options with display names
         language_display = {
@@ -118,14 +117,14 @@ class SettingsPage(QWidget):
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         language_card.addWidget(self.language_combo)
 
-        self.language_hint = QLabel("Switch between English and Arabic user interface")
+        self.language_hint = QLabel(self._i18n.tr("language_hint"))
         self.language_hint.setObjectName("hint")
         self.language_hint.setWordWrap(True)
         language_card.addWidget(self.language_hint)
         layout.addWidget(language_card)
 
         # ----- Theme card -----
-        theme_card = Card("Theme")
+        theme_card = Card(self._i18n.tr("theme_card_title"))
         self.theme_combo = QComboBox()
         theme_display = {
             "dark": "Dark",
@@ -136,28 +135,28 @@ class SettingsPage(QWidget):
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         theme_card.addWidget(self.theme_combo)
 
-        self.theme_hint = QLabel("Switch between dark and light color schemes")
+        self.theme_hint = QLabel(self._i18n.tr("theme_hint"))
         self.theme_hint.setObjectName("hint")
         self.theme_hint.setWordWrap(True)
         theme_card.addWidget(self.theme_hint)
         layout.addWidget(theme_card)
 
         # ----- Connection card -----
-        conn_card = Card("Connection")
+        conn_card = Card(self._i18n.tr("connection_card_title"))
         form = QFormLayout()
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignRight)
 
         self.base_url_input = QLineEdit()
-        self.base_url_input.setPlaceholderText("https://...")
+        self.base_url_input.setPlaceholderText(self._i18n.tr("base_url_placeholder"))
         form.addRow("Base URL", self.base_url_input)
 
         self.api_key_input = QLineEdit()
         self.api_key_input.setEchoMode(QLineEdit.Password)
-        self.api_key_input.setPlaceholderText("Paste your API key (stored locally only)")
+        self.api_key_input.setPlaceholderText(self._i18n.tr("api_key_placeholder"))
         form.addRow("API Key", self.api_key_input)
 
-        self.show_key_cb = QCheckBox("Show API key")
+        self.show_key_cb = QCheckBox(self._i18n.tr("show_api_key_checkbox"))
         self.show_key_cb.toggled.connect(
             lambda on: self.api_key_input.setEchoMode(
                 QLineEdit.Normal if on else QLineEdit.Password
@@ -186,13 +185,10 @@ class SettingsPage(QWidget):
         layout.addWidget(conn_card)
 
         # ----- Danger zone (reset) -----
-        danger_card = Card("Danger Zone")
+        danger_card = Card(self._i18n.tr("danger_zone_title"))
         danger_row = QHBoxLayout()
         danger_row.setSpacing(12)
-        warning = QLabel(
-            "Reset clears your API key, model choice, processing history, "
-            "and any generated Excel files. This cannot be undone."
-        )
+        warning = QLabel(self._i18n.tr("danger_zone_warning"))
         warning.setObjectName("hint")
         warning.setWordWrap(True)
         danger_row.addWidget(warning, stretch=1)
@@ -255,15 +251,23 @@ class SettingsPage(QWidget):
         if cfg.get("requires_base_url") and not base_url:
             QMessageBox.warning(
                 self,
-                "Base URL required",
-                f"The '{cfg.get('label', provider)}' provider requires a Base URL.",
+                self._i18n.tr("base_url_required_title"),
+                self._i18n.tr("base_url_required_message").format(
+                    provider=cfg.get("label", provider)
+                ),
             )
             return
         if not api_key:
-            QMessageBox.warning(self, "API key required", "Please enter an API key.")
+            QMessageBox.warning(
+                self,
+                self._i18n.tr("api_key_required_title"),
+                self._i18n.tr("api_key_required_message"),
+            )
             return
         if not model:
-            QMessageBox.warning(self, "Model required", "Please select or type a model name.")
+            QMessageBox.warning(
+                self, self._i18n.tr("model_required_title"), self._i18n.tr("model_required_message")
+            )
             return
 
         payload = {
@@ -385,15 +389,17 @@ class SettingsPage(QWidget):
         if cfg.get("requires_base_url") and not base_url:
             QMessageBox.warning(
                 self,
-                "Base URL required",
-                f"Enter a Base URL before refreshing '{cfg.get('label', provider)}' models.",
+                self._i18n.tr("base_url_required_title"),
+                self._i18n.tr("refresh_base_url_required").format(
+                    provider=cfg.get("label", provider)
+                ),
             )
             return
         if not api_key:
             QMessageBox.warning(
                 self,
-                "API key required",
-                "Enter an API key so we can fetch the live model list.",
+                self._i18n.tr("api_key_required_title"),
+                self._i18n.tr("refresh_api_key_required"),
             )
             return
 
@@ -449,17 +455,21 @@ class SettingsPage(QWidget):
         if cfg.get("requires_base_url") and not base_url:
             QMessageBox.warning(
                 self,
-                "Base URL required",
-                f"Enter a Base URL before testing '{cfg.get('label', provider)}'.",
+                self._i18n.tr("base_url_required_title"),
+                self._i18n.tr("test_base_url_required").format(provider=cfg.get("label", provider)),
             )
             return
         if not api_key:
             QMessageBox.warning(
-                self, "API key required", "Enter an API key to test the connection."
+                self,
+                self._i18n.tr("api_key_required_title"),
+                self._i18n.tr("test_api_key_required"),
             )
             return
         if not model:
-            QMessageBox.warning(self, "Model required", "Pick or type a model name first.")
+            QMessageBox.warning(
+                self, self._i18n.tr("model_required_title"), self._i18n.tr("test_model_required")
+            )
             return
 
         self.test_btn.setEnabled(False)
@@ -493,8 +503,8 @@ class SettingsPage(QWidget):
                 self.status_label.setText("✗ Connection failed. Check key, URL, and model.")
                 QMessageBox.critical(
                     self,
-                    "Connection failed",
-                    "Could not reach the API. Verify the key, base URL, and model name.",
+                    self._i18n.tr("connection_failed_title"),
+                    self._i18n.tr("connection_failed_message"),
                 )
 
         task.add_done_callback(on_done)
@@ -527,7 +537,11 @@ class SettingsPage(QWidget):
         try:
             report = reset_mod.reset_all()
         except Exception as e:
-            QMessageBox.critical(self, "Reset failed", f"Reset failed:\n{e}")
+            QMessageBox.critical(
+                self,
+                self._i18n.tr("reset_failed_title"),
+                f"{self._i18n.tr('reset_failed_title')}:\n{e}",
+            )
             return
 
         # Clear the in-memory form so the user sees the wipe.
@@ -535,9 +549,9 @@ class SettingsPage(QWidget):
         self.base_url_input.clear()
         self.model_combo.clear()
         self._populate_models_for_provider(self.provider_combo.currentData() or "OpenAI")
-        self.status_label.setText("✓ Everything reset.")
+        self.status_label.setText(self._i18n.tr("reset_complete_message"))
         QMessageBox.information(
             self,
-            "Reset complete",
-            f"Tawreed has been reset.\n\n{report.human_summary()}",
+            self._i18n.tr("reset_complete_title"),
+            self._i18n.tr("reset_complete_details").format(details=report.human_summary()),
         )
