@@ -125,13 +125,17 @@ class AboutPage(QWidget):
 
         # ----- Stack card -----
         stack_card = Card(self._i18n.tr("about_built_with"))
-        stack_card.addLayout(_row(self._i18n.tr("about_language"), "Python 3.10+"))
+        stack_card.addLayout(
+            _row(self._i18n.tr("about_language"), self._i18n.tr("about_python_version"))
+        )
         stack_card.addLayout(_row(self._i18n.tr("about_ui_framework"), "PySide6 (Qt for Python)"))
         stack_card.addLayout(
             _row(self._i18n.tr("about_llm_providers"), self._i18n.tr("about_llm_providers_list"))
         )
-        stack_card.addLayout(_row(self._i18n.tr("about_data"), "openpyxl · pandas · SQLite"))
-        stack_card.addLayout(_row(self._i18n.tr("about_packaging"), "PyInstaller (onedir)"))
+        stack_card.addLayout(_row(self._i18n.tr("about_data"), self._i18n.tr("about_data_stack")))
+        stack_card.addLayout(
+            _row(self._i18n.tr("about_packaging"), self._i18n.tr("about_packaging_type"))
+        )
         layout.addWidget(stack_card)
 
         # ----- Action row -----

@@ -51,13 +51,17 @@ def _excepthook(exc_type, exc_value, exc_tb):
     try:
         from PySide6.QtWidgets import QMessageBox
 
+        from core.i18n import get_i18n
+
         app = QApplication.instance()
         if app is not None:
+            i18n = get_i18n()
             QMessageBox.critical(
                 None,
-                "Tawreed — unexpected error",
-                f"An unhandled error occurred:\n\n{exc_value}\n\n"
-                f"Details have been saved to:\n{db.LOGS_DIR}/tawreed.log",
+                i18n.tr("unexpected_error_title"),
+                i18n.tr("unexpected_error_message").format(
+                    error=exc_value, log_path=f"{db.LOGS_DIR}/tawreed.log"
+                ),
             )
     except Exception:
         # If we can't even build the dialog (e.g. QApplication
