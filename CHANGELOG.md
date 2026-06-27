@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Model Parameter Consistency**: Standardized on `model_id` parameter name across the codebase for improved maintainability and reduced confusion
 - **i18n Completeness**: Added missing Arabic translations for message box strings and fixed key naming consistency
+- **i18n Consistency**: Removed duplicate translation keys and completed final hard-coded strings cleanup
 
 ## [0.0.4] - 2026-06-27
 
