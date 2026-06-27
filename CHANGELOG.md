@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Crash Handler i18n**: Fixed crash handler to use translated error messages instead of hard-coded English strings, ensuring consistent bilingual experience for Arabic users
+
 ## [0.0.5] - 2026-06-27
 
 ### Fixed
