@@ -32,7 +32,7 @@ def get_pip_dependencies():
     if result.returncode != 0:
         print(f"Warning: Could not get pip dependencies: {result.stderr}")
         return []
-    
+
     try:
         packages = json.loads(result.stdout)
         return [
@@ -50,12 +50,12 @@ def get_pip_dependencies():
 def get_project_dependencies():
     """Get dependencies from pyproject.toml."""
     pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
-    
+
     try:
         import tomllib
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
-        
+
         deps = []
         for dep in data.get("project", {}).get("dependencies", []):
             # Parse dependency string (e.g., "PySide6>=6.6,<7" -> name="PySide6", version=">=6.6,<7")
@@ -68,7 +68,7 @@ def get_project_dependencies():
                 name = dep
                 version = "*"
             deps.append({"name": name.strip(), "version": version.strip()})
-        
+
         return deps
     except Exception as e:
         print(f"Warning: Could not parse pyproject.toml: {e}")
@@ -113,9 +113,9 @@ def generate_cyclonedx_sbom(dependencies, output_format="json"):
             }
         ],
     }
-    
+
     # Add dependencies
-    for i, dep in enumerate(dependencies):
+    for _i, dep in enumerate(dependencies):
         component = {
             "type": "library",
             "bom-ref": f"pkg:pypi/{dep['name']}@{dep['version']}",
@@ -125,7 +125,7 @@ def generate_cyclonedx_sbom(dependencies, output_format="json"):
         }
         sbom["components"].append(component)
         sbom["dependencies"][0]["dependsOn"].append(component["bom-ref"])
-    
+
     if output_format == "json":
         return json.dumps(sbom, indent=2)
     elif output_format == "csv":
@@ -143,25 +143,25 @@ def main():
     parser = argparse.ArgumentParser(description="Generate SBOM for Tawreed")
     parser.add_argument("--format", choices=["json", "csv"], default="json", help="Output format")
     parser.add_argument("--output", "-o", type=str, default="sbom.json", help="Output file")
-    parser.add_argument("--source", choices=["pip", "pyproject"], default="pyproject", 
+    parser.add_argument("--source", choices=["pip", "pyproject"], default="pyproject",
                         help="Source of dependencies (pip for installed, pyproject for declared)")
     args = parser.parse_args()
-    
+
     # Get dependencies
     if args.source == "pip":
         dependencies = get_pip_dependencies()
     else:
         dependencies = get_project_dependencies()
-    
+
     print(f"Found {len(dependencies)} dependencies")
-    
+
     # Generate SBOM
     sbom_content = generate_cyclonedx_sbom(dependencies, args.format)
-    
+
     # Write output
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(sbom_content)
-    
+
     print(f"SBOM written to {args.output}")
     print(f"Format: {args.format}")
     print(f"Components: {len(dependencies)}")

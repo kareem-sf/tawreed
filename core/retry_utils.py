@@ -9,8 +9,9 @@ import asyncio
 import logging
 import random
 import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 log = logging.getLogger(__name__)
 
@@ -36,24 +37,24 @@ def calculate_delay(attempt: int, base_delay: float = DEFAULT_BASE_DELAY,
                    max_delay: float = DEFAULT_MAX_DELAY,
                    jitter: float = DEFAULT_JITTER) -> float:
     """Calculate delay for a retry attempt using exponential backoff with jitter.
-    
+
     Args:
         attempt: The current attempt number (0-indexed)
         base_delay: Base delay in seconds
         exponential_base: Base for exponential calculation
         max_delay: Maximum delay in seconds
         jitter: Jitter factor (0-1)
-    
+
     Returns:
         Delay in seconds before next retry
     """
     # Exponential backoff: base_delay * (exponential_base ^ attempt)
     delay = base_delay * (exponential_base ** attempt)
-    
+
     # Add jitter to prevent thundering herd
     jitter_range = delay * jitter
     delay = delay + random.uniform(-jitter_range, jitter_range)
-    
+
     # Cap at max_delay
     return min(delay, max_delay)
 
@@ -68,7 +69,7 @@ def retry_sync(
     on_retry: Callable[[Exception, int, float], None] | None = None,
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Decorator for retrying synchronous functions with exponential backoff.
-    
+
     Args:
         max_retries: Maximum number of retry attempts
         base_delay: Base delay in seconds
@@ -77,10 +78,10 @@ def retry_sync(
         jitter: Jitter factor (0-1)
         retryable_exceptions: Tuple of exception types to retry on (default: RETRYABLE_EXCEPTIONS)
         on_retry: Optional callback called before each retry (exception, attempt, delay)
-    
+
     Returns:
         Decorated function
-    
+
     Example:
         @retry_sync(max_retries=3, base_delay=1.0)
         def fetch_data():
@@ -89,18 +90,18 @@ def retry_sync(
     """
     if retryable_exceptions is None:
         retryable_exceptions = RETRYABLE_EXCEPTIONS
-    
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> T:
             last_exception: Exception | None = None
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     return func(*args, **kwargs)
                 except retryable_exceptions as e:
                     last_exception = e
-                    
+
                     if attempt >= max_retries:
                         # No more retries, re-raise
                         log.warning(
@@ -108,34 +109,34 @@ def retry_sync(
                             max_retries + 1, func.__name__, e
                         )
                         raise
-                    
+
                     # Calculate delay for next retry
                     delay = calculate_delay(
                         attempt, base_delay, exponential_base, max_delay, jitter
                     )
-                    
+
                     log.info(
                         "Retry %d/%d for %s after %.2fs: %s",
                         attempt + 1, max_retries, func.__name__, delay, e
                     )
-                    
+
                     # Call on_retry callback if provided
                     if on_retry:
                         try:
                             on_retry(e, attempt + 1, delay)
                         except Exception:
                             pass
-                    
+
                     # Wait before retrying
                     time.sleep(delay)
-            
+
             # This should never be reached, but just in case
             if last_exception:
                 raise last_exception
             raise RuntimeError("Unexpected state in retry logic")
-        
+
         return wrapper
-    
+
     return decorator
 
 
@@ -149,7 +150,7 @@ async def retry_async(
     on_retry: Callable[[Exception, int, float], None] | None = None,
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Decorator for retrying async functions with exponential backoff.
-    
+
     Args:
         max_retries: Maximum number of retry attempts
         base_delay: Base delay in seconds
@@ -158,10 +159,10 @@ async def retry_async(
         jitter: Jitter factor (0-1)
         retryable_exceptions: Tuple of exception types to retry on
         on_retry: Optional callback called before each retry
-    
+
     Returns:
         Decorated async function
-    
+
     Example:
         @retry_async(max_retries=3, base_delay=1.0)
         async def fetch_data():
@@ -170,18 +171,18 @@ async def retry_async(
     """
     if retryable_exceptions is None:
         retryable_exceptions = RETRYABLE_EXCEPTIONS
-    
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
             last_exception: Exception | None = None
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     return await func(*args, **kwargs)
                 except retryable_exceptions as e:
                     last_exception = e
-                    
+
                     if attempt >= max_retries:
                         # No more retries, re-raise
                         log.warning(
@@ -189,40 +190,40 @@ async def retry_async(
                             max_retries + 1, func.__name__, e
                         )
                         raise
-                    
+
                     # Calculate delay for next retry
                     delay = calculate_delay(
                         attempt, base_delay, exponential_base, max_delay, jitter
                     )
-                    
+
                     log.info(
                         "Async retry %d/%d for %s after %.2fs: %s",
                         attempt + 1, max_retries, func.__name__, delay, e
                     )
-                    
+
                     # Call on_retry callback if provided
                     if on_retry:
                         try:
                             on_retry(e, attempt + 1, delay)
                         except Exception:
                             pass
-                    
+
                     # Wait before retrying
                     await asyncio.sleep(delay)
-            
+
             # This should never be reached, but just in case
             if last_exception:
                 raise last_exception
             raise RuntimeError("Unexpected state in async retry logic")
-        
+
         return wrapper
-    
+
     return decorator
 
 
 class RetryConfig:
     """Configuration for retry behavior."""
-    
+
     def __init__(
         self,
         max_retries: int = DEFAULT_MAX_RETRIES,
@@ -238,8 +239,8 @@ class RetryConfig:
         self.exponential_base = exponential_base
         self.jitter = jitter
         self.retryable_exceptions = retryable_exceptions or RETRYABLE_EXCEPTIONS
-    
-    def with_network_defaults(self) -> 'RetryConfig':
+
+    def with_network_defaults(self) -> RetryConfig:
         """Return a config optimized for network operations."""
         return RetryConfig(
             max_retries=3,
@@ -253,8 +254,8 @@ class RetryConfig:
                 OSError,
             ),
         )
-    
-    def with_file_defaults(self) -> 'RetryConfig':
+
+    def with_file_defaults(self) -> RetryConfig:
         """Return a config optimized for file operations."""
         return RetryConfig(
             max_retries=2,

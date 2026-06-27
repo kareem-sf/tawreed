@@ -114,7 +114,7 @@ class SettingsPage(QWidget):
             self.language_combo.addItem(language_display.get(lang_code, lang_code), userData=lang_code)
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         language_card.addWidget(self.language_combo)
-        
+
         self.language_hint = QLabel("Switch between English and Arabic user interface")
         self.language_hint.setObjectName("hint")
         self.language_hint.setWordWrap(True)
@@ -132,7 +132,7 @@ class SettingsPage(QWidget):
             self.theme_combo.addItem(theme_display.get(theme_code, theme_code), userData=theme_code)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         theme_card.addWidget(self.theme_combo)
-        
+
         self.theme_hint = QLabel("Switch between dark and light color schemes")
         self.theme_hint.setObjectName("hint")
         self.theme_hint.setWordWrap(True)
@@ -225,13 +225,13 @@ class SettingsPage(QWidget):
             self._populate_models_for_provider(provider, select_model=settings.get("model", ""))
             self.base_url_input.setText(settings.get("base_url", ""))
             self.api_key_input.setText(settings.get("api_key", ""))
-            
+
             # Load language setting
             language = settings.get("language", "en")
             lang_idx = self.language_combo.findData(language)
             if lang_idx >= 0:
                 self.language_combo.setCurrentIndex(lang_idx)
-            
+
             # Load theme setting
             theme = settings.get("theme", "dark")
             theme_idx = self.theme_combo.findData(theme)
@@ -277,12 +277,12 @@ class SettingsPage(QWidget):
             i18n = get_i18n()
             i18n.set_language(language)
             # Update the theme
-            from gui.styles import set_theme, load_stylesheet
+            from gui.styles import load_stylesheet, set_theme
             set_theme(theme)
             # Re-apply stylesheet to main window if available
-            from gui.main_window import MainWindow
+            from PySide6.QtWidgets import QApplication
+
             for widget in QApplication.topLevelWidgets():
-                if isinstance(widget, MainWindow):
                     widget.setStyleSheet(load_stylesheet())
                     break
         except Exception as e:
@@ -307,11 +307,12 @@ class SettingsPage(QWidget):
         if self._loading:
             return
         theme = self.theme_combo.currentData() or "dark"
-        from gui.styles import set_theme, load_stylesheet
+        from gui.styles import load_stylesheet, set_theme
         set_theme(theme)
         # Re-apply stylesheet to main window if available
-        from gui.main_window import MainWindow
         from PySide6.QtWidgets import QApplication
+
+        from gui.main_window import MainWindow
         for widget in QApplication.topLevelWidgets():
             if isinstance(widget, MainWindow):
                 widget.setStyleSheet(load_stylesheet())

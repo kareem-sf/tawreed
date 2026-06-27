@@ -978,14 +978,14 @@ def clear_recent_files() -> None:
 
 def cleanup_temp_files() -> int:
     """Remove stale .tmp files from the state directory.
-    
+
     Returns the number of temp files removed.
     """
     if not os.path.isdir(TAWREED_DIR):
         return 0
-    
+
     removed = 0
-    for root, dirs, files in os.walk(TAWREED_DIR):
+    for root, _dirs, files in os.walk(TAWREED_DIR):
         for fname in files:
             if fname.endswith(".tmp"):
                 fpath = os.path.join(root, fname)

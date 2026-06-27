@@ -6,8 +6,8 @@ in the bottom-right corner of the main window.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPropertyAnimation, QEasingCurve, Qt, QTimer
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
 
 class Toast(QFrame):
@@ -65,8 +65,8 @@ class Toast(QFrame):
         super().show()
 
         # Calculate target position (bottom-right with margin)
-        target_x = screen_geom.width() - self.width() - 20
-        target_y = screen_geom.height() - self.height() - 20
+        screen_geom.width() - self.width() - 20
+        screen_geom.height() - self.height() - 20
 
         # Animate in
         self._slide_in.setStartValue(self.geometry())
@@ -79,7 +79,7 @@ class Toast(QFrame):
     def hide(self) -> None:
         """Hide the toast with slide-out animation."""
         # Animate out
-        screen_geom = self.screen().geometry()
+        self.screen().geometry()
         self._slide_out.setStartValue(self.geometry())
         self._slide_out.setEndValue(self.geometry().translated(self.width(), 0))
         self._slide_out.start()
@@ -90,7 +90,7 @@ class Toast(QFrame):
 
 class ToastManager(QWidget):
     """Manages toast notifications for the application.
-    
+
     Usage:
         toast_manager = ToastManager(main_window)
         toast_manager.show_toast("Processing complete!")
@@ -104,28 +104,28 @@ class ToastManager(QWidget):
 
     def show_toast(self, message: str, duration: int = 3000) -> None:
         """Show a toast notification.
-        
+
         Args:
             message: The message to display
             duration: Duration in milliseconds before auto-dismiss (default: 3000)
         """
         toast = Toast(message, duration, self._parent)
         self._toasts.append(toast)
-        
+
         # Position toasts in a stack (each new toast appears above the previous)
         screen_geom = self._parent.screen().geometry()
         y_offset = 20
         for existing_toast in self._toasts[:-1]:
             if existing_toast.isVisible():
                 y_offset += existing_toast.height() + 10
-        
+
         toast.move(
             screen_geom.width() - toast.width() - 20,
             screen_geom.height() - y_offset - toast.height()
         )
-        
+
         toast.show()
-        
+
         # Remove from list when deleted
         toast.destroyed.connect(lambda: self._toasts.remove(toast))
 

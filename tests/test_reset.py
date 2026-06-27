@@ -75,7 +75,7 @@ def test_reset_clears_api_keys_from_keyring(isolated_tawreed_dir):
     report = reset_mod.reset_all()
     assert report.api_keys_cleared == 3
     assert db.get_api_key("OpenAI") == ""
-    assert db.get_api_key("Anthropic") == ""
+    assert db.get_api_key("Claude") == ""
     assert db.get_api_key("OpenAI Compatible") == ""
 
 
