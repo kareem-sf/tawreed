@@ -315,12 +315,11 @@ def clear_all_api_keys() -> int:
     removed = 0
     if _keyring_is_usable():
         keyring = _load_keyring()
-        # We don't track which providers the user has used, so we
-        # try to delete the canonical ones plus any with the same
-        # prefix in the fallback file. Anything else (e.g. a
-        # third-party service that registered under tawreed) is
-        # left alone — it wasn't ours to begin with.
-        for provider in ("OpenAI", "Claude", "Google", "OpenAI Compatible"):
+        # Iterate over actual provider names from the provider registry
+        # to avoid hardcoding and ensure we clear all known providers.
+        from core.ai import get_provider_names
+
+        for provider in get_provider_names():
             try:
                 keyring.delete_password(_KEYRING_SERVICE, _keyring_account_key(provider))
                 removed += 1

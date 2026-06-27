@@ -18,6 +18,7 @@ import asyncio
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -288,8 +289,6 @@ class SettingsPage(QWidget):
 
             set_theme(theme)
             # Re-apply stylesheet to main window if available
-            from PySide6.QtWidgets import QApplication
-
             for widget in QApplication.topLevelWidgets():
                 widget.setStyleSheet(load_stylesheet())
                 break
@@ -299,7 +298,7 @@ class SettingsPage(QWidget):
             )
             return
         self.status_label.setObjectName("statusLabelSuccess")
-        self.status_label.setText("✓ Settings saved.")
+        self.status_label.setText(self._i18n.tr("settings_saved"))
         # Re-apply the style for the new objectName.
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
@@ -321,8 +320,6 @@ class SettingsPage(QWidget):
 
         set_theme(theme)
         # Re-apply stylesheet to main window if available
-        from PySide6.QtWidgets import QApplication
-
         from gui.main_window import MainWindow
 
         for widget in QApplication.topLevelWidgets():
@@ -404,7 +401,7 @@ class SettingsPage(QWidget):
             return
 
         self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setText("Fetching…")
+        self.refresh_btn.setText(self._i18n.tr("fetching_models"))
         self.model_status.set_state("running", "Fetching live models…")
 
         try:
@@ -417,11 +414,11 @@ class SettingsPage(QWidget):
 
         def on_done(future):
             self.refresh_btn.setEnabled(True)
-            self.refresh_btn.setText("↻  Refresh Models")
+            self.refresh_btn.setText(self._i18n.tr("refresh_models_button_text"))
             try:
                 result = future.result()
             except Exception as e:
-                self.model_status.set_state("error", f"Fetch failed: {e}")
+                self.model_status.set_state("error", f"{self._i18n.tr('failed')}: {e}")
                 return
 
             self.model_combo.blockSignals(True)
@@ -473,7 +470,7 @@ class SettingsPage(QWidget):
             return
 
         self.test_btn.setEnabled(False)
-        self.test_btn.setText("Testing…")
+        self.test_btn.setText(self._i18n.tr("testing_connection"))
         self.status_label.setText("Testing connection…")
 
         try:
@@ -488,11 +485,11 @@ class SettingsPage(QWidget):
 
         def on_done(future):
             self.test_btn.setEnabled(True)
-            self.test_btn.setText("Test Connection")
+            self.test_btn.setText(self._i18n.tr("test_connection_button_text"))
             try:
                 success = future.result()
             except Exception as e:
-                self.status_label.setText(f"Test error: {e}")
+                self.status_label.setText(f"{self._i18n.tr('error')}: {e}")
                 QMessageBox.critical(
                     self,
                     self._i18n.tr("test_failed_title"),
@@ -501,10 +498,10 @@ class SettingsPage(QWidget):
                 return
             if success:
                 self.status_label.setObjectName("statusLabelSuccess")
-                self.status_label.setText("✓ Connection successful.")
+                self.status_label.setText(self._i18n.tr("connection_successful_status"))
                 QMessageBox.information(self, "Success", self._i18n.tr("connection_successful"))
             else:
-                self.status_label.setText("✗ Connection failed. Check key, URL, and model.")
+                self.status_label.setText(self._i18n.tr("connection_failed_status"))
                 QMessageBox.critical(
                     self,
                     self._i18n.tr("connection_failed_title"),
@@ -535,7 +532,7 @@ class SettingsPage(QWidget):
             self._i18n.tr("reset_confirm_body"),
         )
         if not ok or phrase.strip() != "RESET":
-            self.status_label.setText("Reset cancelled.")
+            self.status_label.setText(self._i18n.tr("reset_cancelled"))
             return
 
         try:
