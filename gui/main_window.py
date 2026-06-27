@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._i18n: I18n = get_i18n()
-        self.setWindowTitle(f"{__appname__} — AI BOQ Processing")
+        self.setWindowTitle(f"{__appname__} — {self._i18n.tr('app_title')}")
         self.setStyleSheet(load_stylesheet())
 
         self._nav_buttons: dict[str, QPushButton] = {}
