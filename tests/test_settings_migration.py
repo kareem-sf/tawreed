@@ -312,9 +312,9 @@ def test_migrate_legacy_exe_dir(monkeypatch, tmp_path):
     assert (new_tawreed / "config.json").exists()
     assert (new_tawreed / "db" / "tawreed.db").exists()
     # The legacy <exe-dir>/tawreed tree was cleaned up.
-    assert not legacy.exists(), (
-        f"Legacy tree at {legacy} was not removed — should be cleaned after migration"
-    )
+    assert (
+        not legacy.exists()
+    ), f"Legacy tree at {legacy} was not removed — should be cleaned after migration"
 
 
 def test_migrate_skips_when_no_legacy(monkeypatch, tmp_path):

@@ -25,9 +25,9 @@ def test_translations_have_same_keys_en_ar():
     catches drift early."""
     en_keys = set(TRANSLATIONS["en"].keys())
     ar_keys = set(TRANSLATIONS["ar"].keys())
-    assert en_keys == ar_keys, (
-        f"EN/AR key sets differ. Only in EN: {en_keys - ar_keys}. Only in AR: {ar_keys - en_keys}."
-    )
+    assert (
+        en_keys == ar_keys
+    ), f"EN/AR key sets differ. Only in EN: {en_keys - ar_keys}. Only in AR: {ar_keys - en_keys}."
 
 
 def test_tr_returns_english_by_default(i18n_fresh):
@@ -96,6 +96,6 @@ def test_arabic_translations_are_non_empty():
         value = TRANSLATIONS["ar"][key]
         assert value.strip(), f"{key} is empty in AR"
         # Arabic Unicode block is U+0600..U+06FF
-        assert any("\u0600" <= c <= "\u06ff" for c in value), (
-            f"{key}={value!r} has no Arabic characters"
-        )
+        assert any(
+            "\u0600" <= c <= "\u06ff" for c in value
+        ), f"{key}={value!r} has no Arabic characters"
