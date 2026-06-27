@@ -181,6 +181,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "connection_successful_status": "✓ Connection successful.",
         "connection_failed_status": "✗ Connection failed. Check key, URL, and model.",
         "reset_cancelled": "Reset cancelled.",
+        "test_failed_title": "Test failed",
+        "test_failed_message": "Test failed",
+        "delete_run_question": "Remove run?",
+        "could_not_open_file": "Could not open the file",
     },
     "ar": {
         "app_title": "توريد",
@@ -329,6 +333,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fetching_models": "جارٍ جلب النماذج…",
         "reset_failed_title": "فشل إعادة الضبط",
         "reset_cancelled": "تم إلغاء إعادة الضبط.",
+        "test_failed_title": "فشل الاختبار",
+        "test_failed_message": "فشل الاختبار",
+        "delete_run_question": "إزالة التشغيل؟",
+        "could_not_open_file": "تعذر فتح الملف",
         "refresh_models_button_text": "↻  تحديث النماذج",
     },
 }
