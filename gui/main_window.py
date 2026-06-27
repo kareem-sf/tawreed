@@ -119,12 +119,12 @@ class MainWindow(QMainWindow):
         logo_label.setAlignment(Qt.AlignCenter)
         brand_layout.addWidget(logo_label)
 
-        app_label = QLabel("Tawreed")
+        app_label = QLabel(self._i18n.tr("app_name_label"))
         app_label.setObjectName("navBrand")
         app_label.setAlignment(Qt.AlignCenter)
         brand_layout.addWidget(app_label)
 
-        tagline = QLabel("AI BOQ work packages")
+        tagline = QLabel(self._i18n.tr("app_tagline"))
         tagline.setObjectName("navTagline")
         tagline.setAlignment(Qt.AlignCenter)
         brand_layout.addWidget(tagline)

@@ -190,7 +190,9 @@ class WorkspacePage(QWidget):
         self.clear_btn.setObjectName("ghostBtn")
         self.clear_btn.setEnabled(False)
         self.clear_btn.clicked.connect(self._clear_selection)
-        self.process_btn = QPushButton("▶  " + self._i18n.tr("process_button"))
+        self.process_btn = QPushButton(
+            self._i18n.tr("process_button_prefix") + self._i18n.tr("process_button")
+        )
         self.process_btn.setObjectName("primaryBtn")
         self.process_btn.setEnabled(False)
         self.process_btn.clicked.connect(self.start_processing)
@@ -546,7 +548,9 @@ class WorkspacePage(QWidget):
         string anyway.
         """
         self.browse_btn.setText(self._i18n.tr("select_file"))
-        self.process_btn.setText("▶  " + self._i18n.tr("process_button"))
+        self.process_btn.setText(
+            self._i18n.tr("process_button_prefix") + self._i18n.tr("process_button")
+        )
         self.clear_btn.setText(self._i18n.tr("clear"))
         self.open_output_btn.setText(self._i18n.tr("open_output"))
         self.open_folder_btn.setText(self._i18n.tr("show_in_folder"))

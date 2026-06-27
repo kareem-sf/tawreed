@@ -61,6 +61,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "drop_zone_title": "Drop a BOQ Excel file here",
         "drop_zone_subtitle": "or click to browse  ·  .xlsx only",
         "no_file_selected": "No file selected",
+        "app_name_label": "Tawreed",
+        "process_button_prefix": "▶  ",
         "idle": "Idle",
         "awaiting_input": "Awaiting input…",
         "streaming_ai": "Streaming AI output…",
@@ -80,7 +82,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # History page
         "workspace_page_title": "BOQ Processor",
         "workspace_page_subtitle": "Drop a Bill of Quantities Excel file and let Tawreed categorize the items into high-level work packages.",
-        "recent_files_label": "Recent Files:",
         "settings_required_title": "Settings Required",
         "settings_required_message": "Please configure an API key in Settings first.",
         "history_page_title": "Processing History",
@@ -202,6 +203,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "drop_zone_title": "اسحب وأفلت ملف Excel هنا",
         "drop_zone_subtitle": "أو انقر للتصفح  ·  .xlsx فقط",
         "no_file_selected": "لم يتم اختيار أي ملف",
+        "app_name_label": "توريد",
+        "process_button_prefix": "▶  ",
         "idle": "خامل",
         "awaiting_input": "في انتظار الإدخال…",
         "streaming_ai": "جارٍ بث إخراج الذكاء الاصطناعي…",
@@ -221,7 +224,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # History page
         "workspace_page_title": "معالج جدول الكميات",
         "workspace_page_subtitle": "اسحب وأفلت ملف Excel لجدول الكميات ودع توريد يصنف العناصر إلى حزم عمل عالية المستوى.",
-        "recent_files_label": "الملفات الأخيرة:",
         "settings_required_title": "الإعدادات مطلوبة",
         "settings_required_message": "الرجاء تكوين مفتاح API في الإعدادات أولًا.",
         "history_page_title": "سجل المعالجة",
