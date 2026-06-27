@@ -1,7 +1,6 @@
 """Test for the QApplication import fix in SettingsPage."""
 
 import pytest
-from PySide6.QtWidgets import QApplication
 
 
 def test_settings_page_qapplication_import():
@@ -14,7 +13,6 @@ def test_settings_page_qapplication_import():
         "QApplication should be imported in settings_page module"
 
     # Create an instance to verify it works
-    app = QApplication.instance() or QApplication([])
     from gui.pages.settings_page import SettingsPage
     page = SettingsPage()
 
@@ -35,8 +33,7 @@ def test_settings_page_qapplication_import():
 def test_settings_page_theme_change_qapplication():
     """Test that _on_theme_changed method can access QApplication."""
     # Create QApplication instance
-    app = QApplication.instance() or QApplication([])
-
+    # Create QApplication instance
     from gui.pages.settings_page import SettingsPage
     page = SettingsPage()
 
@@ -52,8 +49,9 @@ def test_settings_page_theme_change_qapplication():
 
 def test_qapplication_in_top_level_imports():
     """Test that QApplication is imported at module level, not locally."""
-    import gui.pages.settings_page as settings_module
     import inspect
+
+    import gui.pages.settings_page as settings_module
 
     # Get the source code of the module
     source = inspect.getsource(settings_module)
@@ -69,7 +67,7 @@ def test_qapplication_in_top_level_imports():
     # Verify the specific methods don't have local imports
     save_settings_source = inspect.getsource(settings_module.SettingsPage._save_settings)
     theme_change_source = inspect.getsource(settings_module.SettingsPage._on_theme_changed)
-    
+
     assert "from PySide6.QtWidgets import QApplication" not in save_settings_source, \
         "_save_settings should not have local QApplication import"
     assert "from PySide6.QtWidgets import QApplication" not in theme_change_source, \
