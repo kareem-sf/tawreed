@@ -18,6 +18,7 @@ import asyncio
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -311,7 +312,6 @@ class SettingsPage(QWidget):
         set_theme(theme)
         # Re-apply stylesheet to main window if available
         from gui.main_window import MainWindow
-        from PySide6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
             if isinstance(widget, MainWindow):
                 widget.setStyleSheet(load_stylesheet())
