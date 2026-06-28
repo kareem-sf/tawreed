@@ -48,9 +48,9 @@ def test_token_map_covers_all_referenced_tokens() -> None:
     # Since the stylesheet should have no @-tokens after substitution, tokens_in_stylesheet should be empty
     assert not tokens_in_stylesheet, f"Stylesheet still contains @-tokens: {tokens_in_stylesheet!r}"
     # All referenced tokens should be substituted (i.e., not present in the stylesheet)
-    assert not referenced.intersection(
-        tokens_in_stylesheet
-    ), f"Referenced tokens not substituted: {referenced.intersection(tokens_in_stylesheet)!r}"
+    assert not referenced.intersection(tokens_in_stylesheet), (
+        f"Referenced tokens not substituted: {referenced.intersection(tokens_in_stylesheet)!r}"
+    )
 
 
 def test_legacy_alias_works() -> None:

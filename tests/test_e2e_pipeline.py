@@ -173,9 +173,9 @@ def test_e2e_handles_garbage_llm_response_gracefully(monkeypatch, tmp_path, isol
     assert final is not None, "analyzer did not yield __DONE__ on garbage LLM response"
     # The error envelope should be flagged — at minimum via an
     # "error" key OR an empty / fallback items dict.
-    assert "error" in final or not final.get(
-        "items"
-    ), f"expected an error envelope or empty items; got {final}"
+    assert "error" in final or not final.get("items"), (
+        f"expected an error envelope or empty items; got {final}"
+    )
 
 
 def test_e2e_roundtrip_preserves_amount_formulas(monkeypatch, tmp_path, isolated_tawreed_dir):
@@ -226,14 +226,14 @@ def test_e2e_roundtrip_preserves_amount_formulas(monkeypatch, tmp_path, isolated
         cell = row[amount_col - 1]
         if cell.value is not None:
             value = str(cell.value)
-            assert value.startswith(
-                "="
-            ), f"Amount cell at {cell.coordinate} is not a formula: {value!r}"
+            assert value.startswith("="), (
+                f"Amount cell at {cell.coordinate} is not a formula: {value!r}"
+            )
             # Must reference Qty and Rate (columns D and E in our
             # schema) — that's the whole point of the formula.
-            assert (
-                "D" in value and "E" in value
-            ), f"Amount formula at {cell.coordinate} does not reference D*E: {value!r}"
+            assert "D" in value and "E" in value, (
+                f"Amount formula at {cell.coordinate} does not reference D*E: {value!r}"
+            )
             formula_count += 1
     assert formula_count == 3, f"expected 3 amount formulas, got {formula_count}"
 

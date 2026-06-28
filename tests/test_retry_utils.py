@@ -37,9 +37,9 @@ class TestCalculateDelay:
         expected = [1.0, 2.0, 4.0, 8.0, 10.0]
 
         for i, (actual, expected_val) in enumerate(zip(delays, expected, strict=False)):
-            assert (
-                abs(actual - expected_val) < 0.01
-            ), f"Attempt {i}: expected {expected_val}, got {actual}"
+            assert abs(actual - expected_val) < 0.01, (
+                f"Attempt {i}: expected {expected_val}, got {actual}"
+            )
 
     def test_max_delay_cap(self):
         """Test that delay is capped at max_delay."""

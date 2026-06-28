@@ -5,7 +5,9 @@ All notable changes to Tawreed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.10] - 2026-06-28
+## [Unreleased]
+
+## [0.0.11] - 2026-06-28
 
 ### Fixed
 - **Critical Excel BOQ Column Detection**: Fixed bug where ITEM columns were misclassified as DESCRIPTION columns, causing item numbers to appear in description field instead of Nr. field
@@ -180,6 +182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`HKCU\SOFTWARE\sfkareem\Tawreed`). The previous QSettings-based
   path was the only writer to the registry and has been removed.
 
+[0.0.11]: https://github.com/sfkareem/tawreed/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/sfkareem/tawreed/compare/v0.0.9...v0.0.10
 [0.0.9]: https://github.com/sfkareem/tawreed/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/sfkareem/tawreed/compare/v0.0.7...v0.0.8

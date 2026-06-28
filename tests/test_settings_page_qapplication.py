@@ -9,9 +9,9 @@ def test_settings_page_qapplication_import(qtbot):
     import gui.pages.settings_page as settings_module
 
     # Check that QApplication is available in the module namespace
-    assert hasattr(
-        settings_module, "QApplication"
-    ), "QApplication should be imported in settings_page module"
+    assert hasattr(settings_module, "QApplication"), (
+        "QApplication should be imported in settings_page module"
+    )
 
     # Create an instance to verify it works
     from gui.pages.settings_page import SettingsPage
@@ -62,22 +62,22 @@ def test_qapplication_in_top_level_imports():
     source = inspect.getsource(settings_module)
 
     # Check that QApplication is in the top-level imports
-    assert (
-        "from PySide6.QtWidgets import (\n    QApplication," in source
-    ), "QApplication should be imported at module level"
+    assert "from PySide6.QtWidgets import (\n    QApplication," in source, (
+        "QApplication should be imported at module level"
+    )
 
     # Check that there are no local imports of QApplication in methods
-    assert (
-        "from PySide6.QtWidgets import QApplication" not in source
-    ), "QApplication should not be imported locally in methods"
+    assert "from PySide6.QtWidgets import QApplication" not in source, (
+        "QApplication should not be imported locally in methods"
+    )
 
     # Verify the specific methods don't have local imports
     save_settings_source = inspect.getsource(settings_module.SettingsPage._save_settings)
     theme_change_source = inspect.getsource(settings_module.SettingsPage._on_theme_changed)
 
-    assert (
-        "from PySide6.QtWidgets import QApplication" not in save_settings_source
-    ), "_save_settings should not have local QApplication import"
-    assert (
-        "from PySide6.QtWidgets import QApplication" not in theme_change_source
-    ), "_on_theme_changed should not have local QApplication import"
+    assert "from PySide6.QtWidgets import QApplication" not in save_settings_source, (
+        "_save_settings should not have local QApplication import"
+    )
+    assert "from PySide6.QtWidgets import QApplication" not in theme_change_source, (
+        "_on_theme_changed should not have local QApplication import"
+    )

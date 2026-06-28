@@ -25,9 +25,9 @@ def test_worker_uses_i18n_for_default_project_name():
 
     # Verify that error sections use i18n
     for line in error_section_lines:
-        assert (
-            "i18n.tr" in line or "default_project_name" in line
-        ), f"Error section should use i18n for project name: {line}"
+        assert "i18n.tr" in line or "default_project_name" in line, (
+            f"Error section should use i18n for project name: {line}"
+        )
 
 
 def test_default_project_name_translation_exists():
@@ -49,9 +49,9 @@ def test_worker_parsing_success_uses_i18n():
         content = f.read()
 
     # Should use i18n for the success message
-    assert (
-        'i18n.tr("successfully_parsed")' in content
-    ), "worker.py should use i18n for parsing success message"
+    assert 'i18n.tr("successfully_parsed")' in content, (
+        "worker.py should use i18n for parsing success message"
+    )
 
     # Should not have hard-coded "Successfully parsed" in the main logic
     # (but may have it in fallback logic)
@@ -60,6 +60,6 @@ def test_worker_parsing_success_uses_i18n():
         if "Successfully parsed" in line and 'else f"' not in line:
             # This should be in a fallback, not main logic
             context = "\n".join(lines[max(0, i - 2) : min(len(lines), i + 3)])
-            assert (
-                'else f"' in context or "if i18n else" in context
-            ), f"Line {i + 1}: Hard-coded 'Successfully parsed' should be in fallback only: {line}"
+            assert 'else f"' in context or "if i18n else" in context, (
+                f"Line {i + 1}: Hard-coded 'Successfully parsed' should be in fallback only: {line}"
+            )
