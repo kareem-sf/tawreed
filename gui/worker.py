@@ -92,6 +92,7 @@ def run_analysis(
         model_id=model_id,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
+        i18n=i18n,
     )
     last_was_thought: bool | None = None
     parsed: dict = {}

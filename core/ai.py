@@ -251,6 +251,7 @@ def analyze_boq_stream(
     model_id: str,
     system_prompt: str,
     user_prompt: str,
+    i18n=None,
 ):
     """Stream LLM tokens + the final parsed JSON to the caller.
 
@@ -334,7 +335,7 @@ def analyze_boq_stream(
 
     # ---- Terminal yield: always reached, even on error ----
     if "project_name" not in parsed_data:
-        parsed_data["project_name"] = "Tawreed Project"
+        parsed_data["project_name"] = i18n.tr("default_project_name") if i18n else "Tawreed Project"
     if "date" not in parsed_data:
         parsed_data["date"] = datetime.now().strftime("%Y-%m-%d")
     if "items" not in parsed_data or not isinstance(parsed_data.get("items"), dict):

@@ -774,9 +774,8 @@ def _to_list(item: Any) -> list[Any]:
     return [item]
 
 
-def _style_cover(ws, project_name: str, date: str) -> None:
+def _style_cover(ws, project_name: str, date: str, i18n=None) -> None:
     """Render the Cover sheet: title + project name + date + summary block."""
-    label_font = Font(name=OUTPUT_FONT_NAME, size=11, bold=True, color="FF374151")
     value_font = Font(name=OUTPUT_FONT_NAME, size=11, color="FF1F2937")
     thin = _thin_border()
 
@@ -784,31 +783,40 @@ def _style_cover(ws, project_name: str, date: str) -> None:
     ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 70
 
-    ws["A1"] = "Tawreed"
+    # Use translations if available, fall back to English
+    if i18n:
+        ws["A1"] = i18n.tr("cover_title")
+        ws["B1"] = i18n.tr("cover_subtitle")
+        ws["A3"] = i18n.tr("cover_project_name")
+        ws["A4"] = i18n.tr("cover_date")
+        ws["A5"] = i18n.tr("cover_application")
+        # Format the application value with version
+        app_value = i18n.tr("cover_application_value").format(version="0.0.1")
+    else:
+        ws["A1"] = "Tawreed"
+        ws["B1"] = "BOQ Work-Package Extractor"
+        ws["A3"] = "Project Name"
+        ws["A4"] = "Date"
+        ws["A5"] = "Application"
+        app_value = "Tawreed BOQ Processor v0.0.1"
+
     ws["A1"].font = Font(name=OUTPUT_FONT_NAME, size=26, bold=True, color="FF1F2937")
-    ws["B1"] = "BOQ Work-Package Extractor"
     ws["B1"].font = Font(name=OUTPUT_FONT_NAME, size=14, color="FF6B7280", italic=True)
 
     ws.row_dimensions[1].height = 36
 
     # Metadata block.
-    ws["A3"] = "Project Name"
-    ws["A3"].font = label_font
     ws["B3"] = project_name or "—"
     ws["B3"].font = value_font
     if not project_name:
         ws["B3"].fill = PatternFill(start_color="FFFEF3C7", end_color="FFFEF3C7", fill_type="solid")
 
-    ws["A4"] = "Date"
-    ws["A4"].font = label_font
     ws["B4"] = date or "—"
     ws["B4"].font = value_font
     if not date:
         ws["B4"].fill = PatternFill(start_color="FFFEF3C7", end_color="FFFEF3C7", fill_type="solid")
 
-    ws["A5"] = "Application"
-    ws["A5"].font = label_font
-    ws["B5"] = "Tawreed BOQ Processor v0.0.1"
+    ws["B5"] = app_value
     ws["B5"].font = value_font
 
     # Borders for the metadata block.
@@ -850,7 +858,7 @@ def write_excel(
     # ---- Cover sheet -----------------------------------------------------
     ws_cover = wb.active
     ws_cover.title = "Cover"
-    _style_cover(ws_cover, project_name, date)
+    _style_cover(ws_cover, project_name, date, i18n)
 
     # ---- Package sheets --------------------------------------------------
     grouped_items: dict[str, list] = {}
