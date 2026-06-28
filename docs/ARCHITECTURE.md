@@ -134,7 +134,7 @@ Language model integration for work-package categorization.
 1. **User Action**: User changes settings (provider, model, API key)
 2. **Settings Page**: Validates and processes changes
 3. **Config Manager**: Updates `~/.tawreed/config.json`
-4. **Keyring**: Securely stores API keys in OS credential store
+- **Authentication Storage**: Securely stores provider credentials in OS credential store
 5. **UI Update**: Settings page reflects changes and shows confirmation
 
 ## Key Design Principles
@@ -150,7 +150,7 @@ Language model integration for work-package categorization.
 
 - All data stored locally at `~/.tawreed/`
 - No cloud sync or telemetry by default
-- API keys stored in OS secure credential store
+- **Provider Credentials**: Stored in OS secure credential store
 - Single-user desktop application focus
 
 ### 3. Privacy-Conscious AI Usage
@@ -185,7 +185,7 @@ Language model integration for work-package categorization.
 - **qasync**: Async support for PySide6
 - **openpyxl**: Excel parsing and writing
 - **httpx**: HTTP client for AI API calls
-- **keyring**: OS credential store integration
+- **Credential Management**: OS credential store integration
 - **SQLite**: Local database storage
 
 ### Development Tools
