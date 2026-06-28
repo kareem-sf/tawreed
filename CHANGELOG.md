@@ -5,6 +5,16 @@ All notable changes to Tawreed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Enhanced Excel Error Handling**: Improved error messages for common Excel file issues:
+  - Corrupt or incomplete Excel files
+  - Older .xls format files (Tawreed only supports .xlsx)
+  - Invalid Excel files (password-protected, wrong format, etc.)
+- **Comprehensive i18n Support**: Added 3 new translation keys for Excel error messages in both English and Arabic
+- **Enhanced Test Coverage**: Added comprehensive test suite for Excel error handling scenarios
+
 ## [0.0.8] - 2026-06-28
 
 ### Added
