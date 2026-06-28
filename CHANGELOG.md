@@ -12,15 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Complete i18n Coverage**: Added missing translation keys and routed remaining hard-coded strings through i18n system:
   - Excel error messages (file not found, read errors, no worksheets, write errors)
   - Settings page "Testing connection…" status message
+  - Default project name in error responses and output workbooks
   - All error messages now respect user language preference with proper fallback support
 
 ### Added
 - **Excel i18n Support**: Added 6 new translation keys covering all Excel operation error messages
 - **Comprehensive Tests**: Added test suite for Excel i18n error handling and fallback behavior
+- **Default Project Name Translation**: Added translation keys for default project name in both English and Arabic
 
 ### Changed
 - **Excel Module**: Modified `parse_excel()` and `write_excel()` to accept optional `i18n` parameter for translated error messages
 - **Worker Integration**: Updated worker to pass i18n context to Excel functions for proper error message translation
+- **Default Project Name**: Modified worker to use translated default project name instead of hard-coded "Tawreed Project"
 
 ## [0.0.5] - 2026-06-27
 - **Settings Save Bug**: Fixed duplicate QApplication imports that could cause runtime errors in the settings page
