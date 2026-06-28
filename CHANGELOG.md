@@ -5,6 +5,15 @@ All notable changes to Tawreed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-06-28
+
+### Fixed
+- **Excel Cover Sheet i18n**: Fixed Excel cover sheet to use translated strings instead of hard-coded English, completing the bilingual experience for Arabic users
+
+### Added
+- **Excel Cover Sheet Translations**: Added 6 new translation keys for cover sheet elements (title, subtitle, project name label, date label, application label, application value)
+- **Comprehensive Cover Sheet Tests**: Added test suite for Excel cover sheet i18n in both English and Arabic
+
 ## [0.0.6] - 2026-06-28
 
 ### Fixed
