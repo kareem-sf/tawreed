@@ -110,9 +110,9 @@ def test_large_excel_file_memory_efficient_parsing(tmp_path):
     # Add rows with longer descriptions to make file larger
     for i in range(5000):  # Reduced from 20,000 to 5,000 for faster testing
         long_description = (
-            f"Item {i+1} with some additional text to make it longer and increase file size"
+            f"Item {i + 1} with some additional text to make it longer and increase file size"
         )
-        ws.append([f"{i+1}", long_description, "m2", 100, 50, 5000])
+        ws.append([f"{i + 1}", long_description, "m2", 100, 50, 5000])
 
     large_file = tmp_path / "large_boq.xlsx"
     wb.save(large_file)
@@ -137,14 +137,14 @@ def test_excel_file_with_many_sheets(tmp_path):
     # Create 10 sheets with data
     for sheet_num in range(10):
         if sheet_num > 0:
-            ws = wb.create_sheet(title=f"Sheet{sheet_num+1}")
+            ws = wb.create_sheet(title=f"Sheet{sheet_num + 1}")
         else:
             ws = wb.active
             ws.title = "Sheet1"
 
         ws.append(["Nr.", "Item Description", "Unit", "Qty", "Rate", "Amount"])
         for i in range(100):
-            ws.append([f"{i+1}", f"Item {i+1}", "m2", 10, 50, 500])
+            ws.append([f"{i + 1}", f"Item {i + 1}", "m2", 10, 50, 500])
 
     multi_sheet_file = tmp_path / "multi_sheet.xlsx"
     wb.save(multi_sheet_file)
@@ -565,7 +565,7 @@ def test_large_file_memory_cleanup():
         ws.append(["Nr.", "Item Description", "Unit", "Qty", "Rate", "Amount"])
 
         for i in range(5000):
-            ws.append([f"{i+1}", f"Item {i+1}", "m2", 10, 50, 500])
+            ws.append([f"{i + 1}", f"Item {i + 1}", "m2", 10, 50, 500])
 
         wb.save(tmp.name)
         tmp_path = tmp.name

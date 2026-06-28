@@ -64,9 +64,9 @@ def test_no_hardcoded_ai_boq_processing():
         content = f.read()
 
     # Should not contain the hard-coded string
-    assert (
-        "AI BOQ Processing" not in content
-    ), "main_window.py should not contain hard-coded 'AI BOQ Processing' string"
+    assert "AI BOQ Processing" not in content, (
+        "main_window.py should not contain hard-coded 'AI BOQ Processing' string"
+    )
 
 
 def test_no_hardcoded_success_title():

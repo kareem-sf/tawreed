@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
+from core.i18n import get_i18n
 from gui.assets import LOGO_PNG_PATH
 from tawreed_app import __version__
 
@@ -34,7 +35,7 @@ _WIDTH = 480
 _HEIGHT = 260
 
 
-def _build_pixmap() -> QPixmap:
+def _build_pixmap(i18n) -> QPixmap:
     """Render the splash background to a QPixmap.
 
     We draw the title and version directly so the splash looks the
@@ -65,7 +66,7 @@ def _build_pixmap() -> QPixmap:
     title_font = QFont("Segoe UI", 22, QFont.Bold)
     painter.setFont(title_font)
     painter.setPen(QColor("#ffffff"))
-    painter.drawText(0, 115, _WIDTH, 40, Qt.AlignHCenter | Qt.AlignVCenter, "Tawreed")
+    painter.drawText(0, 115, _WIDTH, 40, Qt.AlignHCenter | Qt.AlignVCenter, i18n.tr("app_title"))
 
     # Tagline
     tagline_font = QFont("Segoe UI", 10)
@@ -77,7 +78,7 @@ def _build_pixmap() -> QPixmap:
         _WIDTH,
         24,
         Qt.AlignHCenter | Qt.AlignVCenter,
-        "AI-driven BOQ work-package extraction",
+        i18n.tr("about_page_subtitle"),
     )
 
     # Version (bottom-left)
@@ -102,10 +103,11 @@ def show() -> QSplashScreen:
     for calling ``splash.showMessage("...")`` as work progresses and
     ``splash.finish(main_window)`` once the main window is visible.
     """
-    splash = QSplashScreen(_build_pixmap(), Qt.WindowStaysOnTopHint)
+    i18n = get_i18n()
+    splash = QSplashScreen(_build_pixmap(i18n), Qt.WindowStaysOnTopHint)
     splash.setWindowFlag(Qt.FramelessWindowHint, True)
     splash.show()
     QApplication.processEvents()
-    splash.showMessage("Loading...", Qt.AlignBottom | Qt.AlignHCenter, QColor("#7f849c"))
+    splash.showMessage(i18n.tr("loading"), Qt.AlignBottom | Qt.AlignHCenter, QColor("#7f849c"))
     QApplication.processEvents()
     return splash

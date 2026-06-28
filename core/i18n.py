@@ -154,6 +154,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "app_brand": "Tawreed",
         "author_mark": "T",
         "app_logo_text": "TAWREED",
+        "loading": "Loading...",
         # Settings page
         "settings_page_title": "Settings",
         "settings_page_subtitle": "Configure the LLM provider used to categorize BOQ items. Switching providers automatically updates the model list and base URL.",
@@ -359,6 +360,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "app_brand": "توريد",
         "author_mark": "ت",
         "app_logo_text": "توريد",
+        "loading": "جارٍ التحميل...",
         # Settings page
         "settings_page_title": "الإعدادات",
         "settings_page_subtitle": "ضبط مزود نموذج اللغة الكبيرة المستخدم لتصنيف عناصر جدول الكميات. يؤدي تغيير المزود إلى تحديث قائمة النماذج وعناوين URL تلقائيًا.",

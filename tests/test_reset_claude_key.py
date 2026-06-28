@@ -34,9 +34,9 @@ def test_clear_all_api_keys_includes_claude():
         db.clear_all_api_keys()
 
         # Verify Claude was included in the deletion attempts
-        assert any(
-            "Claude" in provider for provider in deleted_providers
-        ), f"Claude provider key should be cleared. Deleted providers: {deleted_providers}"
+        assert any("Claude" in provider for provider in deleted_providers), (
+            f"Claude provider key should be cleared. Deleted providers: {deleted_providers}"
+        )
 
         # Verify all expected providers were attempted (from registry)
         from core.ai import get_provider_names
@@ -44,9 +44,9 @@ def test_clear_all_api_keys_includes_claude():
         expected_providers = get_provider_names()
         for provider in expected_providers:
             account_key = db._keyring_account_key(provider)
-            assert any(
-                account_key in deleted for deleted in deleted_providers
-            ), f"{provider} provider key should be cleared"
+            assert any(account_key in deleted for deleted in deleted_providers), (
+                f"{provider} provider key should be cleared"
+            )
 
 
 def test_reset_all_clears_claude_key():
@@ -90,9 +90,9 @@ def test_reset_all_clears_claude_key():
                 reset_all()
 
                 # Verify Claude was included in the deletion attempts
-                assert any(
-                    "Claude" in provider for provider in deleted_providers
-                ), f"Claude provider key should be cleared during reset. Deleted providers: {deleted_providers}"
+                assert any("Claude" in provider for provider in deleted_providers), (
+                    f"Claude provider key should be cleared during reset. Deleted providers: {deleted_providers}"
+                )
 
         finally:
             # Restore original TAWREED_DIR
@@ -108,9 +108,9 @@ def test_provider_names_match_ai_module():
     registry_providers = set(get_provider_names())
 
     # They should match exactly
-    assert (
-        ai_providers == registry_providers
-    ), f"Provider names mismatch: ai.py={ai_providers}, registry={registry_providers}"
+    assert ai_providers == registry_providers, (
+        f"Provider names mismatch: ai.py={ai_providers}, registry={registry_providers}"
+    )
 
     # Most importantly, verify Claude is in both
     assert "Claude" in ai_providers, "Claude should be in ai.py PROVIDERS"
@@ -141,6 +141,6 @@ def test_provider_names_match_ai_module():
         # Verify all providers from registry were attempted
         for provider in registry_providers:
             account_key = db._keyring_account_key(provider)
-            assert any(
-                account_key in deleted for deleted in deleted_providers
-            ), f"{provider} provider key should be cleared"
+            assert any(account_key in deleted for deleted in deleted_providers), (
+                f"{provider} provider key should be cleared"
+            )
