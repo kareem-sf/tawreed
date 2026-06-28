@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-06-28
+
 ### Fixed
 - **Critical Excel BOQ Column Detection**: Fixed bug where ITEM columns were misclassified as DESCRIPTION columns, causing item numbers to appear in description field instead of Nr. field
 - **Excel Column Detection**: Added 'item' to 'no' keywords and changed 'item' to 'work item' in 'desc' keywords to avoid conflicts
@@ -180,6 +182,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`HKCU\SOFTWARE\sfkareem\Tawreed`). The previous QSettings-based
   path was the only writer to the registry and has been removed.
 
+[0.0.10]: https://github.com/sfkareem/tawreed/compare/v0.0.9...v0.0.10
+[0.0.9]: https://github.com/sfkareem/tawreed/compare/v0.0.8...v0.0.9
+[0.0.8]: https://github.com/sfkareem/tawreed/compare/v0.0.7...v0.0.8
+[0.0.7]: https://github.com/sfkareem/tawreed/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/sfkareem/tawreed/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/sfkareem/tawreed/compare/v0.0.1...v0.0.5
 [0.0.1]: https://github.com/sfkareem/tawreed/releases/tag/v0.0.1
