@@ -25,7 +25,8 @@ class PageHeader(QWidget):
     """Title + optional subtitle, used at the top of every page.
 
     Example:
-        header = PageHeader("Workspace", "Run BOQ extraction against your data.")
+        i18n = get_i18n()
+        header = PageHeader(i18n.tr("workspace_page_title"), i18n.tr("workspace_page_subtitle"))
         layout.addWidget(header)
     """
 
@@ -60,7 +61,8 @@ class Card(QFrame):
     add children to.
 
     Example:
-        with Card(layout) as card:
+        i18n = get_i18n()
+        with Card(i18n.tr("provider_card_title")) as card:
             card_layout = card.layout()
             card_layout.addWidget(...)
     """
@@ -102,7 +104,8 @@ class Section(QWidget):
     """A titled sub-region inside a Card.
 
     Example:
-        s = Section("Provider")
+        i18n = get_i18n()
+        s = Section(i18n.tr("provider_card_title"))
         s.addWidget(combo_box)
         card.addWidget(s)
     """
@@ -137,10 +140,11 @@ class StatusPill(QLabel):
     """A small colored status indicator (idle / running / success / error).
 
     Example:
+        i18n = get_i18n()
         pill = StatusPill()
-        pill.set_state("idle", "Idle")
-        pill.set_state("running", "Processing 14/42...")
-        pill.set_state("success", "Done")
+        pill.set_state("idle", i18n.tr("idle"))
+        pill.set_state("running", i18n.tr("processing"))
+        pill.set_state("success", i18n.tr("done"))
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:

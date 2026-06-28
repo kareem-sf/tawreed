@@ -249,7 +249,10 @@ class BOQProcessor:
             output_dir = db.get_outputs_dir()
             base_name = os.path.basename(self.file_path)
             name_without_ext, _ = os.path.splitext(base_name)
-            output_file = os.path.join(output_dir, f"{name_without_ext}_Tawreed_Output.xlsx")
+            output_file = os.path.join(
+                output_dir,
+                f"{name_without_ext}{self._i18n.tr('output_file_suffix') if self._i18n else '_Tawreed_Output'}.xlsx",
+            )
 
             self.signals.log.emit(
                 self._i18n.tr("generating_output").format(output_file=output_file)

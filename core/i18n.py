@@ -157,6 +157,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "author_mark": "T",
         "app_logo_text": "TAWREED",
         "loading": "Loading...",
+        "app_tagline": "BOQ Work-Package Extractor",
+        "output_file_suffix": "_Tawreed_Output",
         # Settings page
         "settings_page_title": "Settings",
         "settings_page_subtitle": "Configure the LLM provider used to categorize BOQ items. Switching providers automatically updates the model list and base URL.",
@@ -365,6 +367,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "author_mark": "ت",
         "app_logo_text": "توريد",
         "loading": "جارٍ التحميل...",
+        "app_tagline": "مستخرج حزم العمل من جدول الكميات",
+        "output_file_suffix": "_مخرج_توريد",
         # Settings page
         "settings_page_title": "الإعدادات",
         "settings_page_subtitle": "ضبط مزود نموذج اللغة الكبيرة المستخدم لتصنيف عناصر جدول الكميات. يؤدي تغيير المزود إلى تحديث قائمة النماذج وعناوين URL تلقائيًا.",
