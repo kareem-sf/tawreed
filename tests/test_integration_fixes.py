@@ -83,9 +83,9 @@ def test_reset_clears_all_provider_keys():
                 # Check that keys for all providers were attempted
                 for provider in expected_providers:
                     account_key = f"api_key:{provider}"
-                    assert any(account_key in deleted for deleted in deleted_providers), (
-                        f"{provider} provider key should be cleared"
-                    )
+                    assert any(
+                        account_key in deleted for deleted in deleted_providers
+                    ), f"{provider} provider key should be cleared"
 
                 # Should have attempted to clear all providers
                 assert len(deleted_providers) == len(expected_providers)
@@ -125,9 +125,9 @@ def test_reset_keyring_uses_provider_registry():
         # Verify all registry providers were attempted
         for provider in expected_providers:
             expected_account = f"api_key:{provider}"
-            assert any(expected_account in deleted for deleted in deleted_accounts), (
-                f"Provider {provider} should be cleared via registry"
-            )
+            assert any(
+                expected_account in deleted for deleted in deleted_accounts
+            ), f"Provider {provider} should be cleared via registry"
 
         # Should not have any hardcoded provider names that aren't in the registry
         assert len(deleted_accounts) == len(expected_providers)
