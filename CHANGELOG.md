@@ -103,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Config Persistence**: Added language and theme fields to config.json with proper validation
 - **Settings Page**: All hard-coded strings now routed through i18n system for complete bilingual support
 - **About Page**: All hard-coded strings now routed through i18n system
-- **Workspace Page**: All hard-coded strings now routed through i18n system  
+- **Workspace Page**: All hard-coded strings now routed through i18n system
 - **History Page**: All hard-coded strings now routed through i18n system
 
 ## [0.0.1] - 2026-06-14

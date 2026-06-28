@@ -15,7 +15,7 @@ This PR stays within Tawreed's BOQ-to-work-package mission by improving bilingua
 
 ## What changed
 * `core/i18n.py`: Added 8 new translation keys for settings page strings
-* `gui/pages/settings_page.py`: 
+* `gui/pages/settings_page.py`:
   - Added `self._i18n` instance to SettingsPage class
   - All button texts now use `self._i18n.tr()`
   - All dialog messages now use `self._i18n.tr()`

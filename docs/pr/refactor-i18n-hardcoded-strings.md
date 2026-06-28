@@ -15,7 +15,7 @@ This PR stays within Tawreed's BOQ-to-work-package mission by improving bilingua
 
 ## What changed
 * `core/i18n.py`: Added 12 new translation keys for workspace strings
-* `gui/pages/workspace_page.py`: 
+* `gui/pages/workspace_page.py`:
   - `_DropZone` class now uses `get_i18n()` for translations
   - `WorkspacePage` class uses `self._i18n.tr()` for all user-facing strings
   - All hard-coded strings replaced with i18n calls

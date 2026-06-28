@@ -15,7 +15,7 @@ This PR stays within Tawreed's BOQ-to-work-package mission by improving bilingua
 
 ## What changed
 * `core/i18n.py`: Added 14 new translation keys for history page strings
-* `gui/pages/history_page.py`: 
+* `gui/pages/history_page.py`:
   - Added `self._i18n` instance to HistoryPage class
   - All page titles, button texts, status messages, and dialog messages now use `self._i18n.tr()`
   - All hard-coded strings replaced with i18n calls

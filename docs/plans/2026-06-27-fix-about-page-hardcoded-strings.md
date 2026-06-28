@@ -3,7 +3,7 @@
 ## Problem
 The About page in `gui/pages/about_page.py` has three hard-coded technical stack strings that are not routed through the i18n system:
 - "Python 3.10+" (line 128)
-- "openpyxl · pandas · SQLite" (line 133) 
+- "openpyxl · pandas · SQLite" (line 133)
 - "PyInstaller (onedir)" (line 134)
 
 These strings need to be translated for Arabic users.

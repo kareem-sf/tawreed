@@ -3,7 +3,7 @@
 ## Problem
 The workspace page has three hard-coded strings that should be routed through the i18n system:
 - "Loaded: {name}" (line 287)
-- "Saved: {output_path}" (line 435) 
+- "Saved: {output_path}" (line 435)
 - "Error: {error_msg}" (line 472)
 
 ## User Impact
