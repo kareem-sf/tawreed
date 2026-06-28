@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Splash Screen i18n**: Completed bilingual support by routing splash screen strings through the translation system
-- **New Translation Keys**: Added "loading" translation key in both English and Arabic
-- **Comprehensive Tests**: Added test suite for splash screen i18n functionality
+- **Workspace Tooltips i18n**: Completed bilingual support by routing workspace page tooltips through the translation system
+- **New Translation Keys**: Added "open_output_tooltip" and "show_in_folder_tooltip" in both English and Arabic
+- **Comprehensive Tests**: Added test suite for workspace tooltip i18n functionality
 
 ### Changed
 - **Code Formatting**: Reformatted all test files with ruff for consistency

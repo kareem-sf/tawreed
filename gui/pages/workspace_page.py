@@ -201,16 +201,12 @@ class WorkspacePage(QWidget):
         self.open_output_btn = QPushButton(self._i18n.tr("open_output"))
         self.open_output_btn.setObjectName("ghostBtn")
         self.open_output_btn.setEnabled(False)
-        self.open_output_btn.setToolTip(
-            "Open the most recently generated Excel in your default app"
-        )
+        self.open_output_btn.setToolTip(self._i18n.tr("open_output_tooltip"))
         self.open_output_btn.clicked.connect(self._open_last_output)
         self.open_folder_btn = QPushButton(self._i18n.tr("show_in_folder"))
         self.open_folder_btn.setObjectName("ghostBtn")
         self.open_folder_btn.setEnabled(False)
-        self.open_folder_btn.setToolTip(
-            "Open the output folder in Windows Explorer with the file selected"
-        )
+        self.open_folder_btn.setToolTip(self._i18n.tr("show_in_folder_tooltip"))
         self.open_folder_btn.clicked.connect(self._reveal_last_output)
         actions.addWidget(self.browse_btn)
         actions.addWidget(self.clear_btn)
