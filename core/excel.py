@@ -222,7 +222,12 @@ _HEADER_LABELS: dict[str, list[str]] = {
         "number",
         "#",
         "item no",
+        "item no.",
+        "item #",
         "item",  # Added to handle "ITEM" column when "DESCRIPTION" is also present
+        "item no ",
+        "no",
+        "item no:",
         "بنـد",
         "بنود",
         "بند",
@@ -235,6 +240,8 @@ _HEADER_LABELS: dict[str, list[str]] = {
         # French (common in MENA construction)
         "n°",
         "no.",
+        "numéro",
+        "num",
     ],
     # Item description / free-text column.
     "desc": [
@@ -245,6 +252,11 @@ _HEADER_LABELS: dict[str, list[str]] = {
         "scope",
         "scope of work",
         "work item",  # Changed from "item" to "work item" to avoid conflict
+        "work description",
+        "item name",
+        "item title",
+        "particulars",
+        "details",
         "بيان",
         "بيـان",
         "البيـان",
@@ -254,6 +266,8 @@ _HEADER_LABELS: dict[str, list[str]] = {
         "بيان الأعمال",
         "وصف الأعمال",
         "بيان البند",
+        "اسم البند",
+        "اسم العمل",
     ],
     # Unit column.
     "unit": [
@@ -275,6 +289,10 @@ _HEADER_LABELS: dict[str, list[str]] = {
         "q'ty",
         "q-ty",
         "quantities",
+        "quantity required",
+        "qty required",
+        "qty req",
+        "qty reqd",
         "كمية",
         "الكميـة",
         "الكميه",
@@ -282,6 +300,8 @@ _HEADER_LABELS: dict[str, list[str]] = {
         "الكمـية",
         "كميه",
         "الكمـيه",
+        "الكمية المطلوبة",
+        "كمية مطلوبة",
     ],
     # Rate / unit price column.
     "rate": [
@@ -338,6 +358,41 @@ def _clean(s: Any) -> str:
     if s is None:
         return ""
     return re.sub(r"\s+", " ", str(s)).strip().lower()
+
+
+def _validate_header_pattern(detected_columns: dict[str, int]) -> str | None:
+    """Validate the detected header pattern and return an error message if invalid.
+
+    Returns None if the pattern is valid, or a user-friendly error message
+    if the pattern is unusual or likely incorrect.
+    """
+    # Minimum viable BOQ: must have at least Nr. and Description
+    required_columns = {"no", "desc"}
+    detected_labels = set(detected_columns.keys())
+
+    if not detected_labels.intersection(required_columns):
+        return (
+            "Could not detect required columns (Item Number and Description). "
+            "Please ensure your BOQ has clear column headers."
+        )
+
+    # Check for unusual patterns that might indicate misdetection
+    if len(detected_columns) == 1 and "desc" in detected_columns:
+        return (
+            "Only detected a Description column. "
+            "This might indicate the Item Number column is missing or has an unusual header. "
+            "Common Item Number headers include: Nr, No., Item No, Item #, رقم, بند"
+        )
+
+    if len(detected_columns) == 1 and "no" in detected_columns:
+        return (
+            "Only detected an Item Number column. "
+            "This might indicate the Description column is missing or has an unusual header. "
+            "Common Description headers include: Description, Item Description, Scope, بيان, وصف"
+        )
+
+    # Pattern is valid
+    return None
 
 
 def _score_column(header_text: str) -> dict[str, int]:
@@ -575,6 +630,17 @@ def parse_excel(
             if "no" in temp_map or "desc" in temp_map:
                 header_row_idx = r_idx
                 mapped_cols = temp_map
+
+                # Validate the detected header pattern
+                validation_error = _validate_header_pattern(mapped_cols)
+                if validation_error:
+                    log.warning(
+                        "Unusual header pattern detected in sheet '%s': %s",
+                        sheet.title,
+                        validation_error,
+                    )
+                    # Continue with detected columns but log the warning
+
                 break
 
         if not header_row_idx:

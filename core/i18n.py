@@ -227,6 +227,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "excel_corrupt_file": "'{file_name}' is corrupt or incomplete. The file may be truncated or damaged. Try re-exporting it from Excel as a new .xlsx file.",
         "excel_old_format": "'{file_name}' appears to be in the older .xls format. Tawreed only supports .xlsx files. Please open the file in Excel and save it as .xlsx format.",
         "excel_invalid_format": "'{file_name}' is not a valid .xlsx file. It may be password-protected, corrupt, or in a different format. Please ensure you're using a standard .xlsx file exported from Excel.",
+        "excel_header_detection_warning": "Warning: Unusual header pattern detected. {details}",
+        "excel_missing_required_columns": "Could not detect required columns (Item Number and Description). Please ensure your BOQ has clear column headers.",
+        "excel_missing_item_number": "Only detected a Description column. This might indicate the Item Number column is missing or has an unusual header. Common Item Number headers include: Nr, No., Item No, Item #, رقم, بند",
+        "excel_missing_description": "Only detected an Item Number column. This might indicate the Description column is missing or has an unusual header. Common Description headers include: Description, Item Description, Scope, بيان, وصف",
         "nav_workspace": "Workspace",  # noqa: F601  # i18n: key appears in both languages
         "danger_zone_title": "Danger Zone",  # noqa: F601  # i18n: key appears in both languages
         "refresh_models_button": "↻  Refresh Models",  # noqa: F601  # i18n: key appears in both languages
@@ -431,6 +435,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cannot_write_excel_permission": "تعذر كتابة '{file_name}' — الملف مفتوح في Excel أو برنامج آخر يقوم بقفله. أغلقه وحاول مرة أخرى.",
         "unexpected_error_title": "توريد — خطأ غير متوقع",
         "unexpected_error_message": "حدث خطأ غير متوقع:\n\n{error}\n\nتم حفظ التفاصيل في:\n{log_path}",
+        "excel_header_detection_warning": "تحذير: تم اكتشاف نمط رأس غير عادي. {details}",
+        "excel_missing_required_columns": "تعذر اكتشاف الأعمدة المطلوبة (رقم البند والوصف). الرجاء التأكد من أن جدول الكميات يحتوي على عناوين أعمدة واضحة.",
+        "excel_missing_item_number": "تم اكتشاف عمود الوصف فقط. قد يشير هذا إلى أن عمود رقم البند مفقود أو يحتوي على عنوان غير عادي. تشمل عناوين أعمدة رقم البند الشائعة: Nr, No., Item No, Item #, رقم, بند",
+        "excel_missing_description": "تم اكتشاف عمود رقم البند فقط. قد يشير هذا إلى أن عمود الوصف مفقود أو يحتوي على عنوان غير عادي. تشمل عناوين أعمدة الوصف الشائعة: Description, Item Description, Scope, بيان, وصف",
         "refresh_models_button_text": "↻  تحديث النماذج",
     },
 }
