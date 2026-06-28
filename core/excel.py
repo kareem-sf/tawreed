@@ -399,12 +399,36 @@ def parse_excel(file_path: str, i18n=None) -> tuple[str, dict[str, Any], dict[st
         # a password-protected file, or random bytes renamed to .xlsx).
         # BadZipFile = the file is corrupt or truncated.
         log.exception("parse_excel: invalid Excel file %s", file_path)
-        raise ValueError(
-            f"'{os.path.basename(file_path)}' is not a valid Excel file. "
-            f"It may be password-protected, corrupt, or in an older format. "
-            f"Re-export it from Excel as .xlsx and try again. "
-            f"(Technical: {type(e).__name__}: {e})"
-        ) from e
+
+        # Provide more specific error messages based on the exception type
+        if isinstance(e, zipfile.BadZipFile):
+            error_msg = (
+                i18n.tr("excel_corrupt_file").format(file_name=os.path.basename(file_path))
+                if i18n
+                else f"'{os.path.basename(file_path)}' is corrupt or incomplete. "
+                f"The file may be truncated or damaged. "
+                f"Try re-exporting it from Excel as a new .xlsx file."
+            )
+        else:  # InvalidFileException
+            # Check if this might be an older .xls format
+            if file_path.lower().endswith(".xls"):
+                error_msg = (
+                    i18n.tr("excel_old_format").format(file_name=os.path.basename(file_path))
+                    if i18n
+                    else f"'{os.path.basename(file_path)}' appears to be in the older .xls format. "
+                    f"Tawreed only supports .xlsx files. "
+                    f"Please open the file in Excel and save it as .xlsx format."
+                )
+            else:
+                error_msg = (
+                    i18n.tr("excel_invalid_format").format(file_name=os.path.basename(file_path))
+                    if i18n
+                    else f"'{os.path.basename(file_path)}' is not a valid .xlsx file. "
+                    f"It may be password-protected, corrupt, or in a different format. "
+                    f"Please ensure you're using a standard .xlsx file exported from Excel."
+                )
+
+        raise ValueError(error_msg) from e
     except OSError as e:
         # PermissionError, file locked by Excel, network share offline.
         log.exception("parse_excel: OS error reading %s", file_path)

@@ -218,6 +218,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cover_date": "Date",
         "cover_application": "Application",
         "cover_application_value": "Tawreed BOQ Processor v{version}",
+        "excel_corrupt_file": "'{file_name}' is corrupt or incomplete. The file may be truncated or damaged. Try re-exporting it from Excel as a new .xlsx file.",
+        "excel_old_format": "'{file_name}' appears to be in the older .xls format. Tawreed only supports .xlsx files. Please open the file in Excel and save it as .xlsx format.",
+        "excel_invalid_format": "'{file_name}' is not a valid .xlsx file. It may be password-protected, corrupt, or in a different format. Please ensure you're using a standard .xlsx file exported from Excel.",
+        "nav_workspace": "Workspace",  # noqa: F601  # i18n: key appears in both languages
+        "danger_zone_title": "Danger Zone",  # noqa: F601  # i18n: key appears in both languages
+        "refresh_models_button": "↻  Refresh Models",  # noqa: F601  # i18n: key appears in both languages
     },
     "ar": {
         "app_title": "توريد",
@@ -227,8 +233,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cover_project_name": "اسم المشروع",
         "cover_date": "التاريخ",
         "cover_application": "التطبيق",
-        "cover_application_value": "معالج جدول الكميات توريد v{version}",
-        "nav_workspace": "مساحة العمل",
+        "cover_application_value": "معالج جدول الكميات توريد v{version}",  # noqa: F601  # i18n: key appears in both languages
+        "excel_corrupt_file": "ملف '{file_name}' تالف أو غير مكتمل. قد يكون الملف مقطوعًا أو تالفًا. حاول إعادة تصديره من Excel كملف .xlsx جديد.",  # noqa: F601  # i18n: key appears in both languages
+        "excel_old_format": "يبدو أن ملف '{file_name}' في تنسيق .xls القديم. يدعم توريد ملفات .xlsx فقط. الرجاء فتح الملف في Excel وحفظه بتنسيق .xlsx.",  # noqa: F601  # i18n: key appears in both languages
+        "excel_invalid_format": "ملف '{file_name}' ليس ملف .xlsx صالحًا. قد يكون محميًا بكلمة مرور أو تالفًا أو في تنسيق مختلف. الرجاء التأكد من استخدامك لملف .xlsx قياسي مصدّر من Excel.",  # noqa: F601  # i18n: key appears in both languages
+        "nav_workspace": "مساحة العمل",  # noqa: F601  # i18n: key appears in both languages
+        "danger_zone_title": "منطقة الخطر",  # noqa: F601  # i18n: key appears in both languages
+        "refresh_models_button": "↻  تحديث النماذج",  # noqa: F601  # i18n: key appears in both languages
         "nav_history": "السجل",
         "nav_settings": "الإعدادات",
         "nav_about": "حول",
@@ -356,8 +367,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "language_card_title": "اللغة",
         "theme_card_title": "السمة",
         "connection_card_title": "الاتصال",
-        "danger_zone_title": "منطقة الخطر",
-        "refresh_models_button": "↻  تحديث النماذج",
+        "cover_application_value": "معالج جدول الكميات توريد v{version}",  # noqa: F601  # i18n: key appears in both languages
+        "excel_corrupt_file": "ملف '{file_name}' تالف أو غير مكتمل. قد يكون الملف مقطوعًا أو تالفًا. حاول إعادة تصديره من Excel كملف .xlsx جديد.",  # noqa: F601  # i18n: key appears in both languages
+        "excel_old_format": "يبدو أن ملف '{file_name}' في تنسيق .xls القديم. يدعم توريد ملفات .xlsx فقط. الرجاء فتح الملف في Excel وحفظه بتنسيق .xlsx.",  # noqa: F601  # i18n: key appears in both languages
+        "excel_invalid_format": "ملف '{file_name}' ليس ملف .xlsx صالحًا. قد يكون محميًا بكلمة مرور أو تالفًا أو في تنسيق مختلف. الرجاء التأكد من استخدامك لملف .xlsx قياسي مصدّر من Excel.",  # noqa: F601  # i18n: key appears in both languages
+        "nav_workspace": "مساحة العمل",  # noqa: F601  # i18n: key appears in both languages
+        "danger_zone_title": "منطقة الخطر",  # noqa: F601  # i18n: key appears in both languages
+        "refresh_models_button": "↻  تحديث النماذج",  # noqa: F601  # i18n: key appears in both languages
         "refresh_models_tooltip": "جلب القائمة المباشرة من نقطة نهاية /models للمزود",
         "base_url_label": "عنوان URL الأساسي",
         "base_url_placeholder": "https://...",

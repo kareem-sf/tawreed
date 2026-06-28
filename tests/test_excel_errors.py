@@ -35,8 +35,8 @@ def test_parse_excel_password_protected_raises_valueerror(tmp_path, monkeypatch)
     with pytest.raises(ValueError) as exc:
         excel.parse_excel(str(p))
     msg = str(exc.value)
-    assert "not a valid Excel file" in msg
-    assert "Re-export" in msg  # we tell the user how to fix it
+    assert "corrupt or incomplete" in msg
+    assert "re-exporting it from Excel" in msg  # we tell the user how to fix it
 
 
 def test_parse_excel_corrupt_zip_raises_valueerror(tmp_path):
@@ -50,7 +50,7 @@ def test_parse_excel_corrupt_zip_raises_valueerror(tmp_path):
     p.write_bytes(real.read_bytes()[:10])  # truncated
     with pytest.raises(ValueError) as exc:
         excel.parse_excel(str(p))
-    assert "not a valid Excel file" in str(exc.value)
+    assert "corrupt or incomplete" in str(exc.value)
 
 
 def test_write_excel_locked_file_raises_ioerror(tmp_path, monkeypatch):
