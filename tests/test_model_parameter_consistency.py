@@ -13,21 +13,21 @@ def test_test_connection_has_model_parameter():
     sig = inspect.signature(test_connection)
     params = list(sig.parameters.keys())
     assert "model_id" in params, f"test_connection should have 'model_id' parameter, got: {params}"
-    assert "model" not in params, (
-        f"test_connection should not have 'model' parameter, got: {params}"
-    )
+    assert (
+        "model" not in params
+    ), f"test_connection should not have 'model' parameter, got: {params}"
 
 
 def test_analyze_boq_stream_has_model_id_parameter():
     """Test that analyze_boq_stream uses 'model_id' parameter."""
     sig = inspect.signature(analyze_boq_stream)
     params = list(sig.parameters.keys())
-    assert "model_id" in params, (
-        f"analyze_boq_stream should have 'model_id' parameter, got: {params}"
-    )
-    assert "model" not in params, (
-        f"analyze_boq_stream should not have 'model' parameter, got: {params}"
-    )
+    assert (
+        "model_id" in params
+    ), f"analyze_boq_stream should have 'model_id' parameter, got: {params}"
+    assert (
+        "model" not in params
+    ), f"analyze_boq_stream should not have 'model' parameter, got: {params}"
 
 
 def test_check_connection_has_model_id_parameter():
@@ -35,9 +35,9 @@ def test_check_connection_has_model_id_parameter():
     sig = inspect.signature(check_connection)
     params = list(sig.parameters.keys())
     assert "model_id" in params, f"check_connection should have 'model_id' parameter, got: {params}"
-    assert "model" not in params, (
-        f"check_connection should not have 'model' parameter, got: {params}"
-    )
+    assert (
+        "model" not in params
+    ), f"check_connection should not have 'model' parameter, got: {params}"
 
 
 def test_run_analysis_has_model_id_parameter():
