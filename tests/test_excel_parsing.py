@@ -80,7 +80,7 @@ def test_detect_arabic_partial_header():
 
 def test_detect_item_description_header():
     """Test the specific case where header has ITEM and DESCRIPTION columns.
-    
+
     This was the bug case: ITEM was being mapped to 'desc' instead of 'no',
     causing item numbers to appear in the description column.
     """
