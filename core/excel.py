@@ -172,6 +172,7 @@ _HEADER_LABELS: dict[str, list[str]] = {
         "number",
         "#",
         "item no",
+        "item",  # Added to handle "ITEM" column when "DESCRIPTION" is also present
         "بنـد",
         "بنود",
         "بند",
@@ -193,8 +194,7 @@ _HEADER_LABELS: dict[str, list[str]] = {
         "item desc",
         "scope",
         "scope of work",
-        "item",
-        "work item",
+        "work item",  # Changed from "item" to "work item" to avoid conflict
         "بيان",
         "بيـان",
         "البيـان",
