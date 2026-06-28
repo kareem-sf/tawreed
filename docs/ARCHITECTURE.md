@@ -234,7 +234,7 @@ tawreed/
 ### Memory Optimization
 
 - **Large Excel Files**: Uses openpyxl's `read_only` mode for files >10MB
-- **Streaming AI**: Processes responses token-by-token
+- **Streaming AI**: Processes responses incrementally as they arrive
 - **Efficient Data Structures**: Uses generators where appropriate
 - **Virtual Workbook**: For very large files, uses `save_virtual_workbook`
 
