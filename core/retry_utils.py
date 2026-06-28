@@ -1,4 +1,4 @@
-"""Retry utilities for API calls and other operations.
+"""Retry utilities for network operations and other transient failures.
 
 Provides exponential backoff retry functionality for transient failures.
 """
@@ -149,7 +149,7 @@ def retry_sync(
     return decorator
 
 
-async def retry_async(
+def retry_async(
     max_retries: int = DEFAULT_MAX_RETRIES,
     base_delay: float = DEFAULT_BASE_DELAY,
     max_delay: float = DEFAULT_MAX_DELAY,
