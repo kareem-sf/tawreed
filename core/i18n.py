@@ -231,6 +231,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "excel_missing_required_columns": "Could not detect required columns (Item Number and Description). Please ensure your BOQ has clear column headers.",
         "excel_missing_item_number": "Only detected a Description column. This might indicate the Item Number column is missing or has an unusual header. Common Item Number headers include: Nr, No., Item No, Item #, رقم, بند",
         "excel_missing_description": "Only detected an Item Number column. This might indicate the Description column is missing or has an unusual header. Common Description headers include: Description, Item Description, Scope, بيان, وصف",
+        "large_file_detected": "Large file detected ({file_size:.1f} MB). Estimated processing time: {estimated_time:.1f} seconds.",
+        "very_large_file_detected": "Very large file detected ({file_size:.1f} MB). Estimated processing time: {estimated_time:.1f} seconds. Processing will continue but may take significant time.",
+        "starting_chunked_processing": "Starting chunked processing of {sheet_title}",
+        "processed_rows": "Processed {processed_rows} rows",
+        "completed_processing": "Completed processing {sheet_title}",
         "nav_workspace": "Workspace",  # noqa: F601  # i18n: key appears in both languages
         "danger_zone_title": "Danger Zone",  # noqa: F601  # i18n: key appears in both languages
         "refresh_models_button": "↻  Refresh Models",  # noqa: F601  # i18n: key appears in both languages
@@ -433,6 +438,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "excel_no_worksheets": "'{file_name}' لا يحتوي على أي أوراق عمل.",
         "cannot_write_excel": "تعذر كتابة '{file_name}': {error}",
         "cannot_write_excel_permission": "تعذر كتابة '{file_name}' — الملف مفتوح في Excel أو برنامج آخر يقوم بقفله. أغلقه وحاول مرة أخرى.",
+        "large_file_detected": "تم اكتشاف ملف كبير ({file_size:.1f} ميجابايت). الوقت المقدر للمعالجة: {estimated_time:.1f} ثانية.",
+        "very_large_file_detected": "تم اكتشاف ملف كبير جدًا ({file_size:.1f} ميجابايت). الوقت المقدر للمعالجة: {estimated_time:.1f} ثانية. ستستمر المعالجة ولكن قد تستغرق وقتًا كبيرًا.",
+        "starting_chunked_processing": "بدء المعالجة المجزأة لورقة {sheet_title}",
+        "processed_rows": "تم معالجة {processed_rows} صفًا",
+        "completed_processing": "تمت معالجة ورقة {sheet_title}",
         "unexpected_error_title": "توريد — خطأ غير متوقع",
         "unexpected_error_message": "حدث خطأ غير متوقع:\n\n{error}\n\nتم حفظ التفاصيل في:\n{log_path}",
         "excel_header_detection_warning": "تحذير: تم اكتشاف نمط رأس غير عادي. {details}",

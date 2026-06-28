@@ -174,7 +174,7 @@ def _estimate_file_processing_time(file_size: int) -> float:
         return mb_size * 1.5  # ~1.5s per MB for small files
 
 
-def _should_warn_about_file_size(file_size: int) -> str | None:
+def _should_warn_about_file_size(file_size: int, i18n: Any = None) -> str | None:
     """Check if file size warrants a warning and return appropriate warning message.
 
     Returns None if no warning needed, otherwise returns warning message.
@@ -182,14 +182,22 @@ def _should_warn_about_file_size(file_size: int) -> str | None:
     if file_size >= HUGE_FILE_THRESHOLD:
         estimated_time = _estimate_file_processing_time(file_size)
         return (
-            f"Very large file detected ({file_size / (1024 * 1024):.1f} MB). "
+            i18n.tr("very_large_file_detected").format(
+                file_size=file_size / (1024 * 1024), estimated_time=estimated_time
+            )
+            if i18n
+            else f"Very large file detected ({file_size / (1024 * 1024):.1f} MB). "
             f"Estimated processing time: {estimated_time:.1f} seconds. "
             f"Processing will continue but may take significant time."
         )
     elif file_size >= VERY_LARGE_FILE_THRESHOLD:
         estimated_time = _estimate_file_processing_time(file_size)
         return (
-            f"Large file detected ({file_size / (1024 * 1024):.1f} MB). "
+            i18n.tr("large_file_detected").format(
+                file_size=file_size / (1024 * 1024), estimated_time=estimated_time
+            )
+            if i18n
+            else f"Large file detected ({file_size / (1024 * 1024):.1f} MB). "
             f"Estimated processing time: {estimated_time:.1f} seconds."
         )
     return None
@@ -496,7 +504,7 @@ def parse_excel(
     file_size = os.path.getsize(file_path)
 
     # Check if file size warrants a warning
-    size_warning = _should_warn_about_file_size(file_size)
+    size_warning = _should_warn_about_file_size(file_size, i18n)
     if size_warning:
         log.warning(size_warning)
         progress_callback(0, size_warning)
@@ -689,7 +697,12 @@ def parse_excel(
         processed_rows = 0
 
         if use_chunked:
-            progress_callback(0, f"Starting chunked processing of {sheet.title}")
+            progress_callback(
+                0,
+                i18n.tr("starting_chunked_processing").format(sheet_title=sheet.title)
+                if i18n
+                else f"Starting chunked processing of {sheet.title}",
+            )
 
             # Use chunked parser generator
             row_generator = _create_chunked_parser(
@@ -727,7 +740,9 @@ def parse_excel(
                     percentage = min(100, int((processed_rows / total_rows_to_process) * 100))
                     progress_callback(
                         percentage,
-                        f"Processed {processed_rows} rows",
+                        i18n.tr("processed_rows").format(processed_rows=processed_rows)
+                        if i18n
+                        else f"Processed {processed_rows} rows",
                         {"processed": processed_rows, "total": total_rows_to_process},
                     )
 
@@ -835,7 +850,11 @@ def parse_excel(
 
         # Send final progress update
         progress_callback(
-            100, f"Completed processing {sheet.title}", {"total_items": len(data_mapping)}
+            100,
+            i18n.tr("completed_processing").format(sheet_title=sheet.title)
+            if i18n
+            else f"Completed processing {sheet.title}",
+            {"total_items": len(data_mapping)},
         )
 
         markdown_parts.append("\n".join(sheet_md))
