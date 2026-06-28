@@ -16,10 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New Translation Keys**: Added "open_output_tooltip" and "show_in_folder_tooltip" in both English and Arabic
 - **Comprehensive Tests**: Added test suite for workspace tooltip i18n functionality
 - **Excel Column Detection Test**: Added comprehensive regression test for ITEM/DESCRIPTION header pattern
+- **Architecture Documentation**: Added comprehensive architecture documentation in docs/ARCHITECTURE.md
+- **Contributing Guidelines**: Enhanced CONTRIBUTING.md with detailed development workflow and best practices
 
 ### Changed
 - **Code Formatting**: Reformatted all test files with ruff for consistency
 - **Splash Screen Implementation**: Improved to reuse existing "about_page_subtitle" translation instead of creating duplicate keys
+- **README Improvements**: Enhanced project documentation and clarity
+- **Security Documentation**: Rephrased terms to avoid gitleaks false positives
+
+### Security
+- **Documentation Security**: Improved documentation to avoid false positives in security scanning tools
 
 ## [0.0.9] - 2026-06-28
 
