@@ -5,6 +5,17 @@ All notable changes to Tawreed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Splash Screen i18n**: Completed bilingual support by routing splash screen strings through the translation system
+- **New Translation Keys**: Added "loading" translation key in both English and Arabic
+- **Comprehensive Tests**: Added test suite for splash screen i18n functionality
+
+### Changed
+- **Code Formatting**: Reformatted all test files with ruff for consistency
+- **Splash Screen Implementation**: Improved to reuse existing "about_page_subtitle" translation instead of creating duplicate keys
+
 ## [0.0.9] - 2026-06-28
 
 ### Added
