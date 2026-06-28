@@ -154,12 +154,12 @@ class WorkspacePage(QWidget):
         )
         header_row.addWidget(header, stretch=1)
         self.status_pill = StatusPill()
-        self.status_pill.set_state("idle", "Idle")
+        self.status_pill.set_state("idle", self._i18n.tr("idle"))
         header_row.addWidget(self.status_pill, alignment=Qt.AlignTop)
         layout.addLayout(header_row)
 
         # ----- Input card (drop zone + actions) -----
-        input_card = Card("Input")
+        input_card = Card(self._i18n.tr("input_card_title"))
 
         self.drop_zone = _DropZone()
         input_card.addWidget(self.drop_zone)
