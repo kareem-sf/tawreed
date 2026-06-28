@@ -32,6 +32,43 @@ To run the optional end-to-end regression test against a real BOQ:
 TAWREED_TEST_BOQ="C:/path/to/a/real/boq.xlsx" pytest -q
 ```
 
+### Testing Guidelines
+
+- **All new features require tests** - Add tests for any new functionality
+- **Bug fixes require regression tests** - Tests should fail on `master` and pass on your branch
+- **Mock AI calls** - Never make live API calls in tests
+- **Test edge cases** - Consider invalid inputs, network failures, permission errors
+- **Keep tests fast** - Tests should run in milliseconds, not seconds
+- **Test both English and Arabic** - Ensure i18n works correctly
+
+### Running Specific Tests
+
+```bash
+# Run tests for a specific module
+pytest tests/test_excel_parsing.py -v
+
+# Run tests matching a pattern
+pytest -k "i18n" -v
+
+# Run with coverage
+pytest --cov=core --cov=gui
+```
+
+## Architecture
+
+Tawreed follows a clean, modular architecture with clear separation of concerns:
+
+- **GUI Layer** (`gui/`): PySide6/Qt presentation layer
+- **Core Layer** (`core/`): Business logic (no Qt dependencies)
+- **Storage Layer**: SQLite database and OS keyring
+- **AI Layer**: Multi-provider LLM integration
+
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation including:
+- Component diagrams
+- Data flow diagrams
+- Design principles
+- Technical stack overview
+
 ## Pull requests
 
 - One change per PR. Split unrelated changes into separate PRs.
@@ -71,6 +108,15 @@ console entry in `tawreed_app/`.
    Windows / macOS / Linux artifacts and attaches them to the
    GitHub release.
 4. Edit the GitHub release notes from the auto-generated draft.
+
+## Documentation Updates
+
+When contributing, please update relevant documentation:
+
+- **New features**: Update README.md and add to CHANGELOG.md
+- **Architecture changes**: Update ARCHITECTURE.md
+- **API changes**: Update relevant docstrings
+- **Bug fixes**: Add to CHANGELOG.md under appropriate version
 
 ## Questions?
 
