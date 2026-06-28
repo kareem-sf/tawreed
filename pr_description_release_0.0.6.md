@@ -23,7 +23,7 @@ This PR stays within Tawreed's BOQ-to-work-package mission because it:
 
 ### Version and Documentation
 * `pyproject.toml`: Bumped version from 0.0.5 to 0.0.6
-* `CHANGELOG.md`: 
+* `CHANGELOG.md`:
   - Moved Unreleased changes to version 0.0.6 with proper date (2026-06-28)
   - Added reference link for 0.0.6
   - Maintained proper Keep a Changelog format

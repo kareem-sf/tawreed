@@ -45,7 +45,7 @@ Real-world construction BOQ spreadsheets often use merged header cells (e.g., "I
 
 ## Test Plan
 - Add unit tests for horizontal merged headers
-- Add unit tests for vertical merged headers  
+- Add unit tests for vertical merged headers
 - Add unit tests for mixed merged/non-merged headers
 - Run full test suite (166 tests + new ones)
 - Manual verification with sample merged-header BOQ

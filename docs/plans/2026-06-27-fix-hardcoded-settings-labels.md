@@ -24,7 +24,7 @@ Low risk:
 
 ## Acceptance Criteria
 1. "Base URL" label uses i18n translation
-2. "API Key" label uses i18n translation  
+2. "API Key" label uses i18n translation
 3. Arabic translation exists for both keys
 4. All existing tests still pass
 5. Manual verification shows Arabic UI has translated labels

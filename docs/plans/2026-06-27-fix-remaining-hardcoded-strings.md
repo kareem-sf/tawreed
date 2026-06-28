@@ -4,7 +4,7 @@
 The workspace page still contains several hard-coded English strings that bypass the i18n system:
 
 1. Line 83: `"Select BOQ Excel File"` in file dialog title
-2. Line 226: `"Live Console"` in console card title  
+2. Line 226: `"Live Console"` in console card title
 3. Line 296: `"Select BOQ Excel File"` in file dialog title (duplicate)
 
 ## User Impact

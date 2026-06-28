@@ -8,7 +8,7 @@
 **Changes Made**:
 - Added missing translation keys to `core/i18n.py`:
   - `file_dialog_title`: "Select BOQ Excel File"
-  - `console_card_title`: "Live Console" 
+  - `console_card_title`: "Live Console"
   - `recent_files_label`: "Recent Files"
   - Arabic translations for all new keys
 
@@ -20,7 +20,7 @@
 
 - Added comprehensive tests in `tests/test_workspace_i18n.py`:
   - Test English UI strings use i18n
-  - Test Arabic UI strings use i18n  
+  - Test Arabic UI strings use i18n
   - Test no hard-coded strings remain in UI code
 
 ### 2. Formatted and Cleaned Up Existing Test
@@ -56,7 +56,7 @@
 
 ### Manual Verification
 - ✅ English UI displays correctly
-- ✅ Arabic UI displays correctly  
+- ✅ Arabic UI displays correctly
 - ✅ Language switching works properly
 - ✅ No hard-coded strings in workspace UI
 

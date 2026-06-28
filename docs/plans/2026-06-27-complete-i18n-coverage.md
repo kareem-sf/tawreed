@@ -22,7 +22,7 @@ All user-facing strings should use the i18n system:
 - `core/excel.py` (route error messages through i18n)
 
 ## Risk Level
-**Low risk**: 
+**Low risk**:
 - Changes are isolated to string routing
 - Fallback logic already exists in worker.py
 - All changes preserve existing behavior
