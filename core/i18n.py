@@ -211,6 +211,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cannot_write_excel_permission": "Cannot write '{file_name}' — the file is open in Excel or another program has it locked. Close it and try again.",
         "unexpected_error_title": "Tawreed — unexpected error",
         "unexpected_error_message": "An unhandled error occurred:\n\n{error}\n\nDetails have been saved to:\n{log_path}",
+        "default_project_name": "Tawreed Project",
     },
     "ar": {
         "app_title": "توريد",
@@ -389,6 +390,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cannot_write_excel_permission": "تعذر كتابة '{file_name}' — الملف مفتوح في Excel أو برنامج آخر يقوم بقفله. أغلقه وحاول مرة أخرى.",
         "unexpected_error_title": "توريد — خطأ غير متوقع",
         "unexpected_error_message": "حدث خطأ غير متوقع:\n\n{error}\n\nتم حفظ التفاصيل في:\n{log_path}",
+        "default_project_name": "مشروع توريد",
         "refresh_models_button_text": "↻  تحديث النماذج",
     },
 }

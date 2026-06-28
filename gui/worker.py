@@ -125,7 +125,7 @@ def run_analysis(
             else f"Stream consumer error: {type(e).__name__}: {e}"
         )
         return {
-            "project_name": "Tawreed Project",
+            "project_name": i18n.tr("default_project_name") if i18n else "Tawreed Project",
             "date": "",
             "items": {},
             "error": error_msg,
@@ -142,7 +142,7 @@ def run_analysis(
             else "AI stream ended without a __DONE__ sentinel. The model may have disconnected mid-response."
         )
         return {
-            "project_name": "Tawreed Project",
+            "project_name": i18n.tr("default_project_name") if i18n else "Tawreed Project",
             "date": "",
             "items": {},
             "error": error_msg,
@@ -227,7 +227,10 @@ class BOQProcessor:
                 self.signals.error.emit(stream_error)
                 return
 
-            project_name = parsed_data.get("project_name", "Tawreed Project")
+            project_name = parsed_data.get(
+                "project_name",
+                self._i18n.tr("default_project_name") if self._i18n else "Tawreed Project",
+            )
             date = parsed_data.get("date", "")
             item_categories = parsed_data.get("items", {})
 
