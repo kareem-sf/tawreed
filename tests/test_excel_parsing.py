@@ -94,7 +94,7 @@ def test_detect_arabic_partial_header():
     assert cols.get("desc") == 1
 
 
-def test_detect_item_description_header():
+def test_detect_item_description_header_duplicate():
     """Test the specific case where header has ITEM and DESCRIPTION columns.
 
     This was the bug case: ITEM was being mapped to 'desc' instead of 'no',
