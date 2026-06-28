@@ -44,6 +44,7 @@ import os
 import re
 import unicodedata
 import zipfile
+from collections.abc import Callable
 from typing import Any
 
 import openpyxl
@@ -97,6 +98,16 @@ HEADER_FILL_HEX = "FF1F2937"  # slate-800
 HEADER_FONT_HEX = "FFFFFFFF"  # white
 HEADER_FONT_SIZE = 11
 
+# Performance constants
+CHUNK_SIZE = 1000  # Process 1000 rows at a time for memory efficiency
+PROGRESS_INTERVAL = 5  # Send progress updates every 5%
+LARGE_FILE_THRESHOLD = 10 * 1024 * 1024  # 10MB - use read_only mode for larger files
+VERY_LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50MB - warn about very large files
+HUGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100MB - warn about huge files
+
+# Progress callback type
+ProgressCallback = Callable[[int, str, dict | None], None]
+
 # Alternating row stripes (zebra striping) for body rows. Pale,
 # neutral — don't compete with the data.
 ZEBRA_FILL_HEX = "FFF8FAFC"  # slate-50
@@ -143,6 +154,45 @@ def _column_width(text: Any, cap: int, pad: int = 2) -> int:
             # Arabic, CJK, etc. -> 1.4
             width += 1.4
     return max(10, min(int(width) + pad, cap))
+
+
+def _default_progress_callback(percentage: int, message: str, data: dict | None = None) -> None:
+    """Default progress callback that logs progress updates."""
+    log.info("Progress: %d%% - %s", percentage, message)
+    if data:
+        log.debug("Progress data: %s", data)
+
+
+def _estimate_file_processing_time(file_size: int) -> float:
+    """Estimate processing time based on file size."""
+    mb_size = file_size / (1024 * 1024)
+    if mb_size > 50:
+        return mb_size * 3.0  # ~3s per MB for very large files
+    elif mb_size > 10:
+        return mb_size * 2.0  # ~2s per MB for large files
+    else:
+        return mb_size * 1.5  # ~1.5s per MB for small files
+
+
+def _should_warn_about_file_size(file_size: int) -> str | None:
+    """Check if file size warrants a warning and return appropriate warning message.
+
+    Returns None if no warning needed, otherwise returns warning message.
+    """
+    if file_size >= HUGE_FILE_THRESHOLD:
+        estimated_time = _estimate_file_processing_time(file_size)
+        return (
+            f"Very large file detected ({file_size / (1024 * 1024):.1f} MB). "
+            f"Estimated processing time: {estimated_time:.1f} seconds. "
+            f"Processing will continue but may take significant time."
+        )
+    elif file_size >= VERY_LARGE_FILE_THRESHOLD:
+        estimated_time = _estimate_file_processing_time(file_size)
+        return (
+            f"Large file detected ({file_size / (1024 * 1024):.1f} MB). "
+            f"Estimated processing time: {estimated_time:.1f} seconds."
+        )
+    return None
 
 
 def _thin_border() -> Border:
@@ -351,7 +401,12 @@ def detect_columns(header_cells: list[Any]) -> dict[str, int]:
     return result
 
 
-def parse_excel(file_path: str, i18n=None) -> tuple[str, dict[str, Any], dict[str, Any]]:
+def parse_excel(
+    file_path: str,
+    i18n=None,
+    progress_callback: ProgressCallback | None = None,
+    use_chunked_processing: bool = True,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Parse an input Excel file, returning markdown + data + headers.
 
     The output ``data_mapping`` uses the canonical English key names
@@ -378,13 +433,26 @@ def parse_excel(file_path: str, i18n=None) -> tuple[str, dict[str, Any], dict[st
             else f"Excel file not found: {file_path}"
         )
 
-    # Check file size for memory optimization
+    # Set up progress callback
+    if progress_callback is None:
+        progress_callback = _default_progress_callback
+
+    # Check file size for memory optimization and warnings
     file_size = os.path.getsize(file_path)
-    large_file_threshold = 10 * 1024 * 1024  # 10 MB
-    use_read_only = file_size > large_file_threshold
+
+    # Check if file size warrants a warning
+    size_warning = _should_warn_about_file_size(file_size)
+    if size_warning:
+        log.warning(size_warning)
+        progress_callback(0, size_warning)
+
+    # Determine processing mode
+    use_read_only = file_size > LARGE_FILE_THRESHOLD
+    use_chunked = use_chunked_processing and file_size > LARGE_FILE_THRESHOLD
 
     if use_read_only:
         log.info("Large Excel file detected (%d bytes), using read_only mode", file_size)
+        progress_callback(0, f"Large file detected ({file_size / (1024 * 1024):.1f} MB)")
 
     try:
         # For large files, use read_only=True to save memory
@@ -550,100 +618,159 @@ def parse_excel(file_path: str, i18n=None) -> tuple[str, dict[str, Any], dict[st
         sheet_md.append("| Global ID | Nr. | Item Description | Unit | Qty | Rate | Amount |")
         sheet_md.append("|---|---|---|---|---|---|---|")
 
-        # Parse data rows.
-        for r_idx in range(header_row_idx + 1, sheet.max_row + 1):
-            row_cells = [
-                sheet.cell(row=r_idx, column=c).value for c in range(1, sheet.max_column + 1)
-            ]
-            if all(v is None or str(v).strip() == "" for v in row_cells):
-                continue
+        # Parse data rows using chunked processing if enabled.
+        total_rows_to_process = sheet.max_row - header_row_idx
+        processed_rows = 0
 
-            # Bind loop variables as default args so the inner
-            # function captures *this iteration's* values, not
-            # the last iteration's. (B023 guard.)
-            def _cell(
-                key: str,
-                _cols: dict = mapped_cols,
-                _cells: list = row_cells,
-            ) -> Any:
-                idx = _cols.get(key)
-                if idx is None or idx >= len(_cells):
-                    return None
-                return _cells[idx]
+        if use_chunked:
+            progress_callback(0, f"Starting chunked processing of {sheet.title}")
 
-            desc_val = _cell("desc")
-            if desc_val is None or str(desc_val).strip() == "":
-                # Skip rows that have no description — these are
-                # sub-headers or visual spacers in real BOQs.
-                continue
-
-            nr = _cell("no")
-            desc = str(desc_val).strip()
-            unit = _cell("unit")
-            qty = _cell("qty")
-            rate = _cell("rate")
-            amount = _cell("total")
-
-            # Format Nr. — Arabic BOQs often use 1, 2, 3, ... so
-            # stringify the int. Excel sometimes returns a float for
-            # an integer cell; cast back if it's whole.
-            if nr is None:
-                nr_str = ""
-            elif isinstance(nr, float) and nr.is_integer():
-                nr_str = str(int(nr))
-            else:
-                nr_str = str(nr).strip()
-
-            # Numeric coercion — if the cell holds a numeric value
-            # we want a number, not a stringified version with
-            # formatting artefacts. Strings that aren't parseable
-            # become 0 so downstream formulas don't crash.
-            def _to_num(v: Any) -> float:
-                if v is None:
-                    return 0.0
-                if isinstance(v, int | float):
-                    return float(v)
-                try:
-                    s = str(v).strip().replace(",", "").replace(" ", "")
-                    return float(s)
-                except (ValueError, TypeError):
-                    return 0.0
-
-            unit_str = str(unit).strip() if unit is not None else ""
-            qty_num = _to_num(qty)
-            rate_num = _to_num(rate)
-            amount_num = _to_num(amount)
-
-            g_id = f"R{global_id_counter}"
-            global_id_counter += 1
-
-            data_mapping[g_id] = {
-                "Nr.": nr_str,
-                "Item Description": desc,
-                "Unit": unit_str,
-                "Qty": qty_num,
-                "Rate": rate_num,
-                "Amount": amount_num,
-                "sheet_name": sheet.title,
-                "original_values": {
-                    "Nr.": nr_str,
-                    "nr": nr_str,
-                    "Item Description": desc,
-                    "description": desc,
-                    "Unit": unit_str,
-                    "unit": unit_str,
-                    "Qty": qty_num,
-                    "qty": qty_num,
-                    "Rate": rate_num,
-                    "rate": rate_num,
-                    "Amount": amount_num,
-                    "amount": amount_num,
-                },
-            }
-            sheet_md.append(
-                f"| {g_id} | {nr_str} | {desc} | {unit_str} | "
-                f"{qty_num} | {rate_num} | {amount_num} |"
+            # Use chunked parser generator
+            row_generator = _create_chunked_parser(
+                sheet, header_row_idx, mapped_cols, global_id_counter
             )
+
+            for row_data, _current_row in row_generator:
+                g_id = row_data["id"]
+                nr_str = row_data["Nr."]
+                desc = row_data["Item Description"]
+                unit_str = row_data["Unit"]
+                qty_num = row_data["Qty"]
+                rate_num = row_data["Rate"]
+                amount_num = row_data["Amount"]
+
+                data_mapping[g_id] = {
+                    "Nr.": nr_str,
+                    "Item Description": desc,
+                    "Unit": unit_str,
+                    "Qty": qty_num,
+                    "Rate": rate_num,
+                    "Amount": amount_num,
+                    "sheet_name": sheet.title,
+                    "original_values": row_data["original_values"],
+                }
+                sheet_md.append(
+                    f"| {g_id} | {nr_str} | {desc} | {unit_str} | "
+                    f"{qty_num} | {rate_num} | {amount_num} |"
+                )
+
+                processed_rows += 1
+
+                # Send progress updates every CHUNK_SIZE rows
+                if processed_rows % CHUNK_SIZE == 0:
+                    percentage = min(100, int((processed_rows / total_rows_to_process) * 100))
+                    progress_callback(
+                        percentage,
+                        f"Processed {processed_rows} rows",
+                        {"processed": processed_rows, "total": total_rows_to_process},
+                    )
+
+                # Update global counter
+                global_id_counter = int(g_id[1:]) + 1
+        else:
+            # Fallback to original processing for small files or when chunked processing is disabled
+            for r_idx in range(header_row_idx + 1, sheet.max_row + 1):
+                row_cells = [
+                    sheet.cell(row=r_idx, column=c).value for c in range(1, sheet.max_column + 1)
+                ]
+                if all(v is None or str(v).strip() == "" for v in row_cells):
+                    continue
+
+                # Bind loop variables as default args so the inner
+                # function captures *this iteration's* values, not
+                # the last iteration's. (B023 guard.)
+                def _cell(
+                    key: str,
+                    _cols: dict = mapped_cols,
+                    _cells: list = row_cells,
+                ) -> Any:
+                    idx = _cols.get(key)
+                    if idx is None or idx >= len(_cells):
+                        return None
+                    return _cells[idx]
+
+                desc_val = _cell("desc")
+                if desc_val is None or str(desc_val).strip() == "":
+                    # Skip rows that have no description — these are
+                    # sub-headers or visual spacers in real BOQs.
+                    continue
+
+                nr = _cell("no")
+                desc = str(desc_val).strip()
+                unit = _cell("unit")
+                qty = _cell("qty")
+                rate = _cell("rate")
+                amount = _cell("total")
+
+                # Format Nr. — Arabic BOQs often use 1, 2, 3, ... so
+                # stringify the int. Excel sometimes returns a float for
+                # an integer cell; cast back if it's whole.
+                if nr is None:
+                    nr_str = ""
+                elif isinstance(nr, float) and nr.is_integer():
+                    nr_str = str(int(nr))
+                else:
+                    nr_str = str(nr).strip()
+
+                # Numeric coercion — if the cell holds a numeric value
+                # we want a number, not a stringified version with
+                # formatting artefacts. Strings that aren't parseable
+                # become 0 so downstream formulas don't crash.
+                def _to_num(v: Any) -> float:
+                    if v is None:
+                        return 0.0
+                    if isinstance(v, int | float):
+                        return float(v)
+                    try:
+                        s = str(v).strip().replace(",", "").replace(" ", "")
+                        return float(s)
+                    except (ValueError, TypeError):
+                        return 0.0
+
+                unit_str = str(unit).strip() if unit is not None else ""
+                qty_num = _to_num(qty)
+                rate_num = _to_num(rate)
+                amount_num = _to_num(amount)
+
+                g_id = f"R{global_id_counter}"
+                global_id_counter += 1
+
+                row_data = {
+                    "id": g_id,
+                    "Nr.": nr_str,
+                    "Item Description": desc,
+                    "Unit": unit_str,
+                    "Qty": qty_num,
+                    "Rate": rate_num,
+                    "Amount": amount_num,
+                    "original_values": {
+                        "Nr.": nr_str,
+                        "nr": nr_str,
+                        "Item Description": desc,
+                        "description": desc,
+                        "Unit": unit_str,
+                        "unit": unit_str,
+                        "Qty": qty_num,
+                        "qty": qty_num,
+                        "Rate": rate_num,
+                        "rate": rate_num,
+                        "Amount": amount_num,
+                        "amount": amount_num,
+                    },
+                }
+
+                data_mapping[g_id] = row_data
+                sheet_md.append(
+                    f"| {g_id} | {nr_str} | {desc} | {unit_str} | "
+                    f"{qty_num} | {rate_num} | {amount_num} |"
+                )
+
+                processed_rows += 1
+
+        # Send final progress update
+        progress_callback(
+            100, f"Completed processing {sheet.title}", {"total_items": len(data_mapping)}
+        )
 
         markdown_parts.append("\n".join(sheet_md))
 
@@ -665,6 +792,100 @@ def sanitize_sheet_name(name: str) -> str:
     # Pkg - <Name> has to be at most 31 characters.
     # "Pkg - " is 6 characters. So name can be at most 25 characters.
     return sanitized[:25].strip()
+
+
+def _create_chunked_parser(
+    sheet, header_row_idx: int, mapped_cols: dict[str, int], global_id_counter: int
+):
+    """Generator that yields parsed rows in chunks for memory-efficient processing."""
+    current_row = header_row_idx + 1
+
+    while current_row <= sheet.max_row:
+        # Process a chunk of rows
+        chunk_end = min(current_row + CHUNK_SIZE - 1, sheet.max_row)
+
+        for r_idx in range(current_row, chunk_end + 1):
+            row_cells = [
+                sheet.cell(row=r_idx, column=c).value for c in range(1, sheet.max_column + 1)
+            ]
+
+            # Skip empty rows
+            if all(v is None or str(v).strip() == "" for v in row_cells):
+                continue
+
+            # Extract values using a helper function
+            def _cell(key: str, cells: list) -> Any:
+                idx = mapped_cols.get(key)
+                if idx is None or idx >= len(cells):
+                    return None
+                return cells[idx]
+
+            desc_val = _cell("desc", row_cells)
+            if desc_val is None or str(desc_val).strip() == "":
+                # Skip rows that have no description
+                continue
+
+            nr = _cell("no", row_cells)
+            desc = str(desc_val).strip()
+            unit = _cell("unit", row_cells)
+            qty = _cell("qty", row_cells)
+            rate = _cell("rate", row_cells)
+            amount = _cell("total", row_cells)
+
+            # Format Nr.
+            if nr is None:
+                nr_str = ""
+            elif isinstance(nr, float) and nr.is_integer():
+                nr_str = str(int(nr))
+            else:
+                nr_str = str(nr).strip()
+
+            # Numeric coercion
+            def _to_num(v: Any) -> float:
+                if v is None:
+                    return 0.0
+                if isinstance(v, int | float):
+                    return float(v)
+                try:
+                    s = str(v).strip().replace(",", "").replace(" ", "")
+                    return float(s)
+                except (ValueError, TypeError):
+                    return 0.0
+
+            unit_str = str(unit).strip() if unit is not None else ""
+            qty_num = _to_num(qty)
+            rate_num = _to_num(rate)
+            amount_num = _to_num(amount)
+
+            g_id = f"R{global_id_counter}"
+            global_id_counter += 1
+
+            row_data = {
+                "id": g_id,
+                "Nr.": nr_str,
+                "Item Description": desc,
+                "Unit": unit_str,
+                "Qty": qty_num,
+                "Rate": rate_num,
+                "Amount": amount_num,
+                "original_values": {
+                    "Nr.": nr_str,
+                    "nr": nr_str,
+                    "Item Description": desc,
+                    "description": desc,
+                    "Unit": unit_str,
+                    "unit": unit_str,
+                    "Qty": qty_num,
+                    "qty": qty_num,
+                    "Rate": rate_num,
+                    "rate": rate_num,
+                    "Amount": amount_num,
+                    "amount": amount_num,
+                },
+            }
+
+            yield row_data, r_idx
+            current_row = r_idx + 1
 
 
 def _style_worksheet(
