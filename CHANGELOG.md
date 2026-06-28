@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Critical Excel BOQ Column Detection**: Fixed bug where ITEM columns were misclassified as DESCRIPTION columns, causing item numbers to appear in description field instead of Nr. field
+- **Excel Column Detection**: Added 'item' to 'no' keywords and changed 'item' to 'work item' in 'desc' keywords to avoid conflicts
+
 ### Added
 - **Workspace Tooltips i18n**: Completed bilingual support by routing workspace page tooltips through the translation system
 - **New Translation Keys**: Added "open_output_tooltip" and "show_in_folder_tooltip" in both English and Arabic
 - **Comprehensive Tests**: Added test suite for workspace tooltip i18n functionality
+- **Excel Column Detection Test**: Added comprehensive regression test for ITEM/DESCRIPTION header pattern
 
 ### Changed
 - **Code Formatting**: Reformatted all test files with ruff for consistency
