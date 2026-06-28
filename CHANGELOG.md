@@ -5,23 +5,15 @@ All notable changes to Tawreed will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.12] - 2026-06-28
+## [Unreleased]
 
 ### Added
-- **Excel Performance Optimization**: Comprehensive performance improvements for large Excel files:
-  - Chunked processing (1000-row chunks) for files >10MB
-  - Real-time progress reporting with detailed metrics
-  - File size warnings for large files (50MB, 100MB) with processing time estimates
-  - Performance monitoring and automatic timing
-  - 33% performance improvement on 5000-row test files
-- **Complete i18n Coverage**: Final cleanup of hard-coded strings:
-  - All UI elements now properly routed through translation system
-  - Complete bilingual English/Arabic support with RTL layout
-  - Enhanced error message translation coverage
-- **Comprehensive Documentation**: Added detailed implementation documentation:
-  - IMPLEMENTATION_SUMMARY.md with performance benchmarks
-  - Complete planning documents for future development phases
-  - Enhanced architecture documentation
+- **Enhanced Excel Header Detection**: Expanded header pattern recognition to handle more real-world BOQ variations:
+  - Additional header keywords: "Item No.", "ITEM NO.", "Item #", "Work Description", "Item Name", "Qty Required", "Qty Reqd", "Quantity Required", "الكمية المطلوبة", "كمية مطلوبة"
+  - Header pattern validation with user-friendly error messages when required columns (Item Number and Description) are missing
+  - Improved error guidance suggesting common header terms in both English and Arabic
+  - Comprehensive test coverage for new header patterns and validation logic
+- **Excel Header Detection Documentation**: Added detailed planning document covering problem analysis, user impact, target behavior, and implementation approach
 
 ### Changed
 - **Excel Processing**: Enhanced parse_excel() with progress callback support
