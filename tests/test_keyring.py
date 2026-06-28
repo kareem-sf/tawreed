@@ -49,9 +49,9 @@ def test_save_settings_writes_api_key_to_keyring_only(isolated_tawreed_dir):
 def test_per_provider_keys_are_isolated(isolated_tawreed_dir):
     """Setting a key for one provider must not leak to another."""
     db.set_api_key("OpenAI", "openai-key")
-    db.set_api_key("Anthropic", "anthropic-key")
+    db.set_api_key("Claude", "claude-key")
     assert db.get_api_key("OpenAI") == "openai-key"
-    assert db.get_api_key("Anthropic") == "anthropic-key"
+    assert db.get_api_key("Claude") == "claude-key"
     assert db.get_api_key("Google") == ""
 
 
@@ -72,7 +72,7 @@ def test_clear_all_api_keys_removes_everything(isolated_tawreed_dir):
     n = db.clear_all_api_keys()
     assert n == 3
     assert db.get_api_key("OpenAI") == ""
-    assert db.get_api_key("Anthropic") == ""
+    assert db.get_api_key("Claude") == ""
     assert db.get_api_key("OpenAI Compatible") == ""
 
 
