@@ -440,12 +440,39 @@ def parse_excel(file_path: str, i18n=None) -> tuple[str, dict[str, Any], dict[st
         # Find header row by scanning up to 50 rows.
         header_row_idx: int | None = None
         mapped_cols: dict[str, int] = {}
-
         for r_idx in range(1, min(51, sheet.max_row + 1)):
-            row_vals = [
-                sheet.cell(row=r_idx, column=c_idx).value
-                for c_idx in range(1, sheet.max_column + 1)
-            ]
+            # Build header values, handling merged cells
+            header_cells = []
+            for c_idx in range(1, sheet.max_column + 1):
+                cell = sheet.cell(row=r_idx, column=c_idx)
+                header_cells.append(cell)
+
+            # Create row_vals array, handling merged cells
+            row_vals = []
+            c_idx = 1
+            while c_idx <= sheet.max_column:
+                cell = header_cells[c_idx - 1]  # Convert to 0-index
+
+                # Check if this cell is in any merged range
+                cell_coordinate = cell.coordinate
+                merged_range = None
+                for merge_rng in sheet.merged_cells.ranges:
+                    if cell_coordinate in merge_rng:
+                        merged_range = merge_rng
+                        break
+
+                if merged_range:
+                    # Use the top-left cell's value for the entire range
+                    top_left = sheet.cell(row=merged_range.min_row, column=merged_range.min_col)
+                    # Add the value for each column in the merged range
+                    for _col in range(merged_range.min_col, merged_range.max_col + 1):
+                        row_vals.append(top_left.value)
+                    # Skip to the end of the merged range
+                    c_idx = merged_range.max_col + 1
+                else:
+                    row_vals.append(cell.value)
+                    c_idx += 1
+
             if all(v is None for v in row_vals):
                 continue
 

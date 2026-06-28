@@ -201,8 +201,156 @@ def test_output_path_is_identical_for_frozen_and_dev(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Roundtrip: write Excel and read it back
+# Merged header support tests
 # ---------------------------------------------------------------------------
+
+
+def test_detect_merged_headers_horizontal():
+    """Test detection when header cells are merged horizontally (common in real BOQs)."""
+    # Create a test workbook with merged headers
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+
+    # Merge "Item Description" across columns B-C
+    ws.merge_cells("B1:C1")
+    ws["B1"] = "Item Description"
+    ws["A1"] = "Nr."
+    ws["D1"] = "Unit"
+    ws["E1"] = "Qty"
+    ws["F1"] = "Rate"
+    ws["G1"] = "Amount"
+
+    # Add some data rows
+    ws["A2"] = "1"
+    ws["B2"] = "Concrete work"
+    ws["D2"] = "m3"
+    ws["E2"] = 10
+    ws["F2"] = 100
+
+    # Save to temp file
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        wb.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        # Parse with our function
+        md, data, headers = excel.parse_excel(tmp_path)
+
+        # Should detect all columns correctly
+        assert len(data) == 1
+        item = data[list(data.keys())[0]]
+        assert item["Nr."] == "1"
+        assert item["Item Description"] == "Concrete work"
+        assert item["Unit"] == "m3"
+        assert item["Qty"] == 10.0
+        assert item["Rate"] == 100.0
+
+    finally:
+        import os
+
+        os.unlink(tmp_path)
+
+
+def test_detect_merged_headers_arabic():
+    """Test merged headers with Arabic text."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+
+    # Merge "البيان" (Description) across columns B-C
+    ws.merge_cells("B1:C1")
+    ws["B1"] = "البيان"
+    ws["A1"] = "بند"  # Nr.
+    ws["D1"] = "الوحدة"
+    ws["E1"] = "الكمية"
+    ws["F1"] = "الفئة"
+    ws["G1"] = "الإجمالي"
+
+    # Add Arabic data
+    ws["A2"] = "١"
+    ws["B2"] = "أعمال الخرسانة"
+    ws["D2"] = "م٣"
+    ws["E2"] = 10
+    ws["F2"] = 100
+
+    # Save to temp file
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        wb.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        # Parse with our function
+        md, data, headers = excel.parse_excel(tmp_path)
+
+        # Should detect Arabic columns correctly
+        assert len(data) == 1
+        item = data[list(data.keys())[0]]
+        assert item["Nr."] == "١"
+        assert "أعمال الخرسانة" in item["Item Description"]
+        assert item["Unit"] == "م٣"
+        assert item["Qty"] == 10.0
+        assert item["Rate"] == 100.0
+
+    finally:
+        import os
+
+        os.unlink(tmp_path)
+
+
+def test_detect_mixed_merged_and_normal_headers():
+    """Test headers where some columns are merged and others are not."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+
+    # Merge only "Item Description" across B-C, leave others normal
+    ws.merge_cells("B1:C1")
+    ws["B1"] = "Item Description"
+    ws["A1"] = "Nr."
+    ws["D1"] = "Unit"
+    ws["E1"] = "Qty"
+    ws["F1"] = "Rate"
+    ws["G1"] = "Amount"
+
+    # Add data
+    ws["A2"] = "1"
+    ws["B2"] = "Test item"
+    ws["D2"] = "each"
+    ws["E2"] = 5
+    ws["F2"] = 20
+
+    # Save to temp file
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        wb.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        # Parse with our function
+        md, data, headers = excel.parse_excel(tmp_path)
+
+        # Should handle mixed scenario correctly
+        assert len(data) == 1
+        item = data[list(data.keys())[0]]
+        assert item["Nr."] == "1"
+        assert item["Item Description"] == "Test item"
+        assert item["Unit"] == "each"
+        assert item["Qty"] == 5.0
+        assert item["Rate"] == 20.0
+
+    finally:
+        import os
+
+        os.unlink(tmp_path)
 
 
 def test_write_then_read_preserves_arabic(tmp_path):
