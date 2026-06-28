@@ -22,10 +22,10 @@ This PR stays within Tawreed's BOQ-to-work-package mission because:
 ## What changed
 
 ### Core changes:
-- **`core/excel.py`**: 
+- **`core/excel.py`**:
   - Added `"item"` to the `"no"` keywords list to handle ITEM columns correctly
   - Changed `"item"` to `"work item"` in the `"desc"` keywords list to avoid conflicts
-  
+
 ### Test changes:
 - **`tests/test_excel_parsing.py`**:
   - Added comprehensive regression test `test_detect_item_description_header()`
