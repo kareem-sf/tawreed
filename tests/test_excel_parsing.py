@@ -78,6 +78,22 @@ def test_detect_arabic_partial_header():
     assert cols.get("desc") == 1
 
 
+def test_detect_item_description_header():
+    """Test the specific case where header has ITEM and DESCRIPTION columns.
+    
+    This was the bug case: ITEM was being mapped to 'desc' instead of 'no',
+    causing item numbers to appear in the description column.
+    """
+    headers = ["ITEM", "DESCRIPTION", "QTY", "UNIT", "RATE", "TOTAL"]
+    cols = excel.detect_columns(headers)
+    assert cols.get("no") == 0, "ITEM should map to 'no' (item number), not 'desc'"
+    assert cols.get("desc") == 1, "DESCRIPTION should map to 'desc'"
+    assert cols.get("qty") == 2
+    assert cols.get("unit") == 3
+    assert cols.get("rate") == 4
+    assert cols.get("total") == 5
+
+
 def test_detect_no_match_returns_empty():
     """A header that doesn't match any keywords returns an empty
     mapping (caller is expected to skip such sheets)."""
