@@ -3,6 +3,10 @@
 from core.i18n import get_i18n
 
 
+def _raise_permission_error(*_args, **_kwargs):
+    raise PermissionError("destination is locked")
+
+
 def test_excel_error_translations():
     """Test that Excel error messages have proper translations."""
     i18n = get_i18n()
@@ -46,7 +50,7 @@ def test_settings_page_status_translation():
     assert i18n.tr("testing_connection_status") == "جارٍ اختبار الاتصال…"
 
 
-def test_fallback_behavior():
+def test_fallback_behavior(monkeypatch):
     """Test that Excel functions work without i18n parameter (fallback mode)."""
     import os
     import tempfile
@@ -61,13 +65,11 @@ def test_fallback_behavior():
         # Should have English fallback message
         assert "Excel file not found:" in str(e)
 
-    # Test write_excel fallback - use a read-only directory to force an error
+    # Patch the final atomic replace instead of relying on chmod semantics.
+    # A CI runner may execute as root and can replace a read-only file.
+    monkeypatch.setattr("core.excel.os.replace", _raise_permission_error)
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Create a file in the temp directory and make it read-only
         test_file = os.path.join(tmpdir, "readonly_file")
-        with open(test_file, "w") as f:
-            f.write("test")
-        os.chmod(test_file, 0o444)  # Make read-only
 
         try:
             # Try to write to the same location (should fail due to permission)
@@ -79,7 +81,7 @@ def test_fallback_behavior():
             assert "Cannot write" in error_str or "Permission denied" in error_str
 
 
-def test_i18n_parameter_usage():
+def test_i18n_parameter_usage(monkeypatch):
     """Test that Excel functions work with i18n parameter."""
     import os
     import tempfile
@@ -88,6 +90,7 @@ def test_i18n_parameter_usage():
     from core.i18n import get_i18n
 
     i18n = get_i18n()
+    monkeypatch.setattr("core.excel.os.replace", _raise_permission_error)
 
     # Test parse_excel with i18n - English
     i18n.set_language("en")
@@ -108,11 +111,7 @@ def test_i18n_parameter_usage():
     # Test write_excel with i18n - English
     i18n.set_language("en")
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Create a read-only file to force an error
         test_file = os.path.join(tmpdir, "readonly_file.xlsx")
-        with open(test_file, "w") as f:
-            f.write("test")
-        os.chmod(test_file, 0o444)  # Make read-only
 
         try:
             write_excel(test_file, {}, {}, "Test", "2024-01-01", i18n=i18n)
@@ -128,11 +127,7 @@ def test_i18n_parameter_usage():
     # Test write_excel with i18n - Arabic
     i18n.set_language("ar")
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Create a read-only file to force an error
         test_file = os.path.join(tmpdir, "readonly_file.xlsx")
-        with open(test_file, "w") as f:
-            f.write("test")
-        os.chmod(test_file, 0o444)  # Make read-only
 
         try:
             write_excel(test_file, {}, {}, "Test", "2024-01-01", i18n=i18n)
