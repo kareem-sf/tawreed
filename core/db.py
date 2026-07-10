@@ -313,6 +313,7 @@ def clear_all_api_keys() -> int:
     leaving the key in Credential Manager is a half-job.
     """
     removed = 0
+    failures: list[str] = []
     if _keyring_is_usable():
         keyring = _load_keyring()
         # Iterate over actual provider names from the provider registry
@@ -320,11 +321,20 @@ def clear_all_api_keys() -> int:
         from core.ai import get_provider_names
 
         for provider in get_provider_names():
+            account = _keyring_account_key(provider)
             try:
-                keyring.delete_password(_KEYRING_SERVICE, _keyring_account_key(provider))
+                keyring.delete_password(_KEYRING_SERVICE, account)
                 removed += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                # Some backends raise when deleting a missing entry. That is
+                # already the desired end state; an existing entry is a real
+                # reset failure and must be reported to the caller.
+                try:
+                    still_present = keyring.get_password(_KEYRING_SERVICE, account)
+                except Exception:
+                    still_present = True
+                if still_present:
+                    failures.append(f"{provider}: {exc}")
     # Always wipe the fallback file too.
     data = _load_fallback_file()
     n = len(data)
@@ -335,8 +345,10 @@ def clear_all_api_keys() -> int:
     if os.path.exists(SECRET_FALLBACK_PATH):
         try:
             os.remove(SECRET_FALLBACK_PATH)
-        except OSError:
-            pass
+        except OSError as exc:
+            failures.append(f"fallback file: {exc}")
+    if failures:
+        raise RuntimeError("Could not remove all stored API keys: " + "; ".join(failures))
     return removed
 
 
@@ -509,8 +521,7 @@ def _migrate_legacy_state() -> None:
 
 
 def _cleanup_stray_app_state() -> None:
-    """Best-effort cleanup of stray state trees that the old code
-    left lying around.
+    """Remove only legacy directories that are already empty.
 
     Background: earlier versions of Tawreed wrote its state to one
     of three places depending on mode — ``%LOCALAPPDATA%\\Tawreed``,
@@ -520,11 +531,9 @@ def _cleanup_stray_app_state() -> None:
     pre-existing state has already been migrated by
     ``_migrate_legacy_state``.
 
-    This function is the second half: it removes the now-empty
-    legacy tree, but ONLY if the migration emptied it. If the user
-    dropped unrelated files into the legacy folder we leave it
-    alone (the migration log captures what we did copy, so a power
-    user can still recover the rest from the legacy location).
+    Migration copies rather than moves user data. Any legacy directory
+    containing a file is preserved as a recovery source. This deliberately
+    avoids recursive deletion after skipped conflicts or copy failures.
 
     Runs once per process. Failures are silently swallowed.
     """
@@ -540,39 +549,19 @@ def _cleanup_stray_app_state() -> None:
                 continue
             if not os.path.isdir(legacy):
                 continue
-            # If the folder contains anything OTHER than our
-            # sub-folders, leave it alone — the user dropped
-            # something there.
-            expected = {
-                "config.json",
-                "db",
-                "outputs",
-                "logs",
-                "single-instance.pid",
-                ".secret_fallback",
-            }
-            try:
-                contents = set(os.listdir(legacy))
-            except OSError:
-                continue
-            if not contents.issubset(expected):
-                continue
-            # Sub-folders we created should be empty or only
-            # contain migrated files. If they're not empty, leave
-            # them — the migration already copied the files to the
-            # new location and the user may want to inspect.
-            for sub in ("db", "outputs"):
-                p = os.path.join(legacy, sub)
-                if os.path.isdir(p):
+            # Never recursively delete a legacy state tree. Remove empty
+            # directories bottom-up; if any file remains, ``os.rmdir`` fails
+            # safely and the tree stays available for manual recovery.
+            for root, dirs, _files in os.walk(legacy, topdown=False):
+                for name in dirs:
                     try:
-                        if os.listdir(p):
-                            continue
+                        os.rmdir(os.path.join(root, name))
                     except OSError:
                         pass
-            # Safe to remove.
-            import shutil as _sh
-
-            _sh.rmtree(legacy, ignore_errors=True)
+            try:
+                os.rmdir(legacy)
+            except OSError:
+                pass
         except Exception:
             pass
 

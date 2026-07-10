@@ -14,9 +14,18 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+
+def _read_project_version() -> str:
+    import tomllib
+
+    pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+    with open(pyproject_path, "rb") as f:
+        return str(tomllib.load(f)["project"]["version"])
+
+
 # Project metadata
 PROJECT_NAME = "Tawreed"
-PROJECT_VERSION = "0.0.1"
+PROJECT_VERSION = _read_project_version()
 PROJECT_DESCRIPTION = "AI-driven BOQ work-package extraction for construction QSs."
 PROJECT_LICENSE = "MIT"
 PROJECT_URL = "https://github.com/sfkareem/tawreed"

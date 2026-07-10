@@ -276,7 +276,7 @@ def test_migrate_legacy_localappdata(monkeypatch, tmp_path):
 def test_migrate_legacy_exe_dir(monkeypatch, tmp_path):
     """If the user had state at ``<exe-dir>/tawreed`` (the broken
     v0.0.1 frozen-build behaviour), init_db() should copy it into
-    ``~/.tawreed/`` and then remove the now-empty legacy tree."""
+    ``~/.tawreed/`` and preserve the legacy tree as a recovery source."""
     import sqlite3
 
     legacy = tmp_path / "dist" / "Tawreed" / "tawreed"
@@ -311,10 +311,39 @@ def test_migrate_legacy_exe_dir(monkeypatch, tmp_path):
     new_tawreed = new_home / ".tawreed"
     assert (new_tawreed / "config.json").exists()
     assert (new_tawreed / "db" / "tawreed.db").exists()
-    # The legacy <exe-dir>/tawreed tree was cleaned up.
-    assert not legacy.exists(), (
-        f"Legacy tree at {legacy} was not removed — should be cleaned after migration"
+    # Copying is deliberately non-destructive. The legacy source remains
+    # available until the user explicitly removes it.
+    assert legacy.exists()
+    assert real_db.exists()
+
+
+def test_cleanup_preserves_unmigrated_legacy_files(monkeypatch, tmp_path):
+    """A destination conflict must never delete the legacy source."""
+    legacy = tmp_path / "fake_localappdata" / "Tawreed"
+    legacy_output = legacy / "outputs" / "run.xlsx"
+    legacy_output.parent.mkdir(parents=True)
+    legacy_output.write_bytes(b"legacy-version")
+
+    new_home = tmp_path / "home"
+    new_output = new_home / ".tawreed" / "outputs" / "run.xlsx"
+    new_output.parent.mkdir(parents=True)
+    new_output.write_bytes(b"current-version")
+
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(new_home) if p == "~" else p)
+    monkeypatch.setattr(
+        os.environ,
+        "get",
+        lambda k, d=None: str(legacy.parent) if k == "LOCALAPPDATA" else os.environ.get(k, d),
     )
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    import importlib
+
+    importlib.reload(db)
+    db.init_db()
+
+    assert legacy_output.read_bytes() == b"legacy-version"
+    assert new_output.read_bytes() == b"current-version"
 
 
 def test_migrate_skips_when_no_legacy(monkeypatch, tmp_path):

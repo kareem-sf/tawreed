@@ -94,3 +94,22 @@ def test_clear_all_api_keys_clears_fallback_file():
 
         # Result should be count of keyring deletions + fallback keys
         assert result == len(expected_providers) + 2
+
+
+def test_clear_all_api_keys_reports_real_keyring_failure():
+    """Reset must not claim success while an existing credential remains."""
+    with (
+        patch("core.db._keyring_is_usable", return_value=True),
+        patch("core.db._load_keyring") as mock_load_keyring,
+        patch("core.db._load_fallback_file", return_value={}),
+        patch("os.path.exists", return_value=False),
+    ):
+        mock_keyring = MagicMock()
+        mock_keyring.delete_password.side_effect = RuntimeError("backend locked")
+        mock_keyring.get_password.return_value = "still-present"
+        mock_load_keyring.return_value = mock_keyring
+
+        import pytest
+
+        with pytest.raises(RuntimeError, match="Could not remove all stored API keys"):
+            clear_all_api_keys()

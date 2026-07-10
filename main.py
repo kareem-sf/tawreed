@@ -76,7 +76,13 @@ def _run() -> int:
     # the rotating file handler never comes up. The hook is
     # idempotent and chained with our GUI ``_excepthook`` below.
     install_crash_hook()
-    sys.excepthook = _excepthook
+    crash_file_hook = sys.excepthook
+
+    def combined_excepthook(exc_type, exc_value, exc_tb):
+        crash_file_hook(exc_type, exc_value, exc_tb)
+        _excepthook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = combined_excepthook
 
     # 0. Logging — must be the very first thing, so any failure in
     # db.init_db() or single-instance handshake ends up in the log

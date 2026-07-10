@@ -9,6 +9,7 @@ import openpyxl
 
 from core.excel import write_excel
 from core.i18n import get_i18n
+from tawreed_app import __version__
 
 
 def test_cover_sheet_uses_english_when_no_i18n():
@@ -43,7 +44,7 @@ def test_cover_sheet_uses_english_when_no_i18n():
         assert ws_cover["A3"].value == "Project Name"
         assert ws_cover["A4"].value == "Date"
         assert ws_cover["A5"].value == "Application"
-        assert ws_cover["B5"].value == "Tawreed BOQ Processor v0.0.1"
+        assert ws_cover["B5"].value == f"Tawreed BOQ Processor v{__version__}"
 
 
 def test_cover_sheet_uses_arabic_when_i18n_provided():
@@ -82,7 +83,7 @@ def test_cover_sheet_uses_arabic_when_i18n_provided():
         assert ws_cover["A3"].value == "اسم المشروع"
         assert ws_cover["A4"].value == "التاريخ"
         assert ws_cover["A5"].value == "التطبيق"
-        assert ws_cover["B5"].value == "معالج جدول الكميات توريد v0.0.1"
+        assert ws_cover["B5"].value == f"معالج جدول الكميات توريد v{__version__}"
 
 
 def test_cover_sheet_uses_english_when_i18n_is_english():
@@ -121,7 +122,7 @@ def test_cover_sheet_uses_english_when_i18n_is_english():
         assert ws_cover["A3"].value == "Project Name"
         assert ws_cover["A4"].value == "Date"
         assert ws_cover["A5"].value == "Application"
-        assert ws_cover["B5"].value == "Tawreed BOQ Processor v0.0.1"
+        assert ws_cover["B5"].value == f"Tawreed BOQ Processor v{__version__}"
 
 
 def test_cover_sheet_project_name_and_date_preserved():

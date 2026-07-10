@@ -24,14 +24,14 @@ from pathlib import Path
 def _project_root() -> Path:
     """Return the directory holding the bundled data files.
 
-    - In dev (``python main.py``): the directory containing ``main.py``.
+    - In dev / wheel installs: the ``gui`` package directory.
     - In the PyInstaller onedir build: the ``_internal/`` directory
       next to the EXE, which is where the bootloader extracts data.
     """
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         return Path(meipass)
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent
 
 
 ROOT = _project_root()

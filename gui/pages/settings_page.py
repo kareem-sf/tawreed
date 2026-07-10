@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -52,6 +52,7 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self._i18n = get_i18n()
         self._loading = False  # guard against signal loops while populating UI
+        self._model_request_serial = 0
         self._build_ui()
         self._load_settings()
 
@@ -225,6 +226,9 @@ class SettingsPage(QWidget):
             self._populate_models_for_provider(provider, select_model=settings.get("model", ""))
             self.base_url_input.setText(settings.get("base_url", ""))
             self.api_key_input.setText(settings.get("api_key", ""))
+            self._apply_provider_controls(provider)
+            if get_provider_config(provider).get("transport") == "codex_cli":
+                self.base_url_input.clear()
 
             # Load language setting
             language = settings.get("language", "en")
@@ -239,6 +243,8 @@ class SettingsPage(QWidget):
                 self.theme_combo.setCurrentIndex(theme_idx)
         finally:
             self._loading = False
+        if get_provider_config(provider).get("transport") == "codex_cli":
+            QTimer.singleShot(0, self._refresh_models)
 
     def _save_settings(self) -> None:
         provider = self.provider_combo.currentData() or "OpenAI"
@@ -258,7 +264,7 @@ class SettingsPage(QWidget):
                 ),
             )
             return
-        if not api_key:
+        if cfg.get("requires_api_key", True) and not api_key:
             QMessageBox.warning(
                 self,
                 self._i18n.tr("api_key_required_title"),
@@ -332,20 +338,48 @@ class SettingsPage(QWidget):
     def _on_provider_changed(self, _index: int) -> None:
         if self._loading:
             return
+        self._model_request_serial += 1
         provider = self.provider_combo.currentData() or "OpenAI"
         self._populate_models_for_provider(provider, select_model="")
         cfg = get_provider_config(provider)
+        # Credentials are provider-scoped. Never carry the visible key from
+        # the previously selected provider into the new provider's save.
+        self.api_key_input.setText(db.get_api_key(provider))
         if cfg.get("base_url"):
             self.base_url_input.setText(cfg["base_url"])
+        elif cfg.get("transport") == "codex_cli":
+            self.base_url_input.clear()
         self.base_url_input.setPlaceholderText(
             "https://..." if cfg.get("requires_base_url") else cfg.get("base_url", "")
         )
         self.provider_hint.setText(cfg.get("hint", ""))
+        self._apply_provider_controls(provider)
         self.status_label.setText("")
+        if cfg.get("transport") == "codex_cli":
+            QTimer.singleShot(0, self._refresh_models)
+
+    def _apply_provider_controls(self, provider: str) -> None:
+        cfg = get_provider_config(provider)
+        requires_key = cfg.get("requires_api_key", True)
+        is_codex = cfg.get("transport") == "codex_cli"
+        self.api_key_input.setEnabled(requires_key)
+        self.show_key_cb.setEnabled(requires_key)
+        self.base_url_input.setEnabled(not is_codex)
+        self.refresh_btn.setEnabled(True)
+        self.model_combo.setEditable(not is_codex)
+        if not requires_key:
+            self.api_key_input.clear()
+            self.api_key_input.setPlaceholderText("Uses the existing Codex CLI login")
+        else:
+            self.api_key_input.setPlaceholderText(self._i18n.tr("api_key_placeholder"))
 
     def _populate_models_for_provider(self, provider: str, select_model: str = "") -> None:
         cfg = get_provider_config(provider)
         models = list(cfg.get("models", []))
+        is_codex = cfg.get("transport") == "codex_cli"
+        if is_codex and select_model == "default":
+            # "default" was a legacy hard-coded placeholder, not a model ID.
+            select_model = ""
         self.model_combo.blockSignals(True)
         try:
             self.model_combo.clear()
@@ -364,7 +398,9 @@ class SettingsPage(QWidget):
         finally:
             self.model_combo.blockSignals(False)
         # Show a different pill depending on the provider shape.
-        if not models:
+        if is_codex:
+            self.model_status.set_state("running", "Fetching models from Codex…")
+        elif not models:
             # No curated list (OpenAI Compatible). The user is
             # expected to type a model name manually.
             self.model_status.set_state("idle", "Type a model name")
@@ -392,7 +428,7 @@ class SettingsPage(QWidget):
                 ),
             )
             return
-        if not api_key:
+        if cfg.get("requires_api_key", True) and not api_key:
             QMessageBox.warning(
                 self,
                 self._i18n.tr("api_key_required_title"),
@@ -402,6 +438,10 @@ class SettingsPage(QWidget):
 
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText(self._i18n.tr("fetching_models"))
+        self._model_request_serial += 1
+        request_serial = self._model_request_serial
+        requested_provider = provider
+        previous_model = self.model_combo.currentText().strip()
         self.model_status.set_state("running", "Fetching live models…")
 
         try:
@@ -413,6 +453,11 @@ class SettingsPage(QWidget):
         task = loop.create_task(fetch_models(provider, api_key=api_key, base_url=base_url))
 
         def on_done(future):
+            if (
+                request_serial != self._model_request_serial
+                or (self.provider_combo.currentData() or "OpenAI") != requested_provider
+            ):
+                return
             self.refresh_btn.setEnabled(True)
             self.refresh_btn.setText(self._i18n.tr("refresh_models_button_text"))
             try:
@@ -421,21 +466,37 @@ class SettingsPage(QWidget):
                 self.model_status.set_state("error", f"{self._i18n.tr('failed')}: {e}")
                 return
 
-            self.model_combo.blockSignals(True)
-            try:
-                self.model_combo.clear()
-                self.model_combo.addItems(result.models)
-            finally:
-                self.model_combo.blockSignals(False)
-
-            if result.source == "live":
-                self.model_status.set_state("success", f"Live list — {len(result.models)} models")
+            if result.source == "live" and result.models:
+                self.model_combo.blockSignals(True)
+                try:
+                    self.model_combo.clear()
+                    self.model_combo.addItems(result.models)
+                    target = (
+                        previous_model
+                        if previous_model in result.models and previous_model != "default"
+                        else result.default_model
+                    )
+                    if target:
+                        index = self.model_combo.findText(target)
+                        if index >= 0:
+                            self.model_combo.setCurrentIndex(index)
+                finally:
+                    self.model_combo.blockSignals(False)
+                if requested_provider == "Codex":
+                    self.model_status.set_state(
+                        "success",
+                        f"Live from Codex — {len(result.models)} models • ChatGPT login",
+                    )
+                else:
+                    self.model_status.set_state(
+                        "success", f"Live list — {len(result.models)} models"
+                    )
             elif result.source == "manual":
                 self.model_status.set_state("idle", "Type a model name")
             else:
                 self.model_status.set_state(
-                    "idle",
-                    f"Curated list — {result.error or 'live fetch failed'}",
+                    "error" if requested_provider == "Codex" else "warning",
+                    result.error or "Live model fetch failed",
                 )
 
         task.add_done_callback(on_done)
@@ -456,7 +517,7 @@ class SettingsPage(QWidget):
                 self._i18n.tr("test_base_url_required").format(provider=cfg.get("label", provider)),
             )
             return
-        if not api_key:
+        if cfg.get("requires_api_key", True) and not api_key:
             QMessageBox.warning(
                 self,
                 self._i18n.tr("api_key_required_title"),
@@ -487,7 +548,7 @@ class SettingsPage(QWidget):
             self.test_btn.setEnabled(True)
             self.test_btn.setText(self._i18n.tr("test_connection_button_text"))
             try:
-                success = future.result()
+                result = future.result()
             except Exception as e:
                 self.status_label.setText(f"{self._i18n.tr('error')}: {e}")
                 QMessageBox.critical(
@@ -496,19 +557,20 @@ class SettingsPage(QWidget):
                     f"{self._i18n.tr('test_failed_message')}:\n{e}",
                 )
                 return
-            if success:
+            if result:
                 self.status_label.setObjectName("statusLabelSuccess")
-                self.status_label.setText(self._i18n.tr("connection_successful_status"))
-                QMessageBox.information(
-                    self, self._i18n.tr("success_title"), self._i18n.tr("connection_successful")
-                )
+                self.status_label.setText(result.message)
+                QMessageBox.information(self, self._i18n.tr("success_title"), result.message)
             else:
-                self.status_label.setText(self._i18n.tr("connection_failed_status"))
+                self.status_label.setObjectName("statusLabel")
+                self.status_label.setText(result.message)
                 QMessageBox.critical(
                     self,
                     self._i18n.tr("connection_failed_title"),
-                    self._i18n.tr("connection_failed_message"),
+                    result.message,
                 )
+            self.status_label.style().unpolish(self.status_label)
+            self.status_label.style().polish(self.status_label)
 
         task.add_done_callback(on_done)
 

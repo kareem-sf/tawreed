@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from core import model_catalog
+from core.codex_connector import CodexConnectorError, CodexModel, CodexModelCatalog
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -118,6 +119,43 @@ async def test_fetch_google_strips_models_prefix(monkeypatch):
     assert result.source == "live"
     assert "gemini-1.5-pro" in result.models
     assert "gemini-1.5-flash" in result.models
+
+
+@pytest.mark.asyncio
+async def test_fetch_codex_models_is_live_and_not_hardcoded(monkeypatch):
+    monkeypatch.setattr(
+        model_catalog,
+        "fetch_codex_models",
+        lambda: CodexModelCatalog(
+            models=[
+                CodexModel("gpt-live-default", "GPT Live Default", True),
+                CodexModel("gpt-live-fast", "GPT Live Fast", False),
+            ],
+            default_model="gpt-live-default",
+            auth_type="chatgpt",
+        ),
+    )
+
+    result = await model_catalog.fetch_models("Codex")
+
+    assert result.source == "live"
+    assert result.models == ["gpt-live-default", "gpt-live-fast"]
+    assert result.default_model == "gpt-live-default"
+    assert "default" not in result.models
+
+
+@pytest.mark.asyncio
+async def test_fetch_codex_models_surfaces_connector_error(monkeypatch):
+    def fail():
+        raise CodexConnectorError("Run 'codex login' and choose ChatGPT.")
+
+    monkeypatch.setattr(model_catalog, "fetch_codex_models", fail)
+
+    result = await model_catalog.fetch_models("Codex")
+
+    assert result.source == "error"
+    assert result.models == []
+    assert "ChatGPT" in result.error
 
 
 # ---------------------------------------------------------------------------
