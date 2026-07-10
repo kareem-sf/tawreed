@@ -72,7 +72,9 @@ jobs:
           python -m ruff format --check .
 
       - name: Test
-        run: pytest -q
+        # A GUI/subprocess regression must fail with the exact hanging test
+        # instead of consuming a runner indefinitely.
+        run: pytest -vv --timeout=90 --timeout-method=thread
 
       # Security: scan for known vulnerabilities in dependencies
       - name: Dependency Security Scan
