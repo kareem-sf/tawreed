@@ -37,7 +37,7 @@ repos:
         # repo. Belt-and-braces for the gitleaks hook below.
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.7
+    rev: v0.15.20
     hooks:
       - id: ruff
         # `ruff check` — the fast Python linter that replaces
