@@ -1,86 +1,37 @@
-# Install
+# Install Tawreed 0.0.1
+
+Tawreed is portable. Download one file from the
+[v0.0.1 release](https://github.com/sfkareem/tawreed/releases/tag/v0.0.1).
+Do not unzip anything and do not run an installer.
 
 ## Windows
 
-Download `tawreed-windows.zip` from the [Releases page](https://github.com/sfkareem/tawreed/releases),
-unzip, and double-click `Tawreed.exe`.
-
-### SmartScreen
-
-The EXE is **not code-signed** (signing certificates are expensive
-and the project is solo-maintained). On first launch, Windows
-SmartScreen will show a blue dialog:
-
-> Windows protected your PC.
-> Microsoft Defender SmartScreen prevented an unrecognised app
-> from starting. Running this app might put your PC at risk.
-
-To run Tawreed anyway:
-
-1. Click **More info**.
-2. Click **Run anyway**.
-
-You only need to do this once — SmartScreen remembers the decision
-per-user, per-file-hash. If you upgrade Tawreed, the hash changes
-and you'll see the dialog again.
-
-### Antivirus false positives
-
-Some antivirus products flag PyInstaller binaries as "Suspicious"
-or "Trojan.Generic" because of how the bootloader unpacks itself.
-This is a known false-positive pattern across all PyInstaller apps.
-If your AV deletes the EXE, add an exception for the `Tawreed\`
-folder.
+Download `Tawreed-windows.exe` and double-click it. The file is not code-signed,
+so Windows SmartScreen may show **Windows protected your PC**. Choose **More
+info**, then **Run anyway**.
 
 ## macOS
 
-Download `tawreed-macos.zip`, unzip, and drag `Tawreed.app` to
-`/Applications/`.
-
-### Gatekeeper
-
-On first launch, macOS will show:
-
-> "Tawreed" cannot be opened because the developer cannot be verified.
-
-To open anyway:
-
-1. Open **System Settings** → **Privacy & Security**.
-2. Scroll to the bottom — you'll see a message about Tawreed
-   being blocked.
-3. Click **Open Anyway**.
-
-Or, in a terminal:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Tawreed.app
-```
+Download `Tawreed-macos`, make it executable if required, and open it. If
+Gatekeeper blocks the unsigned file, right-click it and choose **Open**.
 
 ## Linux
 
-Download `tawreed-linux.tar.gz`, extract, and run `./Tawreed` from
-the extracted folder.
-
-### Dependencies
-
-Some distros require explicit Qt dependencies:
+Download `Tawreed-linux`, then run:
 
 ```bash
-# Debian / Ubuntu
-sudo apt install python3-pyqt6 libxcb-cursor0
-
-# Fedora
-sudo dnf install python3-pyqt6 libxcb
-
-# Arch
-sudo pacman -S python-pyqt6 libxcb
+chmod +x Tawreed-linux
+./Tawreed-linux
 ```
 
-### Wayland
-
-Tawreed uses Qt's XCB platform plugin by default. On Wayland-only
-sessions, set `QT_QPA_PLATFORM=wayland` before launching:
+Qt requires the normal desktop EGL/GL/XCB libraries. On Debian/Ubuntu:
 
 ```bash
-QT_QPA_PLATFORM=wayland ./Tawreed
+sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
 ```
+
+## Codex connection
+
+Install the official Codex application/CLI, run `codex login`, and choose
+ChatGPT. Tawreed then fetches the models available to that account. No API key
+is needed for the Codex provider.

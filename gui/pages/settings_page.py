@@ -1,274 +1,347 @@
-"""Settings page — provider, model, base URL, API key, test, save, reset.
-
-Senior design choices:
-- Card-based layout (one Card per logical region) instead of one
-  QFormLayout stretched across the page.
-- Live model fetch from the provider's own /models endpoint, with
-  a curated-list fallback so the dropdown is never empty.
-- "Reset everything" button at the bottom — clears config, history,
-  outputs, and window state in one shot, with a typed confirmation
-  to prevent misfires.
-- API key field is masked but has a "show" toggle so the user can
-  verify what they typed without re-typing it.
-"""
+"""Staged, provider-aware Settings surface."""
 
 from __future__ import annotations
 
 import asyncio
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
+    QScrollArea,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from core import db
-from core import reset as reset_mod
-from core.ai import (
-    get_provider_config,
-    get_provider_names,
-    is_valid_provider,
-)
-from core.i18n import SUPPORTED_LANGUAGES, get_i18n
+from core.ai import PROVIDERS, get_provider_config
+from core.i18n import get_i18n
 from core.model_catalog import fetch_models
-from gui.widgets import Card, PageHeader, StatusPill
+from core.reset import reset_all
+from gui.styles import load_stylesheet, set_theme
 from gui.worker import check_connection
 
 
 class SettingsPage(QWidget):
-    """Provider/model/credentials configuration."""
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("pageHost")
         self._i18n = get_i18n()
-        self._loading = False  # guard against signal loops while populating UI
-        self._model_request_serial = 0
+        self._loading = False
+        self._model_task: asyncio.Task | None = None
+        self._model_status_kind = "available"
+        self._model_count = 0
         self._build_ui()
         self._load_settings()
 
-    # ----- UI construction ------------------------------------------------
-
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
+        canvas = QWidget(scroll)
+        canvas.setObjectName("pageCanvas")
+        layout = QVBoxLayout(canvas)
+        layout.setContentsMargins(56, 42, 56, 42)
+        layout.setSpacing(20)
+        scroll.setWidget(canvas)
 
-        layout.addWidget(
-            PageHeader(
-                self._i18n.tr("settings_page_title"),
-                self._i18n.tr("settings_page_subtitle"),
-            )
-        )
+        self.title = QLabel(canvas)
+        self.title.setObjectName("pageTitle")
+        self.subtitle = QLabel(canvas)
+        self.subtitle.setObjectName("pageSubtitle")
+        self.subtitle.setWordWrap(True)
+        layout.addWidget(self.title)
+        layout.addWidget(self.subtitle)
 
-        # ----- Provider card -----
-        provider_card = Card(self._i18n.tr("provider_card_title"))
-        self.provider_combo = QComboBox()
-        for name in get_provider_names():
-            cfg = get_provider_config(name)
-            self.provider_combo.addItem(cfg.get("label", name), userData=name)
-        self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        provider_card.addWidget(self.provider_combo)
-
-        self.provider_hint = QLabel("")
-        self.provider_hint.setObjectName("hint")
-        self.provider_hint.setWordWrap(True)
-        provider_card.addWidget(self.provider_hint)
-        layout.addWidget(provider_card)
-
-        # ----- Model card -----
-        model_card = Card(self._i18n.tr("model_card_title"))
-        model_row = QHBoxLayout()
-        model_row.setSpacing(8)
-        self.model_combo = QComboBox()
-        self.model_combo.setEditable(True)  # custom OpenAI-Compatible lets user type
-        self.model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.refresh_btn = QPushButton(self._i18n.tr("refresh_models_button"))
-        self.refresh_btn.setToolTip(self._i18n.tr("refresh_models_tooltip"))
-        self.refresh_btn.clicked.connect(self._refresh_models)
-        model_row.addWidget(self.model_combo, stretch=1)
-        model_row.addWidget(self.refresh_btn)
-        model_card.addLayout(model_row)
-
-        self.model_status = StatusPill()
-        self.model_status.set_state("idle", "Curated list")
-        model_card.addWidget(self.model_status)
-        layout.addWidget(model_card)
-
-        # ----- Language card -----
-        language_card = Card(self._i18n.tr("language_card_title"))
-        self.language_combo = QComboBox()
-        # Add language options with display names
-        language_display = {
-            "en": "English",
-            "ar": "العربية",
-        }
-        for lang_code in SUPPORTED_LANGUAGES:
-            self.language_combo.addItem(
-                language_display.get(lang_code, lang_code), userData=lang_code
-            )
-        self.language_combo.currentIndexChanged.connect(self._on_language_changed)
-        language_card.addWidget(self.language_combo)
-
-        self.language_hint = QLabel(self._i18n.tr("language_hint"))
-        self.language_hint.setObjectName("hint")
-        self.language_hint.setWordWrap(True)
-        language_card.addWidget(self.language_hint)
-        layout.addWidget(language_card)
-
-        # ----- Theme card -----
-        theme_card = Card(self._i18n.tr("theme_card_title"))
-        self.theme_combo = QComboBox()
-        theme_display = {
-            "dark": "Dark",
-            "light": "Light",
-        }
-        for theme_code in ["dark", "light"]:
-            self.theme_combo.addItem(theme_display.get(theme_code, theme_code), userData=theme_code)
-        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        theme_card.addWidget(self.theme_combo)
-
-        self.theme_hint = QLabel(self._i18n.tr("theme_hint"))
-        self.theme_hint.setObjectName("hint")
-        self.theme_hint.setWordWrap(True)
-        theme_card.addWidget(self.theme_hint)
-        layout.addWidget(theme_card)
-
-        # ----- Connection card -----
-        conn_card = Card(self._i18n.tr("connection_card_title"))
-        form = QFormLayout()
-        form.setSpacing(10)
-        form.setLabelAlignment(Qt.AlignRight)
-
-        self.base_url_input = QLineEdit()
-        self.base_url_input.setPlaceholderText(self._i18n.tr("base_url_placeholder"))
-        form.addRow(self._i18n.tr("base_url_label"), self.base_url_input)
-
-        self.api_key_input = QLineEdit()
+        connection, connection_layout = self._section(canvas)
+        self.connection_heading = self._heading(connection)
+        connection_layout.addWidget(self.connection_heading)
+        self.connection_form = QFormLayout()
+        self.connection_form.setHorizontalSpacing(24)
+        self.connection_form.setVerticalSpacing(12)
+        self.provider_combo = QComboBox(connection)
+        for provider, config in PROVIDERS.items():
+            self.provider_combo.addItem(config.get("label", provider), provider)
+        self.provider_combo.currentIndexChanged.connect(self._provider_changed)
+        self.provider_label = QLabel(connection)
+        self.provider_label.setBuddy(self.provider_combo)
+        self.connection_form.addRow(self.provider_label, self.provider_combo)
+        self.connection_status = QLabel(connection)
+        self.connection_status.setObjectName("connectionStatus")
+        self.connection_form.addRow("", self.connection_status)
+        self.api_key_input = QLineEdit(connection)
         self.api_key_input.setEchoMode(QLineEdit.Password)
-        self.api_key_input.setPlaceholderText(self._i18n.tr("api_key_placeholder"))
-        form.addRow(self._i18n.tr("api_key_label"), self.api_key_input)
+        self.api_key_label = QLabel(connection)
+        self.api_key_label.setBuddy(self.api_key_input)
+        self.connection_form.addRow(self.api_key_label, self.api_key_input)
+        self.base_url_input = QLineEdit(connection)
+        self.base_url_label = QLabel(connection)
+        self.base_url_label.setBuddy(self.base_url_input)
+        self.connection_form.addRow(self.base_url_label, self.base_url_input)
+        self.test_button = QPushButton(connection)
+        self.test_button.setObjectName("secondaryButton")
+        self.test_button.clicked.connect(self._test_connection)
+        self.connection_form.addRow("", self.test_button)
+        connection_layout.addLayout(self.connection_form)
+        layout.addWidget(connection)
 
-        self.show_key_cb = QCheckBox(self._i18n.tr("show_api_key_checkbox"))
-        self.show_key_cb.toggled.connect(
-            lambda on: self.api_key_input.setEchoMode(
-                QLineEdit.Normal if on else QLineEdit.Password
-            )
-        )
-        form.addRow("", self.show_key_cb)
+        model_section, model_layout = self._section(canvas)
+        self.model_heading = self._heading(model_section)
+        model_layout.addWidget(self.model_heading)
+        model_row = QHBoxLayout()
+        self.model_combo = QComboBox(model_section)
+        self.model_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.refresh_models_button = QPushButton(model_section)
+        self.refresh_models_button.setObjectName("secondaryButton")
+        self.refresh_models_button.clicked.connect(self._refresh_models)
+        model_row.addWidget(self.model_combo, 1)
+        model_row.addWidget(self.refresh_models_button)
+        model_layout.addLayout(model_row)
+        self.model_status = QLabel(model_section)
+        self.model_status.setObjectName("hintText")
+        self.model_status.setWordWrap(True)
+        model_layout.addWidget(self.model_status)
+        layout.addWidget(model_section)
 
-        conn_card.addLayout(form)
+        appearance, appearance_layout = self._section(canvas)
+        self.appearance_heading = self._heading(appearance)
+        appearance_layout.addWidget(self.appearance_heading)
+        appearance_form = QFormLayout()
+        appearance_form.setHorizontalSpacing(24)
+        appearance_form.setVerticalSpacing(12)
+        self.theme_combo = QComboBox(appearance)
+        self.theme_combo.addItem("System", "system")
+        self.theme_combo.addItem("Light", "light")
+        self.theme_combo.addItem("Dark", "dark")
+        self.theme_label = QLabel(appearance)
+        self.theme_label.setBuddy(self.theme_combo)
+        appearance_form.addRow(self.theme_label, self.theme_combo)
+        self.language_combo = QComboBox(appearance)
+        self.language_combo.addItem("English", "en")
+        self.language_combo.addItem("العربية", "ar")
+        self.language_label = QLabel(appearance)
+        self.language_label.setBuddy(self.language_combo)
+        appearance_form.addRow(self.language_label, self.language_combo)
+        appearance_layout.addLayout(appearance_form)
+        layout.addWidget(appearance)
 
-        action_row = QHBoxLayout()
-        action_row.setSpacing(10)
-        self.test_btn = QPushButton(self._i18n.tr("test_connection"))
-        self.test_btn.clicked.connect(self._test_connection)
-        self.save_btn = QPushButton(self._i18n.tr("save_settings"))
-        self.save_btn.setObjectName("primaryBtn")
-        self.save_btn.clicked.connect(self._save_settings)
-        action_row.addWidget(self.test_btn)
-        action_row.addStretch()
-        action_row.addWidget(self.save_btn)
-        conn_card.addLayout(action_row)
-
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setWordWrap(True)
-        conn_card.addWidget(self.status_label)
-        layout.addWidget(conn_card)
-
-        # ----- Danger zone (reset) -----
-        danger_card = Card(self._i18n.tr("danger_zone_title"))
-        danger_row = QHBoxLayout()
-        danger_row.setSpacing(12)
-        warning = QLabel(self._i18n.tr("danger_zone_warning"))
-        warning.setObjectName("hint")
-        warning.setWordWrap(True)
-        danger_row.addWidget(warning, stretch=1)
-        self.reset_btn = QPushButton(self._i18n.tr("reset_everything"))
-        self.reset_btn.setObjectName("dangerBtn")
-        self.reset_btn.clicked.connect(self._confirm_reset)
-        danger_row.addWidget(self.reset_btn)
-        danger_card.addLayout(danger_row)
-        layout.addWidget(danger_card)
-
+        self.data_toggle = QToolButton(canvas)
+        self.data_toggle.setObjectName("disclosureButton")
+        self.data_toggle.setCheckable(True)
+        self.data_toggle.setArrowType(Qt.RightArrow)
+        self.data_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.data_toggle.toggled.connect(self._toggle_data_reset)
+        layout.addWidget(self.data_toggle)
+        self.data_panel = QWidget(canvas)
+        data_layout = QVBoxLayout(self.data_panel)
+        data_layout.setContentsMargins(20, 0, 0, 0)
+        self.data_warning = QLabel(self.data_panel)
+        self.data_warning.setObjectName("warningText")
+        self.data_warning.setWordWrap(True)
+        self.reset_button = QPushButton(self.data_panel)
+        self.reset_button.setObjectName("dangerButton")
+        self.reset_button.clicked.connect(self._reset_everything)
+        data_layout.addWidget(self.data_warning)
+        data_layout.addWidget(self.reset_button, 0, Qt.AlignLeft)
+        self.data_panel.hide()
+        layout.addWidget(self.data_panel)
         layout.addStretch(1)
 
-    # ----- Load / save ----------------------------------------------------
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        self.cancel_button = QPushButton(canvas)
+        self.cancel_button.setObjectName("secondaryButton")
+        self.cancel_button.clicked.connect(self._load_settings)
+        self.apply_button = QPushButton(canvas)
+        self.apply_button.setObjectName("primaryButton")
+        self.apply_button.clicked.connect(self._save_settings)
+        actions.addWidget(self.cancel_button)
+        actions.addWidget(self.apply_button)
+        layout.addLayout(actions)
+        self.retranslate_ui()
+
+    @staticmethod
+    def _section(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
+        section = QWidget(parent)
+        section.setObjectName("settingsSection")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(0, 12, 0, 18)
+        layout.setSpacing(12)
+        return section, layout
+
+    @staticmethod
+    def _heading(parent: QWidget) -> QLabel:
+        heading = QLabel(parent)
+        heading.setObjectName("sectionTitle")
+        return heading
 
     def _load_settings(self) -> None:
-        settings = db.get_settings()
         self._loading = True
         try:
-            provider = settings.get("provider", "OpenAI")
-            if not is_valid_provider(provider):
-                provider = "OpenAI"
-            idx = self.provider_combo.findData(provider)
-            if idx < 0:
-                idx = 0
-            self.provider_combo.setCurrentIndex(idx)
-            # Set the provider hint to match the loaded provider so
-            # the user sees the right guidance on first render (not
-            # only after they pick a different provider).
-            self.provider_hint.setText(get_provider_config(provider).get("hint", ""))
-            # _on_provider_changed populates the model combo; we then
-            # override it with the saved value if the saved model is
-            # no longer in the curated list.
-            self._populate_models_for_provider(provider, select_model=settings.get("model", ""))
-            self.base_url_input.setText(settings.get("base_url", ""))
+            settings = db.get_settings()
+            provider = settings.get("provider", "Codex")
+            index = self.provider_combo.findData(provider)
+            self.provider_combo.setCurrentIndex(index if index >= 0 else 0)
             self.api_key_input.setText(settings.get("api_key", ""))
-            self._apply_provider_controls(provider)
-            if get_provider_config(provider).get("transport") == "codex_cli":
-                self.base_url_input.clear()
-
-            # Load language setting
-            language = settings.get("language", "en")
-            lang_idx = self.language_combo.findData(language)
-            if lang_idx >= 0:
-                self.language_combo.setCurrentIndex(lang_idx)
-
-            # Load theme setting
-            theme = settings.get("theme", "dark")
-            theme_idx = self.theme_combo.findData(theme)
-            if theme_idx >= 0:
-                self.theme_combo.setCurrentIndex(theme_idx)
+            self.base_url_input.setText(settings.get("base_url", ""))
+            self.model_combo.clear()
+            saved_model = settings.get("model_id") or settings.get("model", "")
+            if saved_model:
+                self.model_combo.addItem(saved_model)
+            theme = settings.get("theme", "system")
+            theme_index = self.theme_combo.findData(theme)
+            self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else 0)
+            language_index = self.language_combo.findData(settings.get("language", "en"))
+            self.language_combo.setCurrentIndex(language_index if language_index >= 0 else 0)
         finally:
             self._loading = False
-        if get_provider_config(provider).get("transport") == "codex_cli":
-            QTimer.singleShot(0, self._refresh_models)
+        self._sync_provider_fields()
+        self._refresh_models()
+
+    def _provider_changed(self) -> None:
+        if self._loading:
+            return
+        provider = self.provider_combo.currentData()
+        config = get_provider_config(provider)
+        self.base_url_input.setText(config.get("base_url", ""))
+        self.model_combo.clear()
+        self._sync_provider_fields()
+        self._refresh_models()
+
+    def _sync_provider_fields(self) -> None:
+        provider = self.provider_combo.currentData() or "OpenAI"
+        is_codex = get_provider_config(provider).get("transport") == "codex_cli"
+        self.api_key_label.setVisible(not is_codex)
+        self.api_key_input.setVisible(not is_codex)
+        self.base_url_label.setVisible(not is_codex)
+        self.base_url_input.setVisible(not is_codex)
+        self.model_combo.setEditable(not is_codex)
+        self.connection_status.setText(
+            self._i18n.tr("codex_uses_chatgpt")
+            if is_codex
+            else self._i18n.tr("connection_not_tested")
+        )
+
+    def _refresh_models(self) -> None:
+        if self._model_task and not self._model_task.done():
+            self._model_task.cancel()
+        self.refresh_models_button.setEnabled(False)
+        self._set_model_status("fetching")
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # Widget-only tests and static previews do not install qasync.
+            # Keep the saved model visible and let the user refresh once the
+            # real application event loop is running.
+            self.refresh_models_button.setEnabled(True)
+            self._set_model_status("available")
+            return
+        self._model_task = loop.create_task(self._fetch_models())
+
+    async def _fetch_models(self) -> None:
+        provider = self.provider_combo.currentData() or "OpenAI"
+        saved = self.model_combo.currentText().strip()
+        result = await fetch_models(
+            provider,
+            self.api_key_input.text().strip(),
+            self.base_url_input.text().strip(),
+        )
+        if provider != (self.provider_combo.currentData() or "OpenAI"):
+            return
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        self.model_combo.addItems(result.models)
+        target = saved or result.default_model
+        if target:
+            index = self.model_combo.findText(target)
+            if index < 0 and self.model_combo.isEditable():
+                self.model_combo.addItem(target)
+                index = self.model_combo.findText(target)
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+        self.model_combo.blockSignals(False)
+        self.refresh_models_button.setEnabled(True)
+        if result.source == "live":
+            self._set_model_status("live", len(result.models))
+        else:
+            self._set_model_status("unavailable")
+
+    def _set_model_status(self, kind: str, count: int = 0) -> None:
+        self._model_status_kind = kind
+        self._model_count = count
+        self._render_model_status()
+
+    def _render_model_status(self) -> None:
+        if self._model_status_kind == "fetching":
+            text = self._i18n.tr("fetching_models")
+        elif self._model_status_kind == "live":
+            text = self._i18n.tr("live_models_count").format(count=self._model_count)
+        elif self._model_status_kind == "unavailable":
+            text = self._i18n.tr("models_unavailable")
+        else:
+            text = self._i18n.tr("models_refresh_available")
+        self.model_status.setText(text)
+        self.model_status.setAccessibleName(text)
+
+    def _test_connection(self) -> None:
+        self.test_button.setEnabled(False)
+        self.connection_status.setText(self._i18n.tr("testing_connection_status"))
+        asyncio.ensure_future(self._run_connection_test())
+
+    async def _run_connection_test(self) -> None:
+        result = await asyncio.to_thread(
+            check_connection,
+            self.provider_combo.currentData() or "OpenAI",
+            self.api_key_input.text().strip(),
+            self.base_url_input.text().strip(),
+            self.model_combo.currentText().strip(),
+        )
+        self.test_button.setEnabled(True)
+        provider = self.provider_combo.currentData() or "OpenAI"
+        if result.success and provider == "Codex":
+            message = self._i18n.tr("codex_connection_success").format(
+                count=self.model_combo.count()
+            )
+        elif result.success:
+            message = self._i18n.tr("connection_successful_status")
+        else:
+            message = self._i18n.tr("connection_failed_status")
+        self.connection_status.setText(message)
+        self.connection_status.setAccessibleName(message)
+        self.connection_status.setProperty("state", "success" if result.success else "error")
+        self.connection_status.style().unpolish(self.connection_status)
+        self.connection_status.style().polish(self.connection_status)
 
     def _save_settings(self) -> None:
         provider = self.provider_combo.currentData() or "OpenAI"
+        config = get_provider_config(provider)
         model = self.model_combo.currentText().strip()
-        base_url = self.base_url_input.text().strip()
         api_key = self.api_key_input.text().strip()
-        language = self.language_combo.currentData() or "en"
-        theme = self.theme_combo.currentData() or "dark"
-
-        cfg = get_provider_config(provider)
-        if cfg.get("requires_base_url") and not base_url:
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("base_url_required_title"),
-                self._i18n.tr("base_url_required_message").format(
-                    provider=cfg.get("label", provider)
-                ),
-            )
-            return
-        if cfg.get("requires_api_key", True) and not api_key:
+        base_url = self.base_url_input.text().strip()
+        if config.get("requires_api_key", True) and not api_key:
             QMessageBox.warning(
                 self,
                 self._i18n.tr("api_key_required_title"),
                 self._i18n.tr("api_key_required_message"),
+            )
+            return
+        if config.get("requires_base_url") and not base_url:
+            QMessageBox.warning(
+                self,
+                self._i18n.tr("base_url_required_title"),
+                self._i18n.tr("base_url_required_message").format(provider=provider),
             )
             return
         if not model:
@@ -276,347 +349,73 @@ class SettingsPage(QWidget):
                 self, self._i18n.tr("model_required_title"), self._i18n.tr("model_required_message")
             )
             return
-
-        payload = {
-            "provider": provider,
-            "api_key": api_key,
-            "model": model,
-            "base_url": base_url,
-            "language": language,
-            "theme": theme,
-        }
-        try:
-            db.save_settings(payload)
-            # Update the global i18n instance to reflect the new language
-            i18n = get_i18n()
-            i18n.set_language(language)
-            # Update the theme
-            from gui.styles import load_stylesheet, set_theme
-
-            set_theme(theme)
-            # Re-apply stylesheet to main window if available
-            for widget in QApplication.topLevelWidgets():
-                widget.setStyleSheet(load_stylesheet())
-                break
-        except Exception as e:
-            QMessageBox.critical(
-                self, self._i18n.tr("save_failed"), f"{self._i18n.tr('save_failed')}:\n{e}"
-            )
-            return
-        self.status_label.setObjectName("statusLabelSuccess")
-        self.status_label.setText(self._i18n.tr("settings_saved"))
-        # Re-apply the style for the new objectName.
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
-
-    def _on_language_changed(self, _index: int) -> None:
-        """Handle language dropdown change - update i18n immediately."""
-        if self._loading:
-            return
         language = self.language_combo.currentData() or "en"
-        i18n = get_i18n()
-        i18n.set_language(language)
+        theme = self.theme_combo.currentData() or "system"
+        db.save_settings(
+            {
+                "provider": provider,
+                "api_key": api_key,
+                "model": model,
+                "model_id": model,
+                "base_url": base_url,
+                "language": language,
+                "theme": theme,
+            }
+        )
+        self._i18n.set_language(language)
+        set_theme(theme)
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(load_stylesheet())
+        self.connection_status.setText(self._i18n.tr("settings_applied"))
+
+    def _toggle_data_reset(self, checked: bool) -> None:
+        self.data_toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        self.data_panel.setVisible(checked)
+
+    def _reset_everything(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            self._i18n.tr("reset_everything"),
+            self._i18n.tr("reset_confirm"),
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        report = reset_all()
+        QMessageBox.information(self, self._i18n.tr("reset_complete"), report.human_summary())
+        self._load_settings()
 
     def _on_theme_changed(self, _index: int) -> None:
-        """Handle theme dropdown change - update theme immediately."""
-        if self._loading:
-            return
-        theme = self.theme_combo.currentData() or "dark"
-        from gui.styles import load_stylesheet, set_theme
+        """Compatibility hook retained for older tests; settings remain staged."""
 
-        set_theme(theme)
-        # Re-apply stylesheet to main window if available
-        from gui.main_window import MainWindow
-
-        for widget in QApplication.topLevelWidgets():
-            if isinstance(widget, MainWindow):
-                widget.setStyleSheet(load_stylesheet())
-                break
-
-    # ----- Provider / model wiring ----------------------------------------
-
-    def _on_provider_changed(self, _index: int) -> None:
-        if self._loading:
-            return
-        self._model_request_serial += 1
-        provider = self.provider_combo.currentData() or "OpenAI"
-        self._populate_models_for_provider(provider, select_model="")
-        cfg = get_provider_config(provider)
-        # Credentials are provider-scoped. Never carry the visible key from
-        # the previously selected provider into the new provider's save.
-        self.api_key_input.setText(db.get_api_key(provider))
-        if cfg.get("base_url"):
-            self.base_url_input.setText(cfg["base_url"])
-        elif cfg.get("transport") == "codex_cli":
-            self.base_url_input.clear()
-        self.base_url_input.setPlaceholderText(
-            "https://..." if cfg.get("requires_base_url") else cfg.get("base_url", "")
-        )
-        self.provider_hint.setText(cfg.get("hint", ""))
-        self._apply_provider_controls(provider)
-        self.status_label.setText("")
-        if cfg.get("transport") == "codex_cli":
-            QTimer.singleShot(0, self._refresh_models)
-
-    def _apply_provider_controls(self, provider: str) -> None:
-        cfg = get_provider_config(provider)
-        requires_key = cfg.get("requires_api_key", True)
-        is_codex = cfg.get("transport") == "codex_cli"
-        self.api_key_input.setEnabled(requires_key)
-        self.show_key_cb.setEnabled(requires_key)
-        self.base_url_input.setEnabled(not is_codex)
-        self.refresh_btn.setEnabled(True)
-        self.model_combo.setEditable(not is_codex)
-        if not requires_key:
-            self.api_key_input.clear()
-            self.api_key_input.setPlaceholderText("Uses the existing Codex CLI login")
-        else:
-            self.api_key_input.setPlaceholderText(self._i18n.tr("api_key_placeholder"))
-
-    def _populate_models_for_provider(self, provider: str, select_model: str = "") -> None:
-        cfg = get_provider_config(provider)
-        models = list(cfg.get("models", []))
-        is_codex = cfg.get("transport") == "codex_cli"
-        if is_codex and select_model == "default":
-            # "default" was a legacy hard-coded placeholder, not a model ID.
-            select_model = ""
-        self.model_combo.blockSignals(True)
-        try:
-            self.model_combo.clear()
-            self.model_combo.addItems(models)
-            target = select_model or cfg.get("default_model", "")
-            if target:
-                idx = self.model_combo.findText(target)
-                if idx >= 0:
-                    self.model_combo.setCurrentIndex(idx)
-                else:
-                    # Add as a custom entry on top so the user's saved
-                    # choice is preserved even if it's no longer in
-                    # the curated list.
-                    self.model_combo.insertItem(0, target)
-                    self.model_combo.setCurrentIndex(0)
-        finally:
-            self.model_combo.blockSignals(False)
-        # Show a different pill depending on the provider shape.
-        if is_codex:
-            self.model_status.set_state("running", "Fetching models from Codex…")
-        elif not models:
-            # No curated list (OpenAI Compatible). The user is
-            # expected to type a model name manually.
-            self.model_status.set_state("idle", "Type a model name")
-        else:
-            # Has a curated list — warn the user that this may be
-            # out of date; encourage them to hit Refresh.
-            self.model_status.set_state(
-                "warning",
-                f"Curated list — {len(models)} model(s); click Refresh for live",
-            )
-
-    def _refresh_models(self) -> None:
-        """Hit the live provider endpoint and replace the dropdown."""
-        provider = self.provider_combo.currentData() or "OpenAI"
-        api_key = self.api_key_input.text().strip()
-        base_url = self.base_url_input.text().strip()
-
-        cfg = get_provider_config(provider)
-        if cfg.get("requires_base_url") and not base_url:
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("base_url_required_title"),
-                self._i18n.tr("refresh_base_url_required").format(
-                    provider=cfg.get("label", provider)
-                ),
-            )
-            return
-        if cfg.get("requires_api_key", True) and not api_key:
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("api_key_required_title"),
-                self._i18n.tr("refresh_api_key_required"),
-            )
-            return
-
-        self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setText(self._i18n.tr("fetching_models"))
-        self._model_request_serial += 1
-        request_serial = self._model_request_serial
-        requested_provider = provider
-        previous_model = self.model_combo.currentText().strip()
-        self.model_status.set_state("running", "Fetching live models…")
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        task = loop.create_task(fetch_models(provider, api_key=api_key, base_url=base_url))
-
-        def on_done(future):
-            if (
-                request_serial != self._model_request_serial
-                or (self.provider_combo.currentData() or "OpenAI") != requested_provider
-            ):
-                return
-            self.refresh_btn.setEnabled(True)
-            self.refresh_btn.setText(self._i18n.tr("refresh_models_button_text"))
-            try:
-                result = future.result()
-            except Exception as e:
-                self.model_status.set_state("error", f"{self._i18n.tr('failed')}: {e}")
-                return
-
-            if result.source == "live" and result.models:
-                self.model_combo.blockSignals(True)
-                try:
-                    self.model_combo.clear()
-                    self.model_combo.addItems(result.models)
-                    target = (
-                        previous_model
-                        if previous_model in result.models and previous_model != "default"
-                        else result.default_model
-                    )
-                    if target:
-                        index = self.model_combo.findText(target)
-                        if index >= 0:
-                            self.model_combo.setCurrentIndex(index)
-                finally:
-                    self.model_combo.blockSignals(False)
-                if requested_provider == "Codex":
-                    self.model_status.set_state(
-                        "success",
-                        f"Live from Codex — {len(result.models)} models • ChatGPT login",
-                    )
-                else:
-                    self.model_status.set_state(
-                        "success", f"Live list — {len(result.models)} models"
-                    )
-            elif result.source == "manual":
-                self.model_status.set_state("idle", "Type a model name")
-            else:
-                self.model_status.set_state(
-                    "error" if requested_provider == "Codex" else "warning",
-                    result.error or "Live model fetch failed",
-                )
-
-        task.add_done_callback(on_done)
-
-    # ----- Test connection ------------------------------------------------
-
-    def _test_connection(self) -> None:
-        provider = self.provider_combo.currentData() or "OpenAI"
-        api_key = self.api_key_input.text().strip()
-        model = self.model_combo.currentText().strip()
-        base_url = self.base_url_input.text().strip()
-
-        cfg = get_provider_config(provider)
-        if cfg.get("requires_base_url") and not base_url:
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("base_url_required_title"),
-                self._i18n.tr("test_base_url_required").format(provider=cfg.get("label", provider)),
-            )
-            return
-        if cfg.get("requires_api_key", True) and not api_key:
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("api_key_required_title"),
-                self._i18n.tr("test_api_key_required"),
-            )
-            return
-        if not model:
-            QMessageBox.warning(
-                self, self._i18n.tr("model_required_title"), self._i18n.tr("test_model_required")
-            )
-            return
-
-        self.test_btn.setEnabled(False)
-        self.test_btn.setText(self._i18n.tr("testing_connection"))
-        self.status_label.setText(self._i18n.tr("testing_connection_status"))
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        task = loop.create_task(
-            asyncio.to_thread(check_connection, provider, api_key, base_url, model)
-        )
-
-        def on_done(future):
-            self.test_btn.setEnabled(True)
-            self.test_btn.setText(self._i18n.tr("test_connection_button_text"))
-            try:
-                result = future.result()
-            except Exception as e:
-                self.status_label.setText(f"{self._i18n.tr('error')}: {e}")
-                QMessageBox.critical(
-                    self,
-                    self._i18n.tr("test_failed_title"),
-                    f"{self._i18n.tr('test_failed_message')}:\n{e}",
-                )
-                return
-            if result:
-                self.status_label.setObjectName("statusLabelSuccess")
-                self.status_label.setText(result.message)
-                QMessageBox.information(self, self._i18n.tr("success_title"), result.message)
-            else:
-                self.status_label.setObjectName("statusLabel")
-                self.status_label.setText(result.message)
-                QMessageBox.critical(
-                    self,
-                    self._i18n.tr("connection_failed_title"),
-                    result.message,
-                )
-            self.status_label.style().unpolish(self.status_label)
-            self.status_label.style().polish(self.status_label)
-
-        task.add_done_callback(on_done)
-
-    # ----- Reset ----------------------------------------------------------
-
-    def _confirm_reset(self) -> None:
-        """Two-step confirmation: dialog → typed phrase."""
-        confirm = QMessageBox(self)
-        confirm.setIcon(QMessageBox.Warning)
-        confirm.setWindowTitle(self._i18n.tr("reset_everything_question"))
-        confirm.setText(self._i18n.tr("reset_confirm_details"))
-        confirm.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
-        confirm.setDefaultButton(QMessageBox.Cancel)
-        if confirm.exec() != QMessageBox.Yes:
-            return
-
-        # Second gate: type the word "RESET" to confirm.
-        from PySide6.QtWidgets import QInputDialog
-
-        phrase, ok = QInputDialog.getText(
-            self,
-            self._i18n.tr("reset_confirm_title"),
-            self._i18n.tr("reset_confirm_body"),
-        )
-        if not ok or phrase.strip() != "RESET":
-            self.status_label.setText(self._i18n.tr("reset_cancelled"))
-            return
-
-        try:
-            report = reset_mod.reset_all()
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                self._i18n.tr("reset_failed_title"),
-                f"{self._i18n.tr('reset_failed_title')}:\n{e}",
-            )
-            return
-
-        # Clear the in-memory form so the user sees the wipe.
-        self.api_key_input.clear()
-        self.base_url_input.clear()
-        self.model_combo.clear()
-        self._populate_models_for_provider(self.provider_combo.currentData() or "OpenAI")
-        self.status_label.setText(self._i18n.tr("reset_complete_message"))
-        QMessageBox.information(
-            self,
-            self._i18n.tr("reset_complete_title"),
-            self._i18n.tr("reset_complete_details").format(details=report.human_summary()),
-        )
+    def retranslate_ui(self) -> None:
+        selected_theme = self.theme_combo.currentData() or "system"
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.clear()
+        self.theme_combo.addItem(self._i18n.tr("theme_system"), "system")
+        self.theme_combo.addItem(self._i18n.tr("theme_light"), "light")
+        self.theme_combo.addItem(self._i18n.tr("theme_dark"), "dark")
+        theme_index = self.theme_combo.findData(selected_theme)
+        self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else 0)
+        self.theme_combo.blockSignals(False)
+        self.title.setText(self._i18n.tr("settings_title"))
+        self.subtitle.setText(self._i18n.tr("settings_subtitle"))
+        self.connection_heading.setText(self._i18n.tr("ai_connection"))
+        self.provider_label.setText(self._i18n.tr("provider_label"))
+        self.api_key_label.setText(self._i18n.tr("api_key_label"))
+        self.base_url_label.setText(self._i18n.tr("base_url_label"))
+        self.test_button.setText(self._i18n.tr("test_connection_button"))
+        self.model_heading.setText(self._i18n.tr("model_label"))
+        self.refresh_models_button.setText(self._i18n.tr("refresh_models_button"))
+        self.appearance_heading.setText(self._i18n.tr("appearance_language"))
+        self.theme_label.setText(self._i18n.tr("theme_label"))
+        self.language_label.setText(self._i18n.tr("language_label"))
+        self.data_toggle.setText(self._i18n.tr("data_reset"))
+        self.data_warning.setText(self._i18n.tr("data_reset_warning"))
+        self.reset_button.setText(self._i18n.tr("reset_everything"))
+        self.cancel_button.setText(self._i18n.tr("cancel"))
+        self.apply_button.setText(self._i18n.tr("apply"))
+        self._sync_provider_fields()
+        self._render_model_status()

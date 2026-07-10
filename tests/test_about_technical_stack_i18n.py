@@ -33,8 +33,7 @@ def test_i18n_keys_exist():
 
 
 def test_about_page_code_uses_i18n():
-    """Test that the About page code contains i18n calls for technical stack strings."""
-    # Read the about_page.py file and check that it uses i18n for the technical stack
+    """The minimal About page uses translated product/privacy copy."""
     with open("gui/pages/about_page.py", encoding="utf-8") as f:
         content = f.read()
 
@@ -45,10 +44,7 @@ def test_about_page_code_uses_i18n():
     assert '"PySide6 (Qt for Python)"' not in content
     assert '"©"' not in content or "about_footer_format" in content
 
-    # Check that the i18n calls are present
-    assert "about_language_value" in content
-    assert "about_ui_framework_value" in content
-    assert "about_llm_providers_value" in content
-    assert "about_packaging_value" in content
-    assert "about_footer_format" in content
-    assert "about_ui_framework_value" in content
+    assert "about_product_heading" in content
+    assert "about_product_text" in content
+    assert "about_privacy_heading" in content
+    assert "about_privacy_text" in content

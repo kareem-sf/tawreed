@@ -1,610 +1,644 @@
-"""Workspace page — the BOQ processing entry point.
+"""State-driven Tawreed Workbench.
 
-Senior design choices:
-- Card-based layout: one card for input controls, one for the
-  live console. The two cards don't compete for vertical space.
-- Status pill in the header so the user knows the current state
-  (idle / running / success / error) without scanning the console.
-- Larger console with monospace font and explicit "Clear log"
-  action so long runs are easier to triage.
-- Drop zone visual: a clickable card that opens the file picker,
-  with a primary "Start Processing" button that lights up only
-  when a file is selected.
+The page deliberately never renders BOQ rows, spreadsheet previews, model
+output, or raw paths.  The processor exposes an opaque approval token and a
+count-only summary.
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QAccessible, QAccessibleEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFileDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QProgressBar,
     QPushButton,
-    QTextEdit,
+    QScrollArea,
+    QSizePolicy,
+    QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from core import db
-from core.ai import get_provider_config
 from core.i18n import I18n, get_i18n
-from gui.review_dialog import ReviewDialog
-from gui.widgets import Card, PageHeader, StatusPill
+from gui.run_contracts import ApprovalRequest, RunPhase, RunProgress
+from gui.styles import motion_enabled
 from gui.worker import BOQProcessor, WorkerSignals
 
-log = logging.getLogger(__name__)
 
+class DropZone(QPushButton):
+    """Keyboard-operable .xlsx picker that also accepts file drops."""
 
-class _DropZone(QFrame):
-    """Drop zone for BOQ Excel files (.xlsx only).
+    file_dropped = Signal(str)
 
-    Shows a drag-and-drop surface with a title and subtitle. When a file is dropped
-    or the browse dialog (button click) or by dragging an .xlsx onto the surface.
-    """
-
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("pageHost")
         self.setObjectName("dropZone")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(110)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(4)
-        i18n = get_i18n()
-        self._title = QLabel(i18n.tr("drop_zone_title"))
-        self._title.setObjectName("dropZoneTitle")
-        self._title.setAlignment(Qt.AlignCenter)
-        self._subtitle = QLabel(i18n.tr("drop_zone_subtitle"))
-        self._subtitle.setObjectName("dropZoneSubtitle")
-        self._subtitle.setAlignment(Qt.AlignCenter)
-        layout.addStretch()
-        layout.addWidget(self._title)
-        layout.addWidget(self._subtitle)
-        layout.addStretch()
+        self.setMinimumHeight(190)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            self._open_dialog()
-            event.accept()
-        else:
-            super().mousePressEvent(event)
-
-    def _open_dialog(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, self._i18n.tr("file_dialog_title"), "", self._i18n.tr("file_dialog_filter")
-        )
-        if path:
-            # Walk up to the QWidget that owns a file_selected handler.
-            w: QWidget = self
-            while w is not None and not hasattr(w, "file_selected"):
-                w = w.parentWidget()
-            if w is not None:
-                w.file_selected.emit(path)  # type: ignore[attr-defined]
-
-    # ----- drag & drop ----------------------------------------------------
+    @staticmethod
+    def _xlsx_from_event(event: QDragEnterEvent | QDropEvent) -> str | None:
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if path and Path(path).is_file() and Path(path).suffix.casefold() == ".xlsx":
+                return path
+        return None
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+        if self._xlsx_from_event(event):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        urls = event.mimeData().urls()
-        if not urls:
-            event.ignore()
-            return
-        path = Path(urls[0].toLocalFile())
-        if not path.exists():
-            event.ignore()
-            return
-        w: QWidget = self
-        while w is not None and not hasattr(w, "file_selected"):
-            w = w.parentWidget()
-        if w is not None:
-            w.file_selected.emit(str(path))  # type: ignore[attr-defined]
+        path = self._xlsx_from_event(event)
+        if path:
+            self.file_dropped.emit(path)
             event.acceptProposedAction()
         else:
             event.ignore()
 
 
-class WorkspacePage(QWidget):
-    """The main BOQ processing workspace."""
+class PhaseStrip(QWidget):
+    PHASES = (
+        RunPhase.INSPECTING,
+        RunPhase.STRUCTURING,
+        RunPhase.CLASSIFYING,
+        RunPhase.VALIDATING,
+        RunPhase.APPROVAL,
+    )
 
-    from PySide6.QtCore import Signal
-
-    file_selected = Signal(str)
-
-    def __init__(self, parent=None):
+    def __init__(self, i18n: I18n, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._i18n: I18n = get_i18n()
+        self._i18n = i18n
+        self._nodes: dict[RunPhase, tuple[QLabel, QLabel]] = {}
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        for index, phase in enumerate(self.PHASES):
+            column = QVBoxLayout()
+            column.setAlignment(Qt.AlignCenter)
+            dot = QLabel(str(index + 1), self)
+            dot.setObjectName("phaseDot")
+            dot.setAlignment(Qt.AlignCenter)
+            dot.setFixedSize(32, 32)
+            label = QLabel(self)
+            label.setObjectName("phaseLabel")
+            label.setAlignment(Qt.AlignCenter)
+            column.addWidget(dot, 0, Qt.AlignCenter)
+            column.addWidget(label)
+            row.addLayout(column, 0)
+            self._nodes[phase] = (dot, label)
+            if index < len(self.PHASES) - 1:
+                line = QFrame(self)
+                line.setObjectName("phaseLine")
+                line.setFixedHeight(1)
+                row.addWidget(line, 1)
+        self.retranslate_ui()
+        self.set_phase(RunPhase.INSPECTING)
+
+    def retranslate_ui(self) -> None:
+        for phase, (_dot, label) in self._nodes.items():
+            label.setText(self._i18n.tr(f"phase_{phase.value}"))
+
+    def set_phase(self, current: RunPhase) -> None:
+        current_index = self.PHASES.index(current) if current in self.PHASES else -1
+        for index, (_phase, (dot, label)) in enumerate(self._nodes.items()):
+            state = (
+                "complete"
+                if index < current_index
+                else "active"
+                if index == current_index
+                else "idle"
+            )
+            dot.setText("✓" if state == "complete" else str(index + 1))
+            for widget in (dot, label):
+                widget.setProperty("state", state)
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+
+
+class WorkspacePage(QWidget):
+    """One run, rendered as an explicit state machine."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._i18n = get_i18n()
         self.selected_file: str | None = None
-        self.signals: WorkerSignals | None = None
-        self._last_output_path: str | None = None
+        self._output_path: str | None = None
         self._processor: BOQProcessor | None = None
-        self._processor_task = None
+        self._signals: WorkerSignals | None = None
+        self._task: asyncio.Task | None = None
+        self._approval: ApprovalRequest | None = None
+        self._run_started = 0.0
+        self._last_progress: RunProgress | None = None
+        self._state_animation: QPropertyAnimation | None = None
         self._build_ui()
-        self.file_selected.connect(self._on_file_selected)
-        self.setFocusPolicy(Qt.StrongFocus)
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._update_elapsed)
+        self._show_state(RunPhase.EMPTY)
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
 
-        # ----- Header + status pill -----
-        header_row = QHBoxLayout()
-        header_row.setSpacing(12)
-        header = PageHeader(
-            self._i18n.tr("workspace_page_title"),
-            self._i18n.tr("workspace_page_subtitle"),
-        )
-        header_row.addWidget(header, stretch=1)
-        self.status_pill = StatusPill()
-        self.status_pill.set_state("idle", self._i18n.tr("idle"))
-        header_row.addWidget(self.status_pill, alignment=Qt.AlignTop)
-        layout.addLayout(header_row)
+        canvas = QWidget(scroll)
+        canvas.setObjectName("pageCanvas")
+        self.canvas_layout = QVBoxLayout(canvas)
+        self.canvas_layout.setContentsMargins(56, 42, 56, 42)
+        self.canvas_layout.setSpacing(22)
+        scroll.setWidget(canvas)
 
-        # ----- Input card (drop zone + actions) -----
-        input_card = Card(self._i18n.tr("input_card_title"))
+        self.title = QLabel(canvas)
+        self.title.setObjectName("pageTitle")
+        self.subtitle = QLabel(canvas)
+        self.subtitle.setObjectName("pageSubtitle")
+        self.subtitle.setWordWrap(True)
+        self.canvas_layout.addWidget(self.title)
+        self.canvas_layout.addWidget(self.subtitle)
 
-        self.drop_zone = _DropZone()
-        input_card.addWidget(self.drop_zone)
+        self.stack = QStackedWidget(canvas)
+        self.stack.setObjectName("workbenchStack")
+        self.empty_view = self._build_empty_view()
+        self.ready_view = self._build_ready_view()
+        self.processing_view = self._build_processing_view()
+        self.approval_view = self._build_approval_view()
+        self.complete_view = self._build_complete_view()
+        self.error_view = self._build_error_view()
+        for view in (
+            self.empty_view,
+            self.ready_view,
+            self.processing_view,
+            self.approval_view,
+            self.complete_view,
+            self.error_view,
+        ):
+            self.stack.addWidget(view)
+        self.canvas_layout.addWidget(self.stack, 1)
+        self.retranslate_ui()
 
-        # Recent files list
-        self.recent_files_label = QLabel(self._i18n.tr("recent_files_label"))
-        self.recent_files_label.setObjectName("hint")
-        self.recent_files_label.setVisible(False)
-        input_card.addWidget(self.recent_files_label)
+    def _view(self) -> tuple[QWidget, QVBoxLayout]:
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 14, 0, 0)
+        layout.setSpacing(18)
+        return widget, layout
 
-        self.recent_files_container = QHBoxLayout()
-        self.recent_files_container.setSpacing(8)
-        self.recent_files_container.setContentsMargins(0, 0, 0, 0)
-        input_card.addLayout(self.recent_files_container)
+    def _build_empty_view(self) -> QWidget:
+        view, layout = self._view()
+        self.drop_zone = DropZone(view)
+        self.drop_zone.clicked.connect(self._browse_file)
+        self.drop_zone.file_dropped.connect(self.select_file)
+        layout.addWidget(self.drop_zone)
+        self.empty_hint = QLabel(view)
+        self.empty_hint.setObjectName("hintText")
+        self.empty_hint.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.empty_hint)
+        layout.addStretch(1)
+        return view
 
-        self.file_label = QLabel(self._i18n.tr("no_file_selected"))
-        self.file_label.setObjectName("fileLabel")
-        input_card.addWidget(self.file_label)
+    def _build_ready_view(self) -> QWidget:
+        view, layout = self._view()
+        panel = QFrame(view)
+        panel.setObjectName("filePanel")
+        row = QHBoxLayout(panel)
+        row.setContentsMargins(22, 20, 22, 20)
+        text = QVBoxLayout()
+        self.ready_label = QLabel(panel)
+        self.ready_label.setObjectName("sectionTitle")
+        self.file_name_label = QLabel(panel)
+        self.file_name_label.setObjectName("fileName")
+        self.file_name_label.setWordWrap(True)
+        text.addWidget(self.ready_label)
+        text.addWidget(self.file_name_label)
+        row.addLayout(text, 1)
+        self.replace_button = QPushButton(panel)
+        self.replace_button.setObjectName("secondaryButton")
+        self.replace_button.clicked.connect(self._browse_file)
+        row.addWidget(self.replace_button)
+        layout.addWidget(panel)
+        self.start_button = QPushButton(view)
+        self.start_button.setObjectName("primaryButton")
+        self.start_button.setMinimumHeight(46)
+        self.start_button.clicked.connect(self.start_processing)
+        layout.addWidget(self.start_button, 0, Qt.AlignRight)
+        layout.addStretch(1)
+        return view
 
-        # Populate recent files on startup
-        self._refresh_recent_files()
+    def _build_processing_view(self) -> QWidget:
+        view, layout = self._view()
+        self.phase_strip = PhaseStrip(self._i18n, view)
+        layout.addWidget(self.phase_strip)
+        layout.addSpacing(18)
+        self.status_label = QLabel(view)
+        self.status_label.setObjectName("runStatus")
+        self.status_label.setWordWrap(True)
+        self.status_label.setAccessibleName("Run status")
+        layout.addWidget(self.status_label)
+        self.progress_bar = QProgressBar(view)
+        self.progress_bar.setObjectName("runProgress")
+        self.progress_bar.setTextVisible(False)
+        layout.addWidget(self.progress_bar)
+        meta = QHBoxLayout()
+        self.progress_count = QLabel(view)
+        self.progress_count.setObjectName("hintText")
+        self.elapsed_label = QLabel(view)
+        self.elapsed_label.setObjectName("hintText")
+        meta.addWidget(self.progress_count)
+        meta.addStretch(1)
+        meta.addWidget(self.elapsed_label)
+        layout.addLayout(meta)
+        self.cancel_button = QPushButton(view)
+        self.cancel_button.setObjectName("secondaryButton")
+        self.cancel_button.clicked.connect(self.cancel_run)
+        layout.addWidget(self.cancel_button, 0, Qt.AlignRight)
+        layout.addStretch(1)
+        return view
 
+    def _build_approval_view(self) -> QWidget:
+        view, layout = self._view()
+        self.approval_layout = QBoxLayout(QBoxLayout.LeftToRight)
+        self.approval_layout.setSpacing(34)
+        left = QWidget(view)
+        left_col = QVBoxLayout(left)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        self.approval_heading = QLabel(left)
+        self.approval_heading.setObjectName("runHeading")
+        self.approval_text = QLabel(left)
+        self.approval_text.setObjectName("pageSubtitle")
+        self.approval_text.setWordWrap(True)
+        self.approval_phase_strip = PhaseStrip(self._i18n, left)
+        self.approval_phase_strip.set_phase(RunPhase.APPROVAL)
+        left_col.addWidget(self.approval_heading)
+        left_col.addWidget(self.approval_text)
+        left_col.addSpacing(18)
+        left_col.addWidget(self.approval_phase_strip)
+        left_col.addStretch(1)
+        self.details_toggle = QToolButton(left)
+        self.details_toggle.setObjectName("disclosureButton")
+        self.details_toggle.setCheckable(True)
+        self.details_toggle.setArrowType(Qt.RightArrow)
+        self.details_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.details_toggle.toggled.connect(self._toggle_details)
+        left_col.addWidget(self.details_toggle)
+        self.details_panel = QLabel(left)
+        self.details_panel.setObjectName("diagnosticPanel")
+        self.details_panel.setWordWrap(True)
+        self.details_panel.hide()
+        left_col.addWidget(self.details_panel)
+        self.approval_layout.addWidget(left, 3)
+
+        summary = QFrame(view)
+        summary.setObjectName("summaryPanel")
+        summary_col = QVBoxLayout(summary)
+        summary_col.setContentsMargins(26, 22, 26, 22)
+        summary_col.setSpacing(12)
+        self.total_caption = QLabel(summary)
+        self.total_caption.setObjectName("summaryCaption")
+        self.total_value = QLabel(summary)
+        self.total_value.setObjectName("summaryTotal")
+        self.packages_caption = QLabel(summary)
+        self.packages_caption.setObjectName("summaryCaption")
+        self.package_list = QVBoxLayout()
+        self.package_list.setSpacing(7)
+        self.warning_label = QLabel(summary)
+        self.warning_label.setObjectName("warningText")
+        self.warning_label.setWordWrap(True)
+        self.provider_label = QLabel(summary)
+        self.provider_label.setObjectName("summaryMeta")
+        self.model_label = QLabel(summary)
+        self.model_label.setObjectName("summaryMeta")
+        summary_col.addWidget(self.total_caption)
+        summary_col.addWidget(self.total_value)
+        summary_col.addSpacing(8)
+        summary_col.addWidget(self.packages_caption)
+        summary_col.addLayout(self.package_list)
+        summary_col.addSpacing(6)
+        summary_col.addWidget(self.warning_label)
+        summary_col.addStretch(1)
+        summary_col.addWidget(self.provider_label)
+        summary_col.addWidget(self.model_label)
         actions = QHBoxLayout()
-        actions.setSpacing(10)
-        self.browse_btn = QPushButton(self._i18n.tr("select_file"))
-        self.browse_btn.clicked.connect(self.browse_file)
-        self.clear_btn = QPushButton(self._i18n.tr("clear"))
-        self.clear_btn.setObjectName("ghostBtn")
-        self.clear_btn.setEnabled(False)
-        self.clear_btn.clicked.connect(self._clear_selection)
-        self.process_btn = QPushButton(
-            self._i18n.tr("process_button_prefix") + self._i18n.tr("process_button")
-        )
-        self.process_btn.setObjectName("primaryBtn")
-        self.process_btn.setEnabled(False)
-        self.process_btn.clicked.connect(self.start_processing)
-        # "Open output" and "Show in folder" are enabled only after
-        # a successful run — see on_processing_finished().
-        self.open_output_btn = QPushButton(self._i18n.tr("open_output"))
-        self.open_output_btn.setObjectName("ghostBtn")
-        self.open_output_btn.setEnabled(False)
-        self.open_output_btn.setToolTip(self._i18n.tr("open_output_tooltip"))
-        self.open_output_btn.clicked.connect(self._open_last_output)
-        self.open_folder_btn = QPushButton(self._i18n.tr("show_in_folder"))
-        self.open_folder_btn.setObjectName("ghostBtn")
-        self.open_folder_btn.setEnabled(False)
-        self.open_folder_btn.setToolTip(self._i18n.tr("show_in_folder_tooltip"))
-        self.open_folder_btn.clicked.connect(self._reveal_last_output)
-        actions.addWidget(self.browse_btn)
-        actions.addWidget(self.clear_btn)
-        actions.addWidget(self.open_output_btn)
-        actions.addWidget(self.open_folder_btn)
-        actions.addStretch()
-        actions.addWidget(self.process_btn)
-        input_card.addLayout(actions)
+        self.approve_button = QPushButton(summary)
+        self.approve_button.setObjectName("primaryButton")
+        self.approve_button.clicked.connect(self.approve_and_generate)
+        self.approval_cancel_button = QPushButton(summary)
+        self.approval_cancel_button.setObjectName("secondaryButton")
+        self.approval_cancel_button.clicked.connect(self.cancel_run)
+        actions.addWidget(self.approve_button, 2)
+        actions.addWidget(self.approval_cancel_button, 1)
+        summary_col.addLayout(actions)
+        self.approval_layout.addWidget(summary, 2)
+        layout.addLayout(self.approval_layout)
+        return view
 
-        layout.addWidget(input_card)
+    def _build_complete_view(self) -> QWidget:
+        view, layout = self._view()
+        self.complete_mark = QLabel("✓", view)
+        self.complete_mark.setObjectName("completeMark")
+        self.complete_mark.setAlignment(Qt.AlignCenter)
+        self.complete_heading = QLabel(view)
+        self.complete_heading.setObjectName("runHeading")
+        self.complete_heading.setAlignment(Qt.AlignCenter)
+        self.complete_file = QLabel(view)
+        self.complete_file.setObjectName("fileName")
+        self.complete_file.setAlignment(Qt.AlignCenter)
+        self.complete_file.setWordWrap(True)
+        layout.addStretch(1)
+        layout.addWidget(self.complete_mark)
+        layout.addWidget(self.complete_heading)
+        layout.addWidget(self.complete_file)
+        actions = QHBoxLayout()
+        self.open_excel_button = QPushButton(view)
+        self.open_excel_button.setObjectName("primaryButton")
+        self.open_excel_button.clicked.connect(self._open_output)
+        self.show_folder_button = QPushButton(view)
+        self.show_folder_button.setObjectName("secondaryButton")
+        self.show_folder_button.clicked.connect(self._show_output_folder)
+        self.another_button = QPushButton(view)
+        self.another_button.setObjectName("secondaryButton")
+        self.another_button.clicked.connect(self.reset)
+        actions.addWidget(self.open_excel_button)
+        actions.addWidget(self.show_folder_button)
+        actions.addWidget(self.another_button)
+        layout.addLayout(actions)
+        layout.addStretch(2)
+        return view
 
-        # ----- Console card -----
-        console_card = Card(self._i18n.tr("console_card_title"))
-        console_actions = QHBoxLayout()
-        console_actions.setSpacing(8)
-        self.console_status = QLabel(self._i18n.tr("awaiting_input"))
-        self.console_status.setObjectName("hint")
-        console_actions.addWidget(self.console_status, stretch=1)
-        self.clear_console_btn = QPushButton(self._i18n.tr("clear_log"))
-        self.clear_console_btn.setObjectName("ghostBtn")
-        self.clear_console_btn.clicked.connect(lambda: self.console.clear())
-        console_actions.addWidget(self.clear_console_btn)
-        console_card.addLayout(console_actions)
+    def _build_error_view(self) -> QWidget:
+        view, layout = self._view()
+        self.error_heading = QLabel(view)
+        self.error_heading.setObjectName("runHeading")
+        self.error_message = QLabel(view)
+        self.error_message.setObjectName("errorText")
+        self.error_message.setWordWrap(True)
+        self.retry_button = QPushButton(view)
+        self.retry_button.setObjectName("primaryButton")
+        self.retry_button.clicked.connect(self.start_processing)
+        self.error_reset_button = QPushButton(view)
+        self.error_reset_button.setObjectName("secondaryButton")
+        self.error_reset_button.clicked.connect(self.reset)
+        layout.addWidget(self.error_heading)
+        layout.addWidget(self.error_message)
+        actions = QHBoxLayout()
+        actions.addWidget(self.retry_button)
+        actions.addWidget(self.error_reset_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        layout.addStretch(1)
+        return view
 
-        # Progress bar for large file processing
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setObjectName("progressBar")
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setMinimum(0)
-        self.progress_bar.setMaximum(100)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("%p%")
-        console_card.addWidget(self.progress_bar)
-
-        self.console = QTextEdit()
-        self.console.setReadOnly(True)
-        self.console.setObjectName("liveConsole")
-        self.console.setMinimumHeight(220)
-        console_card.addWidget(self.console)
-        layout.addWidget(console_card, stretch=1)
-
-    # ----- file selection -------------------------------------------------
-
-    def _refresh_recent_files(self) -> None:
-        """Refresh the recent files list from disk."""
-        recent_files = db.get_recent_files()
-
-        # Clear existing buttons
-        for i in reversed(range(self.recent_files_container.count())):
-            widget = self.recent_files_container.itemAt(i).widget()
-            if widget:
-                widget.deleteLater()
-
-        # Add new buttons
-        for file_path in recent_files:
-            btn = QPushButton(os.path.basename(file_path))
-            btn.setObjectName("ghostBtn")
-            btn.setToolTip(file_path)
-            btn.clicked.connect(lambda _, p=file_path: self._on_file_selected(p))
-            self.recent_files_container.addWidget(btn)
-
-        # Show/hide label based on whether there are recent files
-        has_recent = len(recent_files) > 0
-        self.recent_files_label.setVisible(has_recent)
-
-    def _on_file_selected(self, path: str) -> None:
-        self.selected_file = path
-        self._processor = None
-        name = os.path.basename(path)
-        self.file_label.setText(name)
-        self.file_label.setToolTip(path)
-        self.process_btn.setEnabled(True)
-        self.clear_btn.setEnabled(True)
-        self.status_pill.set_state("idle", self._i18n.tr("ready"))
-        self.console_status.setText(f"{self._i18n.tr('loaded_prefix')} {name}")
-        self.log(f"📄  Loaded {name}\n")
-
-        # Add to recent files
-        db.add_recent_file(path)
-        self._refresh_recent_files()
-
-    def browse_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, self._i18n.tr("file_dialog_title"), "", self._i18n.tr("file_dialog_filter")
+    def _browse_file(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, self._i18n.tr("select_boq_title"), "", "Excel workbooks (*.xlsx)"
         )
         if path:
-            self._on_file_selected(path)
+            self.select_file(path)
 
-    def _clear_selection(self) -> None:
-        self.selected_file = None
-        self.file_label.setText(self._i18n.tr("no_file_selected"))
-        self.file_label.setToolTip("")
-        self.process_btn.setEnabled(False)
-        self.clear_btn.setEnabled(False)
-        self.status_pill.set_state("idle", self._i18n.tr("idle"))
-        self.console_status.setText(self._i18n.tr("awaiting_input"))
-        self.progress_bar.setVisible(False)
-
-    # ----- console helpers ------------------------------------------------
-
-    def keyPressEvent(self, event) -> None:
-        """Handle keyboard shortcuts."""
-        if event.key() == Qt.Key_Escape:
-            self._clear_selection()
-            event.accept()
-        elif event.modifiers() == Qt.ControlModifier:
-            if event.key() == Qt.Key_O:
-                self.browse_file()
-                event.accept()
-            elif event.key() == Qt.Key_P:
-                if self.process_btn.isEnabled():
-                    self.start_processing()
-                event.accept()
-            elif event.key() == Qt.Key_S:
-                # Save settings shortcut
-                event.ignore()  # Let it propagate to main window
-            elif event.key() == Qt.Key_L:
-                self.console.clear()
-                event.accept()
-        else:
-            super().keyPressEvent(event)
-
-    def log(self, text: str) -> None:
-        self.console.insertPlainText(text)
-        sb = self.console.verticalScrollBar()
-        sb.setValue(sb.maximum())
-
-    def set_progress(self, value: int, max_value: int = 100, visible: bool = True) -> None:
-        """Set the progress bar value and visibility."""
-        self.progress_bar.setVisible(visible)
-        if max_value > 0:
-            self.progress_bar.setMaximum(max_value)
-        self.progress_bar.setValue(value)
-
-    def reset_progress(self) -> None:
-        """Reset and hide the progress bar."""
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(False)
-
-    def _show_toast(self, message: str, duration: int = 3000) -> None:
-        """Show a toast notification from the main window."""
-        # Get the main window and show toast
-        from PySide6.QtWidgets import QApplication
-
-        from gui.main_window import MainWindow
-
-        for widget in QApplication.topLevelWidgets():
-            if isinstance(widget, MainWindow):
-                widget.show_toast(message, duration)
-                break
-
-    # ----- processing -----------------------------------------------------
+    def select_file(self, path: str) -> None:
+        file_path = Path(path)
+        if not file_path.is_file() or file_path.suffix.casefold() != ".xlsx":
+            self._show_error(self._i18n.tr("xlsx_only_error"))
+            return
+        self.selected_file = str(file_path)
+        self.file_name_label.setText(file_path.name)
+        self._show_state(RunPhase.READY)
 
     def start_processing(self) -> None:
         if not self.selected_file:
+            self._show_state(RunPhase.EMPTY)
             return
+        self._approval = None
+        self._output_path = None
+        self._signals = WorkerSignals()
+        self._signals.progress.connect(self._on_progress)
+        self._signals.review_ready.connect(self._on_approval_ready)
+        self._signals.finished.connect(self._on_finished)
+        self._signals.error.connect(self._show_error)
+        self._processor = BOQProcessor(self.selected_file, self._signals, self._i18n)
+        self._run_started = time.monotonic()
+        self._elapsed_timer.start()
+        self._show_state(RunPhase.INSPECTING)
+        self._task = asyncio.ensure_future(self._processor.process())
 
-        settings = db.get_settings()
-        provider = settings.get("provider", "OpenAI") if settings else "OpenAI"
-        requires_api_key = get_provider_config(provider).get("requires_api_key", True)
-        if not settings or (requires_api_key and not settings.get("api_key")):
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("settings_required_title"),
-                self._i18n.tr("settings_required_message"),
-            )
-            return
+    def _on_progress(self, progress: RunProgress) -> None:
+        self._last_progress = progress
+        self.status_label.setText(progress.message)
+        self.cancel_button.setEnabled(progress.cancellable)
+        if progress.phase in PhaseStrip.PHASES:
+            self.phase_strip.set_phase(progress.phase)
+        if progress.current is not None and progress.total:
+            self.progress_bar.setRange(0, progress.total)
+            self.progress_bar.setValue(progress.current)
+            self.progress_count.setText(f"{progress.current} / {progress.total}")
+        else:
+            self.progress_bar.setRange(0, 0)
+            self.progress_count.clear()
+        if progress.phase is RunPhase.EXPORTING:
+            self._show_state(RunPhase.EXPORTING)
+        self._announce(progress.message)
 
-        self.process_btn.setEnabled(False)
-        self.browse_btn.setEnabled(False)
-        self.clear_btn.setEnabled(False)
-        self.console.clear()
-        self.status_pill.set_state("running", self._i18n.tr("processing"))
-        self.console_status.setText(self._i18n.tr("streaming_ai"))
-        self.log("Initializing processor…\n")
-        self.set_progress(0, 100, True)
-
-        # Disconnect any previous signal handlers so the page can be reused.
-        self.signals = WorkerSignals()
-        self.signals.log.connect(self.log)
-        self.signals.review_ready.connect(self.on_review_ready)
-        self.signals.finished.connect(self.on_processing_finished)
-        self.signals.error.connect(self.on_processing_error)
-
-        self._processor = BOQProcessor(self.selected_file, self.signals, self._i18n)
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        # add_done_callback is a safety net: if the task raises an
-        # exception that the Worker's own try/except doesn't catch
-        # (e.g. an asyncio.CancelledError leak, a bug in the qasync
-        # bridge), we still want the page to leave the "Processing…"
-        # state instead of staying stuck.
-        task = loop.create_task(self._processor.process())
-        self._processor_task = task
-        task.add_done_callback(self._on_processor_done)
-
-    def _on_processor_done(self, task) -> None:
-        """Safety net for the BOQProcessor task.
-
-        Called when the asyncio task finishes (success, failure, or
-        cancellation). The normal paths route through
-        ``signals.finished`` or ``signals.error``; this handler
-        covers any exception that escapes those — without it, a
-        single leaked exception would leave the page stuck on
-        "Processing…" forever.
-        """
-        if task.cancelled():
-            log.warning("BOQProcessor task was cancelled")
-            self.process_btn.setEnabled(bool(self.selected_file))
-            self.browse_btn.setEnabled(True)
-            self.clear_btn.setEnabled(bool(self.selected_file))
-            self.reset_progress()
-            return
-        exc = task.exception()
-        if exc is not None:
-            log.exception("BOQProcessor task raised unhandled exception")
-            # Re-use the same error path the Worker uses so the UI
-            # state stays consistent (status pill, log, etc.).
-            self.on_processing_error(f"{type(exc).__name__}: {exc}")
-
-    def on_review_ready(self, draft) -> None:
-        """Require a human approval before any workbook or history write."""
-        self.status_pill.set_state("warning", self._i18n.tr("review_dialog_title"))
-        self.console_status.setText(self._i18n.tr("review_ready"))
-        self.reset_progress()
-
-        dialog = ReviewDialog(draft, self._i18n, self)
-        if dialog.exec() != ReviewDialog.Accepted:
-            if self._processor is not None:
-                self._processor.cancel_review()
-            self.log(f"\n{self._i18n.tr('review_cancelled')}\n")
-            self.process_btn.setEnabled(bool(self.selected_file))
-            self.browse_btn.setEnabled(True)
-            self.clear_btn.setEnabled(bool(self.selected_file))
-            self.status_pill.set_state("idle", self._i18n.tr("ready"))
-            self.console_status.setText(self._i18n.tr("review_cancelled"))
-            return
-
-        if self._processor is None:
-            self.on_processing_error("The review session is no longer available.")
-            return
-
-        self.status_pill.set_state("running", self._i18n.tr("processing"))
-        self.console_status.setText(self._i18n.tr("generating_output").format(output_file="…"))
-        self.set_progress(0, 100, True)
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        task = loop.create_task(self._processor.approve_and_export(dialog.reviewed_categories()))
-        self._processor_task = task
-        task.add_done_callback(self._on_processor_done)
-
-    def on_processing_finished(self, output_path: str) -> None:
-        self.log(
-            f"\n\n🎉 {self._i18n.tr('processing_complete')}\n{self._i18n.tr('output_saved_to').format(path=output_path)}\n"
+    def _on_approval_ready(self, request: ApprovalRequest) -> None:
+        self._approval = request
+        summary = request.summary
+        self.total_value.setText(str(summary.total_items))
+        while self.package_list.count():
+            item = self.package_list.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for name, count in summary.package_counts:
+            row_widget = QWidget(self.approval_view)
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 0, 0, 0)
+            name_label = QLabel(name, row_widget)
+            count_label = QLabel(str(count), row_widget)
+            count_label.setObjectName("packageCount")
+            row.addWidget(name_label, 1)
+            row.addWidget(count_label)
+            self.package_list.addWidget(row_widget)
+        self.warning_label.setVisible(bool(summary.warnings))
+        self.warning_label.setText("\n".join(f"⚠ {warning}" for warning in summary.warnings))
+        self.provider_label.setText(f"{self._i18n.tr('provider_label')}: {summary.provider}")
+        self.model_label.setText(f"{self._i18n.tr('model_label')}: {summary.model}")
+        self.details_panel.setText(
+            f"{summary.source_filename}\n{summary.provider} · {summary.model}\n"
+            f"{self._format_elapsed(time.monotonic() - self._run_started)}"
         )
-        self.process_btn.setEnabled(True)
-        self.browse_btn.setEnabled(True)
-        self.clear_btn.setEnabled(True)
-        self.status_pill.set_state("success", self._i18n.tr("done"))
-        self.console_status.setText(
-            f"{self._i18n.tr('saved_prefix')} {os.path.basename(output_path)}"
-        )
-        self.reset_progress()
-        # Stash the path so the "Open Output" button can find it.
-        self._last_output_path = output_path
-        self.open_output_btn.setEnabled(True)
-        self.open_folder_btn.setEnabled(True)
+        self._elapsed_timer.stop()
+        self._show_state(RunPhase.APPROVAL)
+        self.approve_button.setFocus(Qt.OtherFocusReason)
+        self._announce(self._i18n.tr("approval_ready_announcement"))
+
+    def approve_and_generate(self) -> None:
+        if not self._processor or not self._approval:
+            return
+        self.approve_button.setEnabled(False)
+        self._elapsed_timer.start()
+        self._show_state(RunPhase.EXPORTING)
+        self._task = asyncio.ensure_future(self._processor.approve_and_export(self._approval.token))
+
+    def cancel_run(self) -> None:
+        if self._processor:
+            self._processor.cancel()
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self.reset(keep_file=True)
+
+    def _on_finished(self, output_path: str) -> None:
+        self._elapsed_timer.stop()
+        self._output_path = output_path
+        self.complete_file.setText(Path(output_path).name)
+        self._show_state(RunPhase.COMPLETE)
+        self._announce(self._i18n.tr("run_complete_announcement"))
+
+    def _show_error(self, message: str) -> None:
+        self._elapsed_timer.stop()
+        self.error_message.setText(message)
+        self._show_state(RunPhase.ERROR)
+        self._announce(message)
+
+    def _show_state(self, phase: RunPhase) -> None:
+        target = {
+            RunPhase.EMPTY: self.empty_view,
+            RunPhase.READY: self.ready_view,
+            RunPhase.INSPECTING: self.processing_view,
+            RunPhase.STRUCTURING: self.processing_view,
+            RunPhase.CLASSIFYING: self.processing_view,
+            RunPhase.VALIDATING: self.processing_view,
+            RunPhase.EXPORTING: self.processing_view,
+            RunPhase.APPROVAL: self.approval_view,
+            RunPhase.COMPLETE: self.complete_view,
+            RunPhase.ERROR: self.error_view,
+        }[phase]
+        self.stack.setCurrentWidget(target)
+        approval_state = phase is RunPhase.APPROVAL
+        self.title.setVisible(not approval_state)
+        self.subtitle.setVisible(not approval_state)
+        if motion_enabled() and self.isVisible():
+            effect = QGraphicsOpacityEffect(target)
+            target.setGraphicsEffect(effect)
+            animation = QPropertyAnimation(effect, b"opacity", self)
+            animation.setDuration(330 if phase is RunPhase.COMPLETE else 200)
+            animation.setStartValue(0.0)
+            animation.setEndValue(1.0)
+            animation.setEasingCurve(QEasingCurve.OutCubic)
+            animation.finished.connect(lambda widget=target: widget.setGraphicsEffect(None))
+            self._state_animation = animation
+            animation.start()
+        if phase is RunPhase.EXPORTING:
+            self.phase_strip.set_phase(RunPhase.APPROVAL)
+            self.status_label.setText(self._i18n.tr("exporting_workbook"))
+            self.progress_bar.setRange(0, 0)
+            self.cancel_button.setEnabled(False)
+
+    def reset(self, _checked: bool = False, *, keep_file: bool = False) -> None:
+        self._elapsed_timer.stop()
+        self._approval = None
         self._processor = None
+        self._signals = None
+        self._task = None
+        self._last_progress = None
+        self._output_path = None
+        self.approve_button.setEnabled(True)
+        self.details_toggle.setChecked(False)
+        if not keep_file:
+            self.selected_file = None
+        self._show_state(RunPhase.READY if self.selected_file else RunPhase.EMPTY)
 
-        # Show toast notification
-        self._show_toast(self._i18n.tr("processing_complete"))
+    def _toggle_details(self, checked: bool) -> None:
+        self.details_toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        self.details_panel.setVisible(checked)
 
-        # Confirmation dialog with two actions: open the file, or
-        # reveal it in Explorer. Both are common next steps and
-        # make the success state actually actionable.
-        from PySide6.QtWidgets import QMessageBox
+    def _update_elapsed(self) -> None:
+        if self._run_started:
+            self.elapsed_label.setText(self._format_elapsed(time.monotonic() - self._run_started))
 
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Information)
-        box.setWindowTitle(self._i18n.tr("complete"))
-        box.setText(self._i18n.tr("successfully_generated"))
-        box.setInformativeText(f"{self._i18n.tr('saved_to').format(path=output_path)}")
-        open_btn = box.addButton(self._i18n.tr("open_excel"), QMessageBox.AcceptRole)
-        reveal_btn = box.addButton(self._i18n.tr("show_in_folder"), QMessageBox.ActionRole)
-        box.addButton(QMessageBox.Close)
-        box.setDefaultButton(open_btn)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is open_btn:
-            self._open_output_file(output_path)
-        elif clicked is reveal_btn:
-            self._reveal_in_folder(output_path)
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        total = max(0, int(seconds))
+        minutes, seconds = divmod(total, 60)
+        return f"{minutes:02d}:{seconds:02d}"
 
-    def on_processing_error(self, error_msg: str) -> None:
-        self.log(f"\n\n❌ {self._i18n.tr('error_during_processing')}\n{error_msg}\n")
-        self.process_btn.setEnabled(True)
-        self.browse_btn.setEnabled(True)
-        self.clear_btn.setEnabled(True)
-        self.status_pill.set_state("error", self._i18n.tr("error"))
-        self.console_status.setText(f"{self._i18n.tr('error_prefix')} {error_msg[:80]}")
-        self.reset_progress()
-        self.open_output_btn.setEnabled(False)
-        self.open_folder_btn.setEnabled(False)
-        self._processor = None
-        QMessageBox.critical(
-            self, self._i18n.tr("error"), f"{self._i18n.tr('failed_to_process')}\n{error_msg}"
-        )
-
-    # ----- output helpers ------------------------------------------------
-
-    def _open_output_file(self, path: str) -> None:
-        """Open the generated Excel in the OS default viewer."""
-        if not path or not os.path.exists(path):
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("file_missing"),
-                f"{self._i18n.tr('output_file_missing')}\n{path}",
-            )
-            return
+    def _announce(self, message: str) -> None:
+        self.status_label.setAccessibleDescription(message)
         try:
-            if sys.platform == "win32":
-                os.startfile(path)  # type: ignore[attr-defined]
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", path])
-            else:
-                subprocess.Popen(["xdg-open", path])
-        except Exception as e:
-            QMessageBox.critical(
-                self, self._i18n.tr("open_failed"), f"{self._i18n.tr('could_not_open_file')}\n{e}"
+            QAccessible.updateAccessibility(
+                QAccessibleEvent(self.status_label, QAccessible.Event.NameChanged)
             )
+        except Exception:
+            pass
 
-    def _reveal_in_folder(self, path: str) -> None:
-        """Open the containing folder in Explorer / Finder / file manager,
-        with the file selected if the OS supports it."""
-        if not path or not os.path.exists(path):
-            QMessageBox.warning(
-                self,
-                self._i18n.tr("file_missing"),
-                f"{self._i18n.tr('output_file_missing')}\n{path}",
-            )
+    def _open_output(self) -> None:
+        if not self._output_path:
             return
-        try:
-            if sys.platform == "win32":
-                # /select, highlights the file in a new Explorer window.
-                subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", "-R", path])
-            else:
-                subprocess.Popen(["xdg-open", os.path.dirname(path)])
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                self._i18n.tr("reveal_failed"),
-                f"{self._i18n.tr('could_not_open_folder')}\n{e}",
-            )
+        if sys.platform == "win32":
+            os.startfile(self._output_path)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", self._output_path])
+        else:
+            subprocess.Popen(["xdg-open", self._output_path])
 
-    def _open_last_output(self) -> None:
-        """Slot for the in-page "Open Output" button."""
-        if self._last_output_path:
-            self._open_output_file(self._last_output_path)
+    def _show_output_folder(self) -> None:
+        if not self._output_path:
+            return
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(self._output_path)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", self._output_path])
+        else:
+            subprocess.Popen(["xdg-open", str(Path(self._output_path).parent)])
 
-    def _reveal_last_output(self) -> None:
-        """Slot for the in-page "Show in Folder" button."""
-        if self._last_output_path:
-            self._reveal_in_folder(self._last_output_path)
-
-    # ----- i18n -----------------------------------------------------------
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        direction = QBoxLayout.TopToBottom if self.width() < 980 else QBoxLayout.LeftToRight
+        self.approval_layout.setDirection(direction)
 
     def retranslate_ui(self) -> None:
-        """Re-apply translated labels to the visible widgets.
-
-        Called by MainWindow whenever the i18n object emits
-        ``language_changed``. The status pill and the console
-        status line are intentionally left as-is here — they
-        show transient state (e.g. "Processing…", "Saved: foo.xlsx")
-        which the next event will overwrite with the translated
-        string anyway.
-        """
-        self.browse_btn.setText(self._i18n.tr("select_file"))
-        self.process_btn.setText(
-            self._i18n.tr("process_button_prefix") + self._i18n.tr("process_button")
-        )
-        self.clear_btn.setText(self._i18n.tr("clear"))
-        self.open_output_btn.setText(self._i18n.tr("open_output"))
-        self.open_folder_btn.setText(self._i18n.tr("show_in_folder"))
-        self.clear_console_btn.setText(self._i18n.tr("clear_log"))
-        self.console_status.setText(self._i18n.tr("awaiting_input"))
-        # Update file label if no file is selected
-        if not self.selected_file:
-            self.file_label.setText(self._i18n.tr("no_file_selected"))
+        self.title.setText(self._i18n.tr("workbench_title"))
+        self.subtitle.setText(self._i18n.tr("workbench_subtitle"))
+        self.drop_zone.setText(self._i18n.tr("drop_zone_action"))
+        self.drop_zone.setAccessibleName(self._i18n.tr("drop_zone_accessible"))
+        self.empty_hint.setText(self._i18n.tr("xlsx_only_hint"))
+        self.ready_label.setText(self._i18n.tr("ready_to_run"))
+        self.replace_button.setText(self._i18n.tr("replace_file"))
+        self.start_button.setText(self._i18n.tr("start_agent"))
+        self.cancel_button.setText(self._i18n.tr("cancel"))
+        self.approval_heading.setText(self._i18n.tr("approval_title"))
+        self.approval_text.setText(self._i18n.tr("approval_subtitle"))
+        self.details_toggle.setText(self._i18n.tr("technical_details"))
+        self.total_caption.setText(self._i18n.tr("total_items"))
+        self.packages_caption.setText(self._i18n.tr("work_packages"))
+        self.approve_button.setText(self._i18n.tr("approve_generate"))
+        self.approval_cancel_button.setText(self._i18n.tr("cancel"))
+        self.complete_heading.setText(self._i18n.tr("complete_title"))
+        self.open_excel_button.setText(self._i18n.tr("open_excel"))
+        self.show_folder_button.setText(self._i18n.tr("show_in_folder"))
+        self.another_button.setText(self._i18n.tr("start_another"))
+        self.error_heading.setText(self._i18n.tr("error_title"))
+        self.retry_button.setText(self._i18n.tr("retry"))
+        self.error_reset_button.setText(self._i18n.tr("choose_another_file"))
+        if hasattr(self, "phase_strip"):
+            self.phase_strip.retranslate_ui()
+            self.approval_phase_strip.retranslate_ui()

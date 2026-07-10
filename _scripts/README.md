@@ -1,10 +1,5 @@
-# Build & ops scripts
+# Build script
 
-Helper scripts for building, packaging, and operating Tawreed.
-
-- `build-windows.bat` — runs PyInstaller with `tawreed.spec`,
-  producing `dist\Tawreed\Tawreed.exe` (onedir).
-
-All scripts assume they're run from the project root with the
-`.venv` virtualenv active. Each script is self-contained and
-re-runnable; they clean their own previous outputs.
+`build-windows.bat` creates the single portable file
+`dist\Tawreed.exe`. Run it from a development checkout with the `.venv`
+environment installed. It removes previous local build output before building.

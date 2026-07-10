@@ -131,7 +131,7 @@ def is_valid_provider(name: str) -> bool:
 
 def get_default_settings() -> dict:
     """Return a complete default settings dict using the default provider."""
-    default_provider = "OpenAI"
+    default_provider = "Codex"
     p = PROVIDERS[default_provider]
     return {
         "provider": default_provider,
@@ -139,7 +139,7 @@ def get_default_settings() -> dict:
         "model": p["default_model"],
         "base_url": p["base_url"],
         "language": "en",
-        "theme": "dark",
+        "theme": "system",
     }
 
 

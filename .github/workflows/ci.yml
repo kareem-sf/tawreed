@@ -43,12 +43,8 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      # Pre-commit enforces the same lint/format rules that
-      # local development does. The previous v0.0.1 shipped with
-      # hardcoded "sk-..." test fixtures and plaintext api_key
-      # references because pre-commit wasn't wired into CI. Adding
-      # it here makes "I forgot to run pre-commit" a CI failure,
-      # not a release-blocker follow-up PR.
+      # Pre-commit enforces the same lint, formatting, and secret checks
+      # used during local development before any release is published.
       - name: Pre-commit
         # SKIP is set in the `env:` block (cross-shell safe)
         # rather than as a `VAR=val` prefix on the command line,

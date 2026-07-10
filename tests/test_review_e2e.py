@@ -60,7 +60,10 @@ def test_parse_review_edit_export_and_history_end_to_end(isolated_tawreed_dir, m
     assert not outputs
     assert db.get_history() == []
 
-    asyncio.run(processor.approve_and_export({"R1": "Structural Works", "R2": "Masonry Works"}))
+    approval = drafts[0]
+    assert not hasattr(approval, "items")
+    assert approval.summary.total_items == 2
+    asyncio.run(processor.approve_and_export(approval.token))
 
     assert len(outputs) == 1
     output = outputs[0]
@@ -79,7 +82,7 @@ def test_parse_review_edit_export_and_history_end_to_end(isolated_tawreed_dir, m
     finally:
         exported.close()
 
-    assert exported_assignments == {"R1": "Structural Works", "R2": "Masonry Works"}
+    assert exported_assignments == {"R1": "Concrete Works", "R2": "Masonry"}
     history = db.get_history()
     assert len(history) == 1
     assert history[0]["output_path"] == output

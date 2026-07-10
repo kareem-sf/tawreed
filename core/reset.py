@@ -9,18 +9,13 @@ Used by the Settings page "Reset everything" button. The reset:
 4. Removes the ``outputs/`` folder (cached Excel workbooks).
 5. Removes ``ui_state.json`` (window geometry, last page).
 
-The keyring wipe is the part that closes the v0.0.1
-"plaintext api_key" gap for users who used the Reset button
-after upgrading — without it, the key would stay in the
-Credential Manager and the reset would be a half-job.
+The keyring wipe ensures a reset also removes secrets from the
+operating-system credential store. Without it, the reset would
+leave authentication material behind.
 
-The ui_state wipe is the v0.0.2 follow-up that removes the
-last writer to the Windows registry: the previous build used
-``QSettings("sfkareem", "Tawreed")`` for window state, which
-wrote to ``HKCU\\SOFTWARE\\sfkareem\\Tawreed``. That path has
-been replaced with a plain JSON file under ``~/.tawreed/``;
-this reset removes it so the next launch starts with default
-window size and the workspace page.
+Window state is stored in a plain JSON file under ``~/.tawreed/``
+instead of the Windows registry. Removing it makes the next launch
+start with the default window size and Workbench page.
 
 We are NOT removing the user's TAWREED_DIR itself so that re-launch
 creates a fresh one with the same default shape. Removing the parent

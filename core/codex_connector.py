@@ -20,6 +20,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tawreed_app import __version__
+
 MAX_CODEX_OUTPUT_BYTES = 1_000_000
 MAX_APP_SERVER_OUTPUT_BYTES = 2_000_000
 CODEX_TIMEOUT_SECONDS = 180
@@ -385,7 +387,7 @@ def fetch_codex_models(timeout: int = CODEX_CATALOG_TIMEOUT_SECONDS) -> CodexMod
                     "clientInfo": {
                         "name": "tawreed",
                         "title": "Tawreed",
-                        "version": "0.0.12",
+                        "version": __version__,
                     }
                 },
             },

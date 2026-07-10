@@ -1,220 +1,221 @@
-"""History page — read-only list of past BOQ processing runs.
-
-Senior design choices:
-- Card-based layout (one Card for the table, one for the actions).
-- Empty state with a friendly hint and a "Go to Workspace" button
-  that focuses the main shell's nav. (The shell wires this up via
-  a signal in a future PR; for now the button is shown but the
-  focus step is best-effort.)
-- Double-click a row to open the output Excel in the system viewer.
-- Row count + last-updated timestamp in the footer.
-"""
+"""Compact, path-free run history."""
 
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
+from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
+    QListView,
+    QMenu,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
+    QScrollArea,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from core import db
 from core.i18n import get_i18n
-from gui.widgets import Card, PageHeader, StatusPill
+
+
+class RunListModel(QAbstractListModel):
+    EntryRole = Qt.UserRole + 1
+
+    def __init__(self, entries: list[dict[str, Any]] | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("pageHost")
+        self._i18n = get_i18n()
+        self._entries = entries or []
+
+    def set_entries(self, entries: list[dict[str, Any]]) -> None:
+        self.beginResetModel()
+        self._entries = list(entries)
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._entries)
+
+    def data(self, index: QModelIndex, role=Qt.DisplayRole):
+        if not index.isValid() or not 0 <= index.row() < len(self._entries):
+            return None
+        entry = self._entries[index.row()]
+        if role == self.EntryRole:
+            return entry
+        if role == Qt.DisplayRole:
+            name = str(entry.get("project_name") or "Tawreed run")
+            packages = int(entry.get("packages_count") or 0)
+            timestamp = str(entry.get("timestamp") or "")
+            status = self._i18n.tr("run_completed")
+            package_text = self._i18n.tr("run_packages_short").format(count=packages)
+            return f"{name}\n{status}  ·  {package_text}  ·  {timestamp}"
+        if role == Qt.AccessibleTextRole:
+            return self.data(index, Qt.DisplayRole)
+        return None
+
+    def retranslate(self) -> None:
+        if self._entries:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self._entries) - 1, 0))
 
 
 class HistoryPage(QWidget):
-    """A read-only list of past processing runs."""
-
-    HEADERS = ["#", "Timestamp", "Project", "Packages", "Output Path"]
-    COL_ID, COL_TS, COL_PROJ, COL_PKGS, COL_PATH = range(len(HEADERS))
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._i18n = get_i18n()
         self._build_ui()
         self.refresh()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
+        canvas = QWidget(scroll)
+        canvas.setObjectName("pageCanvas")
+        layout = QVBoxLayout(canvas)
+        layout.setContentsMargins(56, 42, 56, 42)
+        layout.setSpacing(18)
+        scroll.setWidget(canvas)
 
-        # Header + status pill on the right
-        header_row = QHBoxLayout()
-        header_row.setSpacing(12)
-        header = PageHeader(
-            self._i18n.tr("history_page_title"),
-            self._i18n.tr("history_page_subtitle"),
-        )
-        header_row.addWidget(header, stretch=1)
-        self.status_pill = StatusPill()
-        self.status_pill.set_state("idle", "—")
-        header_row.addWidget(self.status_pill, alignment=Qt.AlignTop)
-        layout.addLayout(header_row)
+        header = QHBoxLayout()
+        title_col = QVBoxLayout()
+        self.title = QLabel(canvas)
+        self.title.setObjectName("pageTitle")
+        self.subtitle = QLabel(canvas)
+        self.subtitle.setObjectName("pageSubtitle")
+        self.subtitle.setWordWrap(True)
+        title_col.addWidget(self.title)
+        title_col.addWidget(self.subtitle)
+        header.addLayout(title_col, 1)
+        self.refresh_button = QPushButton(canvas)
+        self.refresh_button.setObjectName("secondaryButton")
+        self.refresh_button.clicked.connect(self.refresh)
+        header.addWidget(self.refresh_button, 0, Qt.AlignTop)
+        self.actions_button = QToolButton(canvas)
+        self.actions_button.setObjectName("secondaryButton")
+        self.actions_button.setPopupMode(QToolButton.InstantPopup)
+        self.actions_button.setEnabled(False)
+        self.actions_menu = QMenu(self.actions_button)
+        self.open_action = self.actions_menu.addAction("")
+        self.reveal_action = self.actions_menu.addAction("")
+        self.actions_menu.addSeparator()
+        self.remove_action = self.actions_menu.addAction("")
+        self.open_action.triggered.connect(self.open_selected)
+        self.reveal_action.triggered.connect(self.reveal_selected)
+        self.remove_action.triggered.connect(self.remove_selected)
+        self.actions_button.setMenu(self.actions_menu)
+        header.addWidget(self.actions_button, 0, Qt.AlignTop)
+        layout.addLayout(header)
 
-        # ----- Actions card -----
-        actions_card = Card()
-        actions = QHBoxLayout()
-        actions.setSpacing(10)
-        self.refresh_btn = QPushButton(self._i18n.tr("refresh_button"))
-        self.refresh_btn.clicked.connect(self.refresh)
-        self.open_btn = QPushButton(self._i18n.tr("open_selected_button"))
-        self.open_btn.clicked.connect(self.open_selected)
-        self.delete_btn = QPushButton(self._i18n.tr("delete_selected_button"))
-        self.delete_btn.setObjectName("dangerBtn")
-        self.delete_btn.clicked.connect(self.delete_selected)
-        actions.addWidget(self.refresh_btn)
-        actions.addWidget(self.open_btn)
-        actions.addStretch()
-        actions.addWidget(self.delete_btn)
-        actions_card.addLayout(actions)
-        layout.addWidget(actions_card)
+        self.model = RunListModel(parent=self)
+        self.list_view = QListView(canvas)
+        self.list_view.setObjectName("runList")
+        self.list_view.setModel(self.model)
+        self.list_view.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.list_view.setSpacing(2)
+        self.list_view.doubleClicked.connect(lambda _index: self.open_selected())
+        self.list_view.selectionModel().selectionChanged.connect(self._selection_changed)
+        layout.addWidget(self.list_view, 1)
 
-        # ----- Table card -----
-        self.table = QTableWidget(0, len(self.HEADERS))
-        self.table.setHorizontalHeaderLabels(self.HEADERS)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setAlternatingRowColors(True)
-        self.table.setObjectName("historyTable")
-        self.table.doubleClicked.connect(self.open_selected)
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        header_view = self.table.horizontalHeader()
-        header_view.setSectionResizeMode(self.COL_ID, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(self.COL_TS, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(self.COL_PROJ, QHeaderView.Stretch)
-        header_view.setSectionResizeMode(self.COL_PKGS, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(self.COL_PATH, QHeaderView.Stretch)
-
-        # Wrap the table in a card so it inherits the surface styling
-        # instead of looking like a raw widget hanging in space.
-        table_card = Card()
-        table_card.addWidget(self.table)
-        layout.addWidget(table_card, stretch=1)
-
-        # ----- Footer status -----
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
-
-    # ----- data loading ---------------------------------------------------
+        self.empty_label = QLabel(canvas)
+        self.empty_label.setObjectName("emptyState")
+        self.empty_label.setAlignment(Qt.AlignCenter)
+        self.empty_label.setWordWrap(True)
+        layout.addWidget(self.empty_label, 1)
+        self.count_label = QLabel(canvas)
+        self.count_label.setObjectName("hintText")
+        layout.addWidget(self.count_label)
+        self.retranslate_ui()
 
     def refresh(self) -> None:
         try:
-            history = db.get_history()
-        except Exception as e:
-            self.table.setRowCount(0)
-            self.status_label.setText(f"{self._i18n.tr('failed_to_load_history')}: {e}")
-            self.status_pill.set_state("error", self._i18n.tr("load_failed"))
-            return
+            entries = db.get_history()
+        except Exception as exc:
+            entries = []
+            self.empty_label.setText(f"{self._i18n.tr('failed_to_load_history')}: {exc}")
+        self.model.set_entries(entries)
+        self.list_view.setVisible(bool(entries))
+        self.empty_label.setVisible(not entries)
+        self.actions_button.setEnabled(False)
+        self.count_label.setText(self._i18n.tr("run_count").format(count=len(entries)))
 
-        self.table.setRowCount(len(history))
-        for row_idx, entry in enumerate(history):
-            ts = str(entry.get("timestamp", ""))
-            proj = str(entry.get("project_name", ""))
-            pkgs = str(entry.get("packages_count", ""))
-            path = str(entry.get("output_path", ""))
+    def _selection_changed(self) -> None:
+        self.actions_button.setEnabled(self.list_view.currentIndex().isValid())
 
-            self.table.setItem(row_idx, self.COL_ID, QTableWidgetItem(str(entry.get("id", ""))))
-            self.table.setItem(row_idx, self.COL_TS, QTableWidgetItem(ts))
-            self.table.setItem(row_idx, self.COL_PROJ, QTableWidgetItem(proj))
-            self.table.setItem(row_idx, self.COL_PKGS, QTableWidgetItem(pkgs))
-            self.table.setItem(row_idx, self.COL_PATH, QTableWidgetItem(path))
-            # Tooltip on the path cell so long Windows paths are readable.
-            self.table.item(row_idx, self.COL_PATH).setToolTip(path)
-
-        if history:
-            self.status_pill.set_state("success", f"{len(history)} run(s)")
-            self.status_label.setText(
-                f"{len(history)} run(s) recorded.  Last: {history[0].get('timestamp', '—')}"
-            )
-        else:
-            self.status_pill.set_state("idle", self._i18n.tr("empty_history"))
-            self.status_label.setText(self._i18n.tr("no_history_yet"))
-
-    # ----- actions --------------------------------------------------------
-
-    def _selected_output_path(self) -> str | None:
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        return self.table.item(rows[0].row(), self.COL_PATH).text()
+    def _selected_entry(self) -> dict[str, Any] | None:
+        index = self.list_view.currentIndex()
+        return index.data(RunListModel.EntryRole) if index.isValid() else None
 
     def open_selected(self) -> None:
-        path = self._selected_output_path()
-        if not path:
-            QMessageBox.information(
-                self, self._i18n.tr("nothing_selected"), self._i18n.tr("pick_row_first")
-            )
+        entry = self._selected_entry()
+        if entry:
+            self._open_path(str(entry.get("output_path") or ""))
+
+    def reveal_selected(self) -> None:
+        entry = self._selected_entry()
+        if not entry:
             return
+        path = str(entry.get("output_path") or "")
         if not os.path.exists(path):
             QMessageBox.warning(
-                self,
-                self._i18n.tr("file_missing"),
-                f"{self._i18n.tr('output_file_missing')}\n{path}",
+                self, self._i18n.tr("file_missing"), self._i18n.tr("output_file_missing")
             )
             return
-        try:
-            if sys.platform == "win32":
-                os.startfile(path)  # type: ignore[attr-defined]
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", path])
-            else:
-                subprocess.Popen(["xdg-open", path])
-        except Exception as e:
-            QMessageBox.critical(
-                self, self._i18n.tr("open_failed"), f"{self._i18n.tr('could_not_open_file')}\n{e}"
-            )
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path])
+        else:
+            subprocess.Popen(["xdg-open", os.path.dirname(path)])
 
-    def delete_selected(self) -> None:
-        from core import db as db_mod
-
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            QMessageBox.information(
-                self, self._i18n.tr("nothing_selected"), self._i18n.tr("pick_row_first")
+    def _open_path(self, path: str) -> None:
+        if not path or not os.path.exists(path):
+            QMessageBox.warning(
+                self, self._i18n.tr("file_missing"), self._i18n.tr("output_file_missing")
             )
             return
-        row = rows[0].row()
-        entry_id = int(self.table.item(row, self.COL_ID).text())
-        proj = self.table.item(row, self.COL_PROJ).text()
-        confirm = QMessageBox.question(
+        if sys.platform == "win32":
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+
+    def remove_selected(self) -> None:
+        entry = self._selected_entry()
+        if not entry:
+            return
+        answer = QMessageBox.question(
             self,
-            self._i18n.tr("delete_run_question"),
-            self._i18n.tr("delete_run_confirm").format(proj=proj, entry_id=entry_id),
+            self._i18n.tr("remove_run_title"),
+            self._i18n.tr("remove_run_message"),
             QMessageBox.Yes | QMessageBox.Cancel,
             QMessageBox.Cancel,
         )
-        if confirm != QMessageBox.Yes:
-            return
-        try:
-            db_mod.delete_history_entry(entry_id)
-        except AttributeError:
-            # Older core.db without the helper — fall back to raw SQL.
-            import sqlite3
+        if answer == QMessageBox.Yes:
+            db.delete_history_entry(int(entry["id"]))
+            self.refresh()
 
-            conn = sqlite3.connect(db_mod.DB_PATH)
-            try:
-                conn.execute("DELETE FROM history WHERE id = ?", (entry_id,))
-                conn.commit()
-            finally:
-                conn.close()
-        self.refresh()
+    def retranslate_ui(self) -> None:
+        self.title.setText(self._i18n.tr("runs_title"))
+        self.subtitle.setText(self._i18n.tr("runs_subtitle"))
+        self.refresh_button.setText(self._i18n.tr("refresh_button"))
+        self.actions_button.setText(self._i18n.tr("actions"))
+        self.open_action.setText(self._i18n.tr("open_excel"))
+        self.reveal_action.setText(self._i18n.tr("show_in_folder"))
+        self.remove_action.setText(self._i18n.tr("remove_from_history"))
+        self.model.retranslate()
+        if not self.model.rowCount():
+            self.empty_label.setText(self._i18n.tr("runs_empty"))

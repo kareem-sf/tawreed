@@ -128,14 +128,17 @@ def _run() -> int:
         if saved_language != i18n.language:
             i18n.set_language(saved_language)
 
-        saved_theme = settings.get("theme", "dark")
-        if saved_theme != "dark":
-            from gui.styles import set_theme
+        saved_theme = settings.get("theme", "system")
+        from gui.styles import set_theme
 
-            set_theme(saved_theme)
+        set_theme(saved_theme)
     except Exception:
         # If settings can't be loaded, use system default
         pass
+
+    from gui.styles import load_stylesheet
+
+    app.setStyleSheet(load_stylesheet())
 
     app.setLayoutDirection(Qt.RightToLeft if i18n.is_rtl() else Qt.LeftToRight)
     i18n.language_changed.connect(

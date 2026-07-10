@@ -207,7 +207,7 @@ def test_unknown_provider_falls_back_to_default(isolated_config):
     )
     s = db.get_settings()
     assert s["provider"] in PROVIDERS
-    assert s["provider"] == "OpenAI"
+    assert s["provider"] == "Codex"
 
 
 def test_corrupt_config_returns_defaults(isolated_config):

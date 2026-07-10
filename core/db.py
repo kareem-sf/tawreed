@@ -774,10 +774,10 @@ def get_settings() -> dict[str, Any]:
 
     # Validate and normalize theme setting
     if "theme" not in settings:
-        settings["theme"] = default_settings.get("theme", "dark")
+        settings["theme"] = default_settings.get("theme", "system")
     else:
-        if settings["theme"] not in ("dark", "light"):
-            settings["theme"] = default_settings.get("theme", "dark")
+        if settings["theme"] not in ("system", "dark", "light"):
+            settings["theme"] = default_settings.get("theme", "system")
 
     # Populate api_key from keyring. If a legacy plaintext key
     # is sitting in config.json (which the migration should
@@ -831,9 +831,9 @@ def save_settings(settings: dict) -> None:
     """
     os.makedirs(TAWREED_DIR, exist_ok=True)
 
-    provider = settings.get("provider", "OpenAI")
+    provider = settings.get("provider", "Codex")
     if not is_valid_provider(provider):
-        provider = "OpenAI"
+        provider = "Codex"
     settings["provider"] = provider
 
     p = get_provider_config(provider)
@@ -860,10 +860,10 @@ def save_settings(settings: dict) -> None:
 
     # Validate and normalize theme setting
     if "theme" not in settings:
-        settings["theme"] = "dark"
+        settings["theme"] = "system"
     else:
-        if settings["theme"] not in ("dark", "light"):
-            settings["theme"] = "dark"
+        if settings["theme"] not in ("system", "dark", "light"):
+            settings["theme"] = "system"
 
     # Route the api_key to keyring and drop it from the on-disk
     # payload. ``api_key`` is allowed to be absent in the input
@@ -896,7 +896,7 @@ def update_settings(
     model: str,
     base_url: str,
     language: str = "en",
-    theme: str = "dark",
+    theme: str = "system",
 ) -> None:
     settings = {
         "provider": provider,

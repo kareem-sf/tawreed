@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import secrets
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +15,7 @@ from core.ai import test_connection as _test_connection
 from core.codex_connector import CodexConnectorError, fetch_codex_models
 from core.excel import parse_excel, write_excel
 from core.packaging_agent import BOQPackagingAgent, canonicalise_ai_package_name
+from gui.run_contracts import ApprovalRequest, ApprovalSummary, RunPhase, RunProgress
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +23,7 @@ log = logging.getLogger(__name__)
 class WorkerSignals(QObject):
     log = Signal(str)
     review_ready = Signal(object)
+    progress = Signal(object)
     finished = Signal(str)
     error = Signal(str)
 
@@ -219,16 +223,48 @@ class BOQProcessor:
         self.settings = db.get_settings()
         self._i18n = i18n
         self.agent = BOQPackagingAgent()
+        self._started_at = 0.0
+        self._approval_token: str | None = None
+        self._cancel_requested = False
+
+    def _progress(
+        self,
+        phase: RunPhase,
+        message: str,
+        *,
+        current: int | None = None,
+        total: int | None = None,
+        cancellable: bool = False,
+    ) -> None:
+        elapsed = max(0.0, time.monotonic() - self._started_at) if self._started_at else 0.0
+        self.signals.progress.emit(
+            RunProgress(phase, message, current, total, elapsed, cancellable)
+        )
+
+    def _tr(self, key: str, fallback: str, **values) -> str:
+        template = self._i18n.tr(key) if self._i18n else fallback
+        return template.format(**values)
+
+    def _ensure_active(self) -> None:
+        if self._cancel_requested:
+            raise asyncio.CancelledError
 
     async def process(self):
         try:
+            self._started_at = time.monotonic()
             self.agent.start()
+            self._progress(
+                RunPhase.INSPECTING,
+                self._tr("progress_inspecting", "Inspecting workbook structure"),
+                cancellable=True,
+            )
             self.signals.log.emit(
                 self._i18n.tr("parsing_excel") if self._i18n else "Parsing Excel BOQ file..."
             )
             _markdown_content, data_mapping, _headers_mapping = await asyncio.to_thread(
                 parse_excel, self.file_path, self._i18n
             )
+            self._ensure_active()
             if not data_mapping:
                 raise ValueError(
                     self._i18n.tr("no_boq_items_found")
@@ -239,6 +275,13 @@ class BOQProcessor:
                 self._i18n.tr("successfully_parsed").format(count=len(data_mapping))
                 if self._i18n
                 else f"Successfully parsed {len(data_mapping)} items from Excel."
+            )
+            self._progress(
+                RunPhase.STRUCTURING,
+                self._tr("progress_structuring", "Structuring BOQ items into safe work batches"),
+                current=len(data_mapping),
+                total=len(data_mapping),
+                cancellable=True,
             )
             batches = self.agent.plan_batches(data_mapping)
 
@@ -279,6 +322,19 @@ class BOQProcessor:
             )
             item_categories: dict[str, str] = {}
             for batch in batches:
+                self._ensure_active()
+                self._progress(
+                    RunPhase.CLASSIFYING,
+                    self._tr(
+                        "progress_classifying",
+                        "Classifying batch {current} of {total}",
+                        current=batch.index,
+                        total=len(batches),
+                    ),
+                    current=batch.index - 1,
+                    total=len(batches),
+                    cancellable=True,
+                )
                 self.signals.log.emit(
                     self._i18n.tr("analyzing_batch").format(current=batch.index, total=len(batches))
                     if self._i18n
@@ -308,6 +364,15 @@ class BOQProcessor:
                     }
                 )
 
+            self._ensure_active()
+            self._progress(
+                RunPhase.VALIDATING,
+                self._tr("progress_validating", "Validating item coverage and package assignments"),
+                current=len(item_categories),
+                total=len(data_mapping),
+                cancellable=True,
+            )
+
             project_name = Path(self.file_path).stem.strip() or (
                 self._i18n.tr("default_project_name") if self._i18n else "Tawreed Project"
             )
@@ -334,16 +399,61 @@ class BOQProcessor:
                 date=date,
                 suggested_categories=item_categories,
             )
-            self.signals.review_ready.emit(draft)
 
+            package_counts: dict[str, int] = {}
+            for package in draft.suggested_categories.values():
+                package_counts[package] = package_counts.get(package, 0) + 1
+            other_count = package_counts.get("Other", 0)
+            warnings = (
+                (
+                    self._tr(
+                        "other_items_warning",
+                        "{count} items were assigned to Other; review them in Excel after export.",
+                        count=other_count,
+                    ),
+                )
+                if other_count
+                else ()
+            )
+            self._approval_token = secrets.token_urlsafe(24)
+            summary = ApprovalSummary(
+                source_filename=Path(self.file_path).name,
+                total_items=len(draft.items),
+                package_counts=tuple(
+                    sorted(package_counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+                ),
+                warnings=warnings,
+                provider=provider,
+                model=model_id,
+            )
+            self._progress(
+                RunPhase.APPROVAL,
+                self._tr("progress_approval", "Work packages are ready for approval"),
+                current=len(draft.items),
+                total=len(draft.items),
+                cancellable=True,
+            )
+            self.signals.review_ready.emit(ApprovalRequest(self._approval_token, summary))
+
+        except asyncio.CancelledError:
+            if self.agent.state.value in {"analyzing", "review_required"}:
+                self.agent.cancel()
+            return
         except Exception as e:
             self.agent.fail(e)
+            self._progress(RunPhase.ERROR, str(e))
             self.signals.error.emit(str(e))
 
-    async def approve_and_export(self, reviewed_categories: dict[str, str]) -> None:
-        """Export only after the review dialog returns explicit approval."""
+    async def approve_and_export(self, approval_token: str) -> None:
+        """Export the private draft only after its opaque token is approved."""
         try:
-            approved = self.agent.approve(reviewed_categories)
+            if not self._approval_token or not secrets.compare_digest(
+                approval_token, self._approval_token
+            ):
+                raise ValueError("This approval request is no longer valid. Start the run again.")
+            if self.agent.draft is None:
+                raise ValueError("No packaging draft is available for export.")
+            approved = self.agent.approve(self.agent.draft.suggested_categories)
             output_dir = db.get_outputs_dir()
             base_name = os.path.basename(self.file_path)
             name_without_ext, _ = os.path.splitext(base_name)
@@ -352,6 +462,10 @@ class BOQProcessor:
                 f"{name_without_ext}{self._i18n.tr('output_file_suffix') if self._i18n else '_Tawreed_Output'}.xlsx",
             )
 
+            self._progress(
+                RunPhase.EXPORTING,
+                self._tr("progress_exporting", "Generating the approved workbook"),
+            )
             self.signals.log.emit(
                 self._i18n.tr("generating_output").format(output_file=output_file)
                 if self._i18n
@@ -382,10 +496,22 @@ class BOQProcessor:
                 )
 
             self.agent.complete(output_file)
+            self._approval_token = None
+            self._progress(
+                RunPhase.COMPLETE,
+                self._tr("progress_complete", "Workbook generated successfully"),
+            )
             self.signals.finished.emit(output_file)
         except Exception as e:
             self.agent.fail(e)
+            self._progress(RunPhase.ERROR, str(e))
             self.signals.error.emit(str(e))
 
     def cancel_review(self) -> None:
-        self.agent.cancel()
+        self.cancel()
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+        self._approval_token = None
+        if self.agent.state.value in {"analyzing", "review_required"}:
+            self.agent.cancel()

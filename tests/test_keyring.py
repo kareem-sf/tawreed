@@ -107,7 +107,7 @@ def test_get_settings_with_no_config_returns_empty_api_key(isolated_tawreed_dir)
     get_settings() should return defaults with api_key=''."""
     assert not Path(db.CONFIG_PATH).exists()
     s = db.get_settings()
-    assert s["provider"] in ("OpenAI", "OpenAI Compatible")
+    assert s["provider"] == "Codex"
     assert s["api_key"] == ""
 
 
@@ -115,7 +115,7 @@ def test_get_settings_does_not_persist_api_key(isolated_tawreed_dir):
     """Calling get_settings() must never write the api_key to
     config.json. The only writer to config.json is save_settings,
     and even that routes the key to keyring."""
-    db.set_api_key("OpenAI", "key-1")
+    db.set_api_key("Codex", "key-1")
     # Trigger a get_settings() roundtrip.
     s = db.get_settings()
     assert s["api_key"] == "key-1"

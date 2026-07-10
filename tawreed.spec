@@ -3,18 +3,12 @@
 # Tawreed — PyInstaller spec, onefile build with dead-weight trimming.
 #
 # Why onefile (vs onedir)?
-#   The previous v0.0.1 shipped onedir, which meant the user
-#   unzipped a 60+ MB archive and saw a ``_internal/`` folder full
-#   of 81 files. For a desktop app the user double-clicks, that's a
-#   terrible first impression. Onefile packages the bootloader +
-#   every dependency into a single ``Tawreed.exe`` that the user
-#   drops anywhere. Cold start is ~12s on a cold cache vs ~1.5s for
-#   onedir, but for an internal BOQ-analysis tool that gets opened
-#   a few times a day, the UX win is worth the 10s.
+#   The first public release is intentionally a single portable binary:
+#   no installer, ZIP archive, source bundle, or companion directory.
+#   Users download ``Tawreed.exe`` and run it from any writable location.
 #
 # Why the long excludes list?
-#   The untrimmed onedir build was 188 MB. ~70 MB of that was
-#   PySide6 modules the app never imports (QtQuick, QtPdf, QtSvg,
+#   PySide6 includes modules the app never imports (QtQuick, QtPdf, QtSvg,
 #   the OpenGL software fallback, the full Qt translation pack,
 #   the Win32 API forwarder DLLs). PyInstaller's static analysis
 #   pulls in everything in site-packages, including the Qt
@@ -52,6 +46,7 @@ HIDDEN_IMPORTS = [
     "gui.pages.history_page",
     "gui.pages.settings_page",
     "gui.pages.about_page",
+    "gui.run_contracts",
     "gui.splash",
     "gui.single_app",
     "gui.widgets",
@@ -192,7 +187,6 @@ a = Analysis(
         ("gui/tawreed_logo_transparent.png", "."),
         # Theme files — loaded at runtime by gui.styles.load_stylesheet.
         ("gui/themes/tawreed_dark.qss", "gui/themes"),
-        ("gui/themes/tawreed_light.qss", "gui/themes"),
     ],
     hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],

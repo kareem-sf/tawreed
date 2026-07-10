@@ -16,14 +16,11 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
-        # trailing whitespace is forbidden in the source tree
-        # (the previous codebase had a mix of CRLF/LF and stray
-        # spaces on blank lines).
+        # Trailing whitespace is forbidden in the source tree.
       - id: end-of-file-fixer
         # Every file ends with a newline.
       - id: check-yaml
-        # .github/workflows/*.yml must be valid YAML (catches the
-        # 'leading text above `name:`' bug from earlier PRs).
+        # .github/workflows/*.yml must be valid YAML.
       - id: check-toml
       - id: check-added-large-files
         # Don't commit anything > 1 MB without thinking about it.

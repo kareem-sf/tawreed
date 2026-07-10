@@ -121,8 +121,7 @@ jobs:
     # The `publish` job runs once all 3 platform builds have
     # finished, downloads the per-platform artifacts, and
     # attaches them to a GitHub Release for tag `v*`.
-    # On a `workflow_dispatch` (manual) run it still publishes
-    # so the v0.0.1 re-tag is reproducible.
+    # Manual runs build artifacts for verification but publish only from tags.
     name: Publish GitHub Release
     needs: build
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

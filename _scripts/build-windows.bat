@@ -6,7 +6,7 @@ REM Usage:
 REM     .venv\Scripts\python -m pip install -e .[dev]
 REM     _scripts\build-windows.bat
 REM
-REM Output: dist\Tawreed\Tawreed.exe (onedir).
+REM Output: dist\Tawreed.exe (single portable file).
 REM ---------------------------------------------------------------------------
 
 setlocal
@@ -30,8 +30,7 @@ if errorlevel 1 (
 
 echo.
 echo [build] success.
-echo [build] executable: dist\Tawreed\Tawreed.exe
-echo [build] folder:      dist\Tawreed\
+echo [build] executable: dist\Tawreed.exe
 echo.
 
 popd

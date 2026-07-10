@@ -1,29 +1,21 @@
-"""About page — author credits, version, repo, and license.
-
-Senior design choices:
-- Card-based layout. Each logical block (Author, Project, Stack,
-  License, Repository) is its own Card.
-- Author block centres the brand mark + name + URL — a tiny
-  visual signature rather than a wall of text.
-- Version is pulled from tawreed_app.__init__ at runtime so a version
-  bump only needs to be done in one place.
-"""
+"""Minimal About surface."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from core.i18n import get_i18n
 from gui.assets import LOGO_PNG_PATH
-from gui.widgets import Card, PageHeader
 from tawreed_app import (
     __appname__,
     __author__,
@@ -35,136 +27,87 @@ from tawreed_app import (
 
 
 class AboutPage(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("pageHost")
         self._i18n = get_i18n()
         self._build_ui()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
+        canvas = QWidget(scroll)
+        canvas.setObjectName("pageCanvas")
+        layout = QVBoxLayout(canvas)
+        layout.setContentsMargins(56, 48, 56, 48)
         layout.setSpacing(16)
+        scroll.setWidget(canvas)
 
-        layout.addWidget(
-            PageHeader(
-                __appname__,
-                self._i18n.tr("about_page_subtitle"),
-            )
-        )
-
-        # ----- Author card -----
-        author_card = Card(self._i18n.tr("about_author_credits"))
-        body = QHBoxLayout()
-        body.setSpacing(16)
-        body.setContentsMargins(0, 0, 0, 0)
-
-        mark = QLabel()
+        self.mark = QLabel(canvas)
         if LOGO_PNG_PATH.exists():
-            pix = QPixmap(str(LOGO_PNG_PATH)).scaled(
-                72,
-                72,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
+            self.mark.setPixmap(
+                QPixmap(str(LOGO_PNG_PATH)).scaled(
+                    76, 76, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
             )
-            mark.setPixmap(pix)
-        else:
-            mark.setText(self._i18n.tr("author_mark"))
-            mark.setObjectName("navBrandFallback")
-        mark.setAlignment(Qt.AlignCenter)
-        body.addWidget(mark)
+        self.mark.setAccessibleName("Tawreed logo")
+        layout.addWidget(self.mark, 0, Qt.AlignLeft)
+        self.title = QLabel(__appname__, canvas)
+        self.title.setObjectName("pageTitle")
+        self.version = QLabel(f"v{__version__}", canvas)
+        self.version.setObjectName("aboutVersion")
+        self.description = QLabel(canvas)
+        self.description.setObjectName("pageSubtitle")
+        self.description.setWordWrap(True)
+        layout.addWidget(self.title)
+        layout.addWidget(self.version)
+        layout.addWidget(self.description)
+        layout.addSpacing(16)
 
-        text_col = QVBoxLayout()
-        text_col.setSpacing(2)
-        name = QLabel(f"{self._i18n.tr('about_built_by')} {__author__}")
-        name.setObjectName("authorName")
-        text_col.addWidget(name)
-        url = QLabel(f'<a href="{__author_url__}" style="color:#89b4fa;">{__author_url__}</a>')
-        url.setObjectName("authorUrl")
-        url.setTextFormat(Qt.RichText)
-        url.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        url.setOpenExternalLinks(True)
-        text_col.addWidget(url)
-        bio = QLabel(self._i18n.tr("about_bio_text"))
-        bio.setObjectName("hint")
-        bio.setWordWrap(True)
-        text_col.addWidget(bio)
-        body.addLayout(text_col, stretch=1)
-        author_card.addLayout(body)
-        layout.addWidget(author_card)
+        self.product_heading = QLabel(canvas)
+        self.product_heading.setObjectName("sectionTitle")
+        self.product_text = QLabel(canvas)
+        self.product_text.setWordWrap(True)
+        self.product_text.setObjectName("bodyText")
+        layout.addWidget(self.product_heading)
+        layout.addWidget(self.product_text)
+        layout.addSpacing(12)
 
-        # ----- Project card -----
-        project_card = Card(self._i18n.tr("about_project"))
-
-        def _row(label: str, value: str) -> QHBoxLayout:
-            r = QHBoxLayout()
-            r.setSpacing(8)
-            l = QLabel(label)
-            l.setObjectName("metaLabel")
-            l.setFixedWidth(110)
-            v = QLabel(value)
-            v.setObjectName("metaValue")
-            v.setTextInteractionFlags(Qt.TextBrowserInteraction)
-            v.setWordWrap(True)
-            r.addWidget(l)
-            r.addWidget(v, stretch=1)
-            return r
-
-        project_card.addLayout(_row(self._i18n.tr("about_app_name"), __appname__))
-        project_card.addLayout(_row(self._i18n.tr("about_version"), f"v{__version__}"))
-        project_card.addLayout(_row(self._i18n.tr("about_license"), __license__))
-        project_card.addLayout(
-            _row(
-                self._i18n.tr("about_repository"),
-                f'<a href="{__repo_url__}" style="color:#89b4fa;">{__repo_url__}</a>',
-            )
-        )
-        project_card.addLayout(
-            _row(self._i18n.tr("about_status"), self._i18n.tr("about_status_released"))
-        )
-        layout.addWidget(project_card)
-
-        # ----- Stack card -----
-        stack_card = Card(self._i18n.tr("about_built_with"))
-        stack_card.addLayout(
-            _row(self._i18n.tr("about_language"), self._i18n.tr("about_language_value"))
-        )
-        stack_card.addLayout(
-            _row(self._i18n.tr("about_ui_framework"), self._i18n.tr("about_ui_framework_value"))
-        )
-        stack_card.addLayout(
-            _row(self._i18n.tr("about_llm_providers"), self._i18n.tr("about_llm_providers_list"))
-        )
-        stack_card.addLayout(
-            _row(self._i18n.tr("about_data"), self._i18n.tr("about_llm_providers_value"))
-        )
-        stack_card.addLayout(
-            _row(self._i18n.tr("about_packaging"), self._i18n.tr("about_packaging_value"))
-        )
-        layout.addWidget(stack_card)
-
-        # ----- Action row -----
-        action_row = QHBoxLayout()
-        action_row.setSpacing(10)
-        repo_btn = QPushButton(self._i18n.tr("about_open_repository"))
-        repo_btn.setObjectName("primaryBtn")
-        repo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(__repo_url__)))
-        author_btn = QPushButton(self._i18n.tr("about_author_website"))
-        author_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(__author_url__)))
-        action_row.addWidget(repo_btn)
-        action_row.addWidget(author_btn)
-        action_row.addStretch()
-        layout.addLayout(action_row)
-
-        # ----- Footer -----
-        footer = QLabel(
-            self._i18n.tr("about_footer_format").format(
-                author=__author__,
-                license_text=self._i18n.tr("about_copyright_license"),
-                license=__license__,
-            )
-        )
-        footer.setObjectName("footer")
-        footer.setAlignment(Qt.AlignCenter)
-        layout.addWidget(footer)
-
+        self.privacy_heading = QLabel(canvas)
+        self.privacy_heading.setObjectName("sectionTitle")
+        self.privacy_text = QLabel(canvas)
+        self.privacy_text.setWordWrap(True)
+        self.privacy_text.setObjectName("bodyText")
+        layout.addWidget(self.privacy_heading)
+        layout.addWidget(self.privacy_text)
         layout.addStretch(1)
+
+        actions = QHBoxLayout()
+        self.repo_button = QPushButton(canvas)
+        self.repo_button.setObjectName("primaryButton")
+        self.repo_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(__repo_url__)))
+        self.author_button = QPushButton(canvas)
+        self.author_button.setObjectName("secondaryButton")
+        self.author_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(__author_url__)))
+        actions.addWidget(self.repo_button)
+        actions.addWidget(self.author_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        self.footer = QLabel(f"{__author__} · {__license__}", canvas)
+        self.footer.setObjectName("hintText")
+        layout.addWidget(self.footer)
+        self.retranslate_ui()
+
+    def retranslate_ui(self) -> None:
+        self.description.setText(self._i18n.tr("about_page_subtitle"))
+        self.product_heading.setText(self._i18n.tr("about_product_heading"))
+        self.product_text.setText(self._i18n.tr("about_product_text"))
+        self.privacy_heading.setText(self._i18n.tr("about_privacy_heading"))
+        self.privacy_text.setText(self._i18n.tr("about_privacy_text"))
+        self.repo_button.setText(self._i18n.tr("about_open_repository"))
+        self.author_button.setText(self._i18n.tr("about_author_website"))
