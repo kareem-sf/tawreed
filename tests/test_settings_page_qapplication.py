@@ -3,7 +3,7 @@
 import pytest
 
 
-def test_settings_page_qapplication_import(qtbot):
+def test_settings_page_qapplication_import(qtbot, monkeypatch):
     """Test that QApplication is properly imported in SettingsPage."""
     # Import the module to check its namespace
     import gui.pages.settings_page as settings_module
@@ -18,6 +18,13 @@ def test_settings_page_qapplication_import(qtbot):
 
     page = SettingsPage()
     qtbot.addWidget(page)
+
+    # Exercise the validation path without opening a modal dialog.  A real
+    # QMessageBox blocks forever on a headless Linux runner because nobody
+    # can press OK; the import regression this test covers does not require
+    # a live dialog or a settings write.
+    page.model_combo.clear()
+    monkeypatch.setattr(settings_module.QMessageBox, "warning", lambda *_args: None)
 
     # Verify that the _save_settings method can access QApplication
     # (This would fail with NameError if QApplication wasn't imported)
