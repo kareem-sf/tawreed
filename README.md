@@ -5,8 +5,8 @@
 Tawreed takes a Bill of Quantities (BOQ) Excel — Arabic or English, one
 sheet or seven — and re-emits it as a structured work-package workbook
 ready to hand to procurement. Categorisation is done by a large language
-model (OpenAI, Anthropic Claude, Google Gemini, or any OpenAI-compatible
-endpoint), and the output Excel is Calibri-formatted, currency-aware,
+model (OpenAI, Anthropic Claude, Google Gemini, any OpenAI-compatible
+endpoint, or the optional Codex CLI adapter), and the output Excel is Calibri-formatted, currency-aware,
 and aligned to the way a quantity surveyor actually reads the file.
 
 ## Architecture
@@ -25,8 +25,11 @@ principles.
 - **Toast Notifications**: Non-blocking success/error feedback
 - **Keyboard Shortcuts**: Common actions accessible via keyboard (Esc, Ctrl+O, Ctrl+P, Ctrl+L)
 - **Memory Optimization**: Efficient handling of large Excel files (>10MB)
+- **Mandatory Human Review**: Every proposed package can be checked and edited before any Excel or history record is created
+- **Bounded AI Agent**: Large BOQs are sent as size-limited JSON batches with exact item-ID reconciliation and no model file or shell tools
+- **Optional Codex Login**: Experimental Codex CLI provider can reuse an existing `codex login` session and ChatGPT plan/credits without copying the token into Tawreed
 - **Enhanced Error Handling**: Clear, actionable error messages for common issues
-- **Comprehensive Testing**: 196+ tests with 95%+ coverage
+- **Comprehensive Testing**: 273 automated tests plus clean-wheel and packaged-app smoke checks
 - **Professional Excel Output**: Calibri-formatted, currency-aware workbooks with formulas
 
 ### Workspace
@@ -82,6 +85,13 @@ This launches the desktop application. On first run, Tawreed will:
 2. Show a splash screen.
 3. Reveal the Workspace page, where you can drop in a BOQ Excel
    and click **Process**.
+4. Show a mandatory review table. Edit any proposed work package,
+   then click **Approve & Export** to create the workbook.
+
+To try the optional Codex provider, install the official Codex CLI,
+run `codex login`, then choose **Codex (ChatGPT login) — Experimental**
+in Settings. If the CLI or login is unavailable, Tawreed reports that
+state and does not silently switch providers.
 
 ## Build
 
@@ -128,20 +138,23 @@ tawreed/
 ├── pyproject.toml           # Build + metadata
 ├── core/                    # Backend (no Qt)
 │   ├── ai.py                # Multi-provider streaming client
+│   ├── codex_connector.py   # Optional least-privilege Codex CLI adapter
 │   ├── db.py                # SQLite state at ~/.tawreed/
 │   ├── excel.py             # openpyxl parse + Calibri write
 │   ├── logging_setup.py     # RotatingFileHandler config
 │   ├── model_catalog.py     # Provider / model catalog
+│   ├── packaging_agent.py   # Review-before-export state + batching policy
 │   └── reset.py             # Settings reset
 ├── gui/                     # Qt / PySide6
 │   ├── main_window.py       # QStackedWidget nav shell
+│   ├── review_dialog.py     # Mandatory editable package review
 │   ├── single_app.py        # Single-instance via QLocalServer
 │   ├── splash.py            # QSplashScreen
 │   ├── pages/               # Workspace, History, Settings, About
 │   ├── widgets/             # Shared chrome (Card, Section)
 │   └── themes/              # .qss theme files
 ├── tawreed_app/             # Console entry point (python -m tawreed)
-├── tests/                   # pytest (80+ tests, ~3s)
+├── tests/                   # pytest suite + end-to-end workflow tests
 └── _scripts/                # Local build helpers (not in the wheel)
 ```
 

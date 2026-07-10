@@ -6,6 +6,8 @@ from datetime import datetime
 import httpx
 import openai
 
+from core.codex_connector import check_codex_availability, run_codex_cli
+
 log = logging.getLogger(__name__)
 
 PROVIDERS = {
@@ -37,6 +39,20 @@ PROVIDERS = {
         "hint": "Official OpenAI Chat Completions API (ChatGPT models). "
         "Uses api.openai.com by default. Click 'Refresh Models' to "
         "pull the live list from your account.",
+    },
+    "Codex": {
+        "base_url": "",
+        # Account-visible models are fetched from Codex app-server's
+        # model/list endpoint. Never hard-code a model catalog here.
+        "models": [],
+        "default_model": "",
+        "requires_base_url": False,
+        "requires_api_key": False,
+        "transport": "codex_cli",
+        "label": "Codex (ChatGPT login)",
+        "hint": "Uses your existing Codex ChatGPT login and Codex plan usage—not an API key. "
+        "Available models are fetched live from your account. Tawreed never stores or copies "
+        "the Codex token; classification runs read-only and requires review before export.",
     },
     "Google": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -222,12 +238,20 @@ def extract_json_from_text(text: str) -> dict:
         else:
             json_str = cleaned_text
 
+    def reject_duplicate_keys(pairs):
+        parsed = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise ValueError(f"Duplicate JSON key: {key}")
+            parsed[key] = value
+        return parsed
+
     try:
-        parsed_data = json.loads(json_str)
+        parsed_data = json.loads(json_str, object_pairs_hook=reject_duplicate_keys)
     except Exception:
         try:
             fixed_json_str = re.sub(r",\s*([\]}])", r"\1", json_str)
-            parsed_data = json.loads(fixed_json_str)
+            parsed_data = json.loads(fixed_json_str, object_pairs_hook=reject_duplicate_keys)
         except Exception:
             parsed_data = {}
 
@@ -238,11 +262,60 @@ def extract_json_from_text(text: str) -> dict:
     for k, v in parsed_data.items():
         k_str = str(k)
         if k_str == "items" and isinstance(v, dict):
-            normalized_data["items"] = {str(item_k): str(item_v) for item_k, item_v in v.items()}
+            normalized_data["items"] = {str(item_k): item_v for item_k, item_v in v.items()}
         else:
             normalized_data[k_str] = v
 
     return normalized_data
+
+
+def validate_categorization_result(result: dict, expected_item_ids) -> dict:
+    """Validate the AI result against the exact set of parsed BOQ rows."""
+    if not isinstance(result, dict):
+        raise ValueError("The AI response is not a valid result object.")
+
+    expected = {str(item_id) for item_id in expected_item_ids}
+    if not expected:
+        raise ValueError("The BOQ does not contain any categorizable items.")
+
+    items = result.get("items")
+    if not isinstance(items, dict):
+        raise ValueError("The AI response does not contain an items mapping.")
+
+    items_by_id = {str(item_id): package for item_id, package in items.items()}
+    actual = set(items_by_id)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        details = []
+        if missing:
+            details.append(f"missing {len(missing)} item(s): {', '.join(missing[:8])}")
+        if extra:
+            details.append(f"unknown {len(extra)} item(s): {', '.join(extra[:8])}")
+        raise ValueError("AI categorization coverage mismatch (" + "; ".join(details) + ").")
+
+    normalized_items: dict[str, str] = {}
+    for item_id in expected:
+        package = items_by_id[item_id]
+        if not isinstance(package, str) or not package.strip():
+            raise ValueError(f"AI returned an empty package for item {item_id}.")
+        package = package.strip()
+        if len(package) > 120:
+            raise ValueError(f"AI returned an overlong package name for item {item_id}.")
+        normalized_items[item_id] = package
+
+    project_name = result.get("project_name", "Tawreed Project")
+    date = result.get("date", datetime.now().strftime("%Y-%m-%d"))
+    if not isinstance(project_name, str) or not project_name.strip() or len(project_name) > 200:
+        raise ValueError("AI returned an invalid project name.")
+    if not isinstance(date, str) or len(date) > 50:
+        raise ValueError("AI returned an invalid project date.")
+
+    validated = dict(result)
+    validated["project_name"] = project_name.strip()
+    validated["date"] = date.strip()
+    validated["items"] = normalized_items
+    return validated
 
 
 def analyze_boq_stream(
@@ -252,6 +325,7 @@ def analyze_boq_stream(
     system_prompt: str,
     user_prompt: str,
     i18n=None,
+    provider: str = "OpenAI",
 ):
     """Stream LLM tokens + the final parsed JSON to the caller.
 
@@ -280,39 +354,74 @@ def analyze_boq_stream(
     error_msg: str | None = None
 
     try:
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
-        response = client.chat.completions.create(
-            model=model_id,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            stream=True,
-            temperature=0.0,
-        )
+        if not is_valid_provider(provider):
+            raise ValueError(f"Unsupported AI provider: {provider}")
 
-        parser = ContentStreamParser()
-        for chunk in response:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                yield (reasoning, True)
-                continue
-
-            content = getattr(delta, "content", None)
+        if provider == "Codex":
+            content = run_codex_cli(system_prompt, user_prompt, model_id)
             if content:
-                for token_text, is_thought in parser.feed(content):
-                    yield (token_text, is_thought)
-                    if not is_thought:
-                        accumulated_content.append(token_text)
+                yield (content, False)
+                accumulated_content.append(content)
+        elif provider == "Claude":
+            url = (base_url or PROVIDERS[provider]["base_url"]).rstrip("/")
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            payload = {
+                "model": model_id,
+                "max_tokens": 8192,
+                "temperature": 0.0,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_prompt}],
+            }
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(f"{url}/messages", headers=headers, json=payload)
+                response.raise_for_status()
+                blocks = response.json().get("content", [])
+            content = "".join(
+                str(block.get("text", ""))
+                for block in blocks
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+            if content:
+                yield (content, False)
+                accumulated_content.append(content)
+        else:
+            client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
+            response = client.chat.completions.create(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                stream=True,
+                temperature=0.0,
+            )
 
-        for token_text, is_thought in parser.flush():
-            yield (token_text, is_thought)
-            if not is_thought:
-                accumulated_content.append(token_text)
+            parser = ContentStreamParser()
+            for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    yield (reasoning, True)
+                    continue
+
+                content = getattr(delta, "content", None)
+                if content:
+                    for token_text, is_thought in parser.feed(content):
+                        yield (token_text, is_thought)
+                        if not is_thought:
+                            accumulated_content.append(token_text)
+
+            for token_text, is_thought in parser.flush():
+                yield (token_text, is_thought)
+                if not is_thought:
+                    accumulated_content.append(token_text)
 
         full_content_str = "".join(accumulated_content).strip()
         if not full_content_str:
@@ -361,6 +470,8 @@ def analyze_boq_stream(
 
 async def test_connection(provider: str, api_key: str, model_id: str, base_url: str = "") -> bool:
     try:
+        if provider == "Codex":
+            return check_codex_availability().available
         url = base_url if provider == "OpenAI Compatible" else PROVIDERS[provider]["base_url"]
         if not url:
             return False

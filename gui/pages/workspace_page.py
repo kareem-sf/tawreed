@@ -37,7 +37,9 @@ from PySide6.QtWidgets import (
 )
 
 from core import db
+from core.ai import get_provider_config
 from core.i18n import I18n, get_i18n
+from gui.review_dialog import ReviewDialog
 from gui.widgets import Card, PageHeader, StatusPill
 from gui.worker import BOQProcessor, WorkerSignals
 
@@ -136,6 +138,8 @@ class WorkspacePage(QWidget):
         self.selected_file: str | None = None
         self.signals: WorkerSignals | None = None
         self._last_output_path: str | None = None
+        self._processor: BOQProcessor | None = None
+        self._processor_task = None
         self._build_ui()
         self.file_selected.connect(self._on_file_selected)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -274,6 +278,7 @@ class WorkspacePage(QWidget):
 
     def _on_file_selected(self, path: str) -> None:
         self.selected_file = path
+        self._processor = None
         name = os.path.basename(path)
         self.file_label.setText(name)
         self.file_label.setToolTip(path)
@@ -364,7 +369,9 @@ class WorkspacePage(QWidget):
             return
 
         settings = db.get_settings()
-        if not settings or not settings.get("api_key"):
+        provider = settings.get("provider", "OpenAI") if settings else "OpenAI"
+        requires_api_key = get_provider_config(provider).get("requires_api_key", True)
+        if not settings or (requires_api_key and not settings.get("api_key")):
             QMessageBox.warning(
                 self,
                 self._i18n.tr("settings_required_title"),
@@ -384,10 +391,11 @@ class WorkspacePage(QWidget):
         # Disconnect any previous signal handlers so the page can be reused.
         self.signals = WorkerSignals()
         self.signals.log.connect(self.log)
+        self.signals.review_ready.connect(self.on_review_ready)
         self.signals.finished.connect(self.on_processing_finished)
         self.signals.error.connect(self.on_processing_error)
 
-        processor = BOQProcessor(self.selected_file, self.signals, self._i18n)
+        self._processor = BOQProcessor(self.selected_file, self.signals, self._i18n)
 
         try:
             loop = asyncio.get_event_loop()
@@ -399,7 +407,8 @@ class WorkspacePage(QWidget):
         # (e.g. an asyncio.CancelledError leak, a bug in the qasync
         # bridge), we still want the page to leave the "Processing…"
         # state instead of staying stuck.
-        task = loop.create_task(processor.process())
+        task = loop.create_task(self._processor.process())
+        self._processor_task = task
         task.add_done_callback(self._on_processor_done)
 
     def _on_processor_done(self, task) -> None:
@@ -414,6 +423,10 @@ class WorkspacePage(QWidget):
         """
         if task.cancelled():
             log.warning("BOQProcessor task was cancelled")
+            self.process_btn.setEnabled(bool(self.selected_file))
+            self.browse_btn.setEnabled(True)
+            self.clear_btn.setEnabled(bool(self.selected_file))
+            self.reset_progress()
             return
         exc = task.exception()
         if exc is not None:
@@ -421,6 +434,40 @@ class WorkspacePage(QWidget):
             # Re-use the same error path the Worker uses so the UI
             # state stays consistent (status pill, log, etc.).
             self.on_processing_error(f"{type(exc).__name__}: {exc}")
+
+    def on_review_ready(self, draft) -> None:
+        """Require a human approval before any workbook or history write."""
+        self.status_pill.set_state("warning", self._i18n.tr("review_dialog_title"))
+        self.console_status.setText(self._i18n.tr("review_ready"))
+        self.reset_progress()
+
+        dialog = ReviewDialog(draft, self._i18n, self)
+        if dialog.exec() != ReviewDialog.Accepted:
+            if self._processor is not None:
+                self._processor.cancel_review()
+            self.log(f"\n{self._i18n.tr('review_cancelled')}\n")
+            self.process_btn.setEnabled(bool(self.selected_file))
+            self.browse_btn.setEnabled(True)
+            self.clear_btn.setEnabled(bool(self.selected_file))
+            self.status_pill.set_state("idle", self._i18n.tr("ready"))
+            self.console_status.setText(self._i18n.tr("review_cancelled"))
+            return
+
+        if self._processor is None:
+            self.on_processing_error("The review session is no longer available.")
+            return
+
+        self.status_pill.set_state("running", self._i18n.tr("processing"))
+        self.console_status.setText(self._i18n.tr("generating_output").format(output_file="…"))
+        self.set_progress(0, 100, True)
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        task = loop.create_task(self._processor.approve_and_export(dialog.reviewed_categories()))
+        self._processor_task = task
+        task.add_done_callback(self._on_processor_done)
 
     def on_processing_finished(self, output_path: str) -> None:
         self.log(
@@ -438,6 +485,7 @@ class WorkspacePage(QWidget):
         self._last_output_path = output_path
         self.open_output_btn.setEnabled(True)
         self.open_folder_btn.setEnabled(True)
+        self._processor = None
 
         # Show toast notification
         self._show_toast(self._i18n.tr("processing_complete"))
@@ -473,6 +521,7 @@ class WorkspacePage(QWidget):
         self.reset_progress()
         self.open_output_btn.setEnabled(False)
         self.open_folder_btn.setEnabled(False)
+        self._processor = None
         QMessageBox.critical(
             self, self._i18n.tr("error"), f"{self._i18n.tr('failed_to_process')}\n{error_msg}"
         )

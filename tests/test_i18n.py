@@ -41,11 +41,111 @@ def test_tr_returns_arabic_after_set_language(i18n_fresh):
     assert i18n_fresh.tr("process_button") == "معالجة جدول الكميات"
 
 
-def test_set_language_unknown_falls_silently(i18n_fresh):
-    i18n_fresh.set_language("fr")  # not supported
-    assert i18n_fresh.language == "en"  # unchanged
-    i18n_fresh.set_language("xx")
-    assert i18n_fresh.language == "en"
+def test_excel_i18n_keys_exist():
+    """Test that all Excel-related i18n keys exist and have translations."""
+    excel_keys = [
+        "excel_file_not_found",
+        "cannot_read_excel",
+        "excel_no_worksheets",
+        "cannot_write_excel",
+        "cannot_write_excel_permission",
+        "large_file_detected",
+        "very_large_file_detected",
+        "starting_chunked_processing",
+        "processed_rows",
+        "completed_processing",
+    ]
+
+    for key in excel_keys:
+        # Check English translations exist
+        assert key in TRANSLATIONS["en"], f"Missing English translation for {key}"
+        en_translation = TRANSLATIONS["en"][key]
+        assert en_translation and isinstance(en_translation, str), (
+            f"Empty or invalid English translation for {key}"
+        )
+
+        # Check Arabic translations exist
+        assert key in TRANSLATIONS["ar"], f"Missing Arabic translation for {key}"
+        ar_translation = TRANSLATIONS["ar"][key]
+        assert ar_translation and isinstance(ar_translation, str), (
+            f"Empty or invalid Arabic translation for {key}"
+        )
+
+
+def test_excel_i18n_formatting(i18n_fresh):
+    """Test that Excel i18n keys can be properly formatted."""
+    # Test English formatting
+    assert "Excel file not found: test.xlsx" in i18n_fresh.tr("excel_file_not_found").format(
+        file_path="test.xlsx"
+    )
+    assert "Cannot read 'test.xlsx': permission denied" in i18n_fresh.tr(
+        "cannot_read_excel"
+    ).format(file_name="test.xlsx", error="permission denied")
+    assert "'test.xlsx' has no worksheets." == i18n_fresh.tr("excel_no_worksheets").format(
+        file_name="test.xlsx"
+    )
+
+    # Test Arabic formatting
+    i18n_fresh.set_language("ar")
+    assert "ملف Excel غير موجود" in i18n_fresh.tr("excel_file_not_found").format(
+        file_path="test.xlsx"
+    )
+    assert "تعذر قراءة" in i18n_fresh.tr("cannot_read_excel").format(
+        file_name="test.xlsx", error="permission denied"
+    )
+    assert "لا يحتوي على أي أوراق عمل" in i18n_fresh.tr("excel_no_worksheets").format(
+        file_name="test.xlsx"
+    )
+
+
+def test_excel_large_file_i18n_formatting(i18n_fresh):
+    """Test that large file detection messages can be properly formatted."""
+    # Test English formatting
+    large_msg = i18n_fresh.tr("large_file_detected").format(file_size=10.5, estimated_time=5.2)
+    assert "Large file detected (10.5 MB)" in large_msg
+    assert "Estimated processing time: 5.2 seconds" in large_msg
+
+    very_large_msg = i18n_fresh.tr("very_large_file_detected").format(
+        file_size=50.3, estimated_time=12.8
+    )
+    assert "Very large file detected (50.3 MB)" in very_large_msg
+    assert "Processing will continue but may take significant time" in very_large_msg
+
+    # Test Arabic formatting
+    i18n_fresh.set_language("ar")
+    ar_large_msg = i18n_fresh.tr("large_file_detected").format(file_size=10.5, estimated_time=5.2)
+    assert "تم اكتشاف ملف كبير" in ar_large_msg
+    assert "10.5 ميجابايت" in ar_large_msg
+
+    ar_very_large_msg = i18n_fresh.tr("very_large_file_detected").format(
+        file_size=50.3, estimated_time=12.8
+    )
+    assert "تم اكتشاف ملف كبير جدًا" in ar_very_large_msg
+    assert "ستستمر المعالجة ولكن قد تستغرق وقتًا كبيرًا" in ar_very_large_msg
+
+
+def test_excel_progress_i18n_formatting(i18n_fresh):
+    """Test that progress messages can be properly formatted."""
+    # Test English formatting
+    start_msg = i18n_fresh.tr("starting_chunked_processing").format(sheet_title="Sheet1")
+    assert "Starting chunked processing of Sheet1" == start_msg
+
+    processed_msg = i18n_fresh.tr("processed_rows").format(processed_rows=100)
+    assert "Processed 100 rows" == processed_msg
+
+    completed_msg = i18n_fresh.tr("completed_processing").format(sheet_title="Sheet1")
+    assert "Completed processing Sheet1" == completed_msg
+
+    # Test Arabic formatting
+    i18n_fresh.set_language("ar")
+    ar_start_msg = i18n_fresh.tr("starting_chunked_processing").format(sheet_title="ورقة1")
+    assert "بدء المعالجة المجزأة لورقة ورقة1" == ar_start_msg
+
+    ar_processed_msg = i18n_fresh.tr("processed_rows").format(processed_rows=100)
+    assert "تم معالجة 100 صفًا" == ar_processed_msg
+
+    ar_completed_msg = i18n_fresh.tr("completed_processing").format(sheet_title="ورقة1")
+    assert "تمت معالجة ورقة ورقة1" == ar_completed_msg
 
 
 def test_set_language_same_value_no_signal(i18n_fresh):

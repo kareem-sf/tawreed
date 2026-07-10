@@ -162,7 +162,7 @@ All changes use existing dependencies with no new libraries added.
 
 ### Eligible for auto-merge: Yes
 
-**Reason**: 
+**Reason**:
 - All tests pass (230 passed, 5 skipped)
 - All quality checks pass (ruff, formatting, compilation)
 - Low risk (backward compatible, well-tested)

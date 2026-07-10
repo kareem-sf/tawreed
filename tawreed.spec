@@ -188,8 +188,8 @@ a = Analysis(
         # QApplication.setWindowIcon so the title bar / taskbar /
         # Alt-Tab show the brand icon. The PNG is used by the
         # nav rail / splash.
-        ("tawreed_logo.ico", "."),
-        ("tawreed_logo_transparent.png", "."),
+        ("gui/tawreed_logo.ico", "."),
+        ("gui/tawreed_logo_transparent.png", "."),
         # Theme files — loaded at runtime by gui.styles.load_stylesheet.
         ("gui/themes/tawreed_dark.qss", "gui/themes"),
         ("gui/themes/tawreed_light.qss", "gui/themes"),

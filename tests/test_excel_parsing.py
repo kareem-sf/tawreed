@@ -117,6 +117,104 @@ def test_detect_no_match_returns_empty():
     assert excel.detect_columns(headers) == {}
 
 
+def test_parse_stacked_header_and_skip_repeated_page_header(tmp_path):
+    source = tmp_path / "stacked-header.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "B04"
+    ws.append(["Project"])
+    ws.append([])
+    ws.append([])
+    ws.append(["ITEM", "ITEM", "ITEM", "ITEM", "UNIT PRICE", "AMOUNT"])
+    ws.append(["NO.", "DESCRIPTION", "UNIT", "QTY.", "IN L.E.", "IN L.E."])
+    ws.append([1, "Concrete block wall", "m2", 12, 5, 60])
+    ws.append(["ITEM", "ITEM", "ITEM", "ITEM", "UNIT PRICE", "AMOUNT"])
+    ws.append(["NO.", "DESCRIPTION", "UNIT", "QTY.", "IN L.E.", "IN L.E."])
+    ws.append([2, "Plaster finish", "m2", 8, 4, 32])
+    wb.save(source)
+    wb.close()
+
+    _markdown, rows, headers = excel.parse_excel(str(source))
+
+    assert [row["Item Description"] for row in rows.values()] == [
+        "Concrete block wall",
+        "Plaster finish",
+    ]
+    assert headers["B04"]["Item Description"] == 1
+    assert headers["B04"]["Qty"] == 3
+
+
+def test_parse_stacked_header_with_specs_column(tmp_path):
+    source = tmp_path / "stacked-specs-header.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "B02"
+    ws.append(["ITEM", "SPECS.", "ITEM", "ITEM", "ITEM", "UNIT PRICE", "AMOUNT"])
+    ws.append(["NO.", "NO.", "DESCRIPTION", "UNIT", "QTY.", "IN L.E.", "IN L.E."])
+    ws.append([1, "02 41 13", "Demolish masonry wall", "m2", 15, None, None])
+    wb.save(source)
+    wb.close()
+
+    _markdown, rows, headers = excel.parse_excel(str(source))
+
+    assert len(rows) == 1
+    assert rows["R1"]["Item Description"] == "Demolish masonry wall"
+    assert rows["R1"]["Unit"] == "m2"
+    assert rows["R1"]["Qty"] == 15.0
+    assert headers["B02"]["Item Description"] == 2
+
+
+def test_quantified_child_keeps_parent_context_for_ai_only(tmp_path):
+    source = tmp_path / "parent-context.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "B02"
+    ws.append(["ITEM", "ITEM", "ITEM", "ITEM", "UNIT PRICE", "AMOUNT"])
+    ws.append(["NO.", "DESCRIPTION", "UNIT", "QTY.", "IN L.E.", "IN L.E."])
+    ws.append([None, "Selective Demolition"])
+    ws.append([1, "Walls thick=250mm", "m2", 15, None, None])
+    wb.save(source)
+    wb.close()
+
+    _markdown, rows, _headers = excel.parse_excel(str(source))
+
+    assert rows["R1"]["Item Description"] == "Walls thick=250mm"
+    assert "Selective Demolition" in rows["R1"]["classification_text"]
+    assert "Walls thick=250mm" in rows["R1"]["classification_text"]
+
+
+def test_description_only_bill_skips_page_furniture_and_summary(tmp_path):
+    source = tmp_path / "description-only.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "B01"
+    ws.append(["ITEM", "ITEM", "ITEM", "ITEM", "UNIT RATE", "AMOUNT"])
+    ws.append(["NO.", "DESCRIPTION", "UNIT", "QTY.", "IN L.E.", "IN L.E."])
+    ws.append([None, "PRELIMINARIES"])
+    ws.append([None, "Environment protection"])
+    ws.append([None, "1/2"])
+    ws.append(["ITEM", "ITEM", "ITEM", "ITEM", "UNIT RATE", "AMOUNT"])
+    ws.append(["NO.", "DESCRIPTION", "UNIT", "QTY.", "IN L.E.", "IN L.E."])
+    ws.append([None, "Temporary facilities"])
+    ws.append([None, "COLLECTION FROM PAGE 1"])
+
+    summary = wb.create_sheet("Arch Summary")
+    summary.append(["ITEM", "ITEM", None, "AMOUNT"])
+    summary.append(["NO.", "DESCRIPTION", None, "IN L.E."])
+    summary.append([None, "BILL # 1", None, 100])
+    wb.save(source)
+    wb.close()
+
+    _markdown, rows, headers = excel.parse_excel(str(source))
+
+    assert [row["Item Description"] for row in rows.values()] == [
+        "Environment protection",
+        "Temporary facilities",
+    ]
+    assert "Arch Summary" not in headers
+    assert all("PRELIMINARIES" in row["classification_text"] for row in rows.values())
+
+
 # TAWREED_TEST_BOQ env var so we don't commit a path that doesn't
 # exist on every developer's machine. Set in your shell before
 # running pytest if you have a real BOQ to test against.

@@ -24,7 +24,7 @@ This PR implements comprehensive Excel performance optimization for Tawreed, inc
 
 **Test Results on 5000-row file (164KB):**
 - **With chunked processing**: 10.7 seconds
-- **Without chunked processing**: 16.1 seconds  
+- **Without chunked processing**: 16.1 seconds
 - **Improvement**: 33% faster
 
 **Scalability:**
@@ -67,7 +67,7 @@ This PR implements comprehensive Excel performance optimization for Tawreed, inc
 
 **Generated performance test files:**
 - Small (100 rows, ~8KB)
-- Medium (1000 rows, ~37KB)  
+- Medium (1000 rows, ~37KB)
 - Large (5000 rows, ~164KB)
 - Arabic and English versions for i18n testing
 

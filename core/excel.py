@@ -42,6 +42,7 @@ import errno
 import logging
 import os
 import re
+import tempfile
 import unicodedata
 import zipfile
 from collections.abc import Callable
@@ -51,6 +52,8 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.exceptions import InvalidFileException
+
+from tawreed_app import __version__
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +107,8 @@ PROGRESS_INTERVAL = 5  # Send progress updates every 5%
 LARGE_FILE_THRESHOLD = 10 * 1024 * 1024  # 10MB - use read_only mode for larger files
 VERY_LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50MB - warn about very large files
 HUGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100MB - warn about huge files
+MAX_WORKSHEET_ROWS = 500_000
+MAX_WORKSHEET_COLUMNS = 512
 
 # Progress callback type
 ProgressCallback = Callable[[int, str, dict | None], None]
@@ -156,6 +161,15 @@ def _column_width(text: Any, cap: int, pad: int = 2) -> int:
     return max(10, min(int(width) + pad, cap))
 
 
+def _safe_excel_text(value: Any) -> Any:
+    """Neutralize externally-derived text that Excel could execute."""
+    if not isinstance(value, str):
+        return value
+    if value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 def _default_progress_callback(percentage: int, message: str, data: dict | None = None) -> None:
     """Default progress callback that logs progress updates."""
     log.info("Progress: %d%% - %s", percentage, message)
@@ -174,7 +188,7 @@ def _estimate_file_processing_time(file_size: int) -> float:
         return mb_size * 1.5  # ~1.5s per MB for small files
 
 
-def _should_warn_about_file_size(file_size: int) -> str | None:
+def _should_warn_about_file_size(file_size: int, i18n: Any = None) -> str | None:
     """Check if file size warrants a warning and return appropriate warning message.
 
     Returns None if no warning needed, otherwise returns warning message.
@@ -182,14 +196,22 @@ def _should_warn_about_file_size(file_size: int) -> str | None:
     if file_size >= HUGE_FILE_THRESHOLD:
         estimated_time = _estimate_file_processing_time(file_size)
         return (
-            f"Very large file detected ({file_size / (1024 * 1024):.1f} MB). "
+            i18n.tr("very_large_file_detected").format(
+                file_size=file_size / (1024 * 1024), estimated_time=estimated_time
+            )
+            if i18n
+            else f"Very large file detected ({file_size / (1024 * 1024):.1f} MB). "
             f"Estimated processing time: {estimated_time:.1f} seconds. "
             f"Processing will continue but may take significant time."
         )
     elif file_size >= VERY_LARGE_FILE_THRESHOLD:
         estimated_time = _estimate_file_processing_time(file_size)
         return (
-            f"Large file detected ({file_size / (1024 * 1024):.1f} MB). "
+            i18n.tr("large_file_detected").format(
+                file_size=file_size / (1024 * 1024), estimated_time=estimated_time
+            )
+            if i18n
+            else f"Large file detected ({file_size / (1024 * 1024):.1f} MB). "
             f"Estimated processing time: {estimated_time:.1f} seconds."
         )
     return None
@@ -456,6 +478,196 @@ def detect_columns(header_cells: list[Any]) -> dict[str, int]:
     return result
 
 
+def _iter_header_rows(sheet, *, read_only: bool):
+    """Yield the first candidate header rows without random access in streaming mode."""
+    max_row = min(50, sheet.max_row or 0)
+    max_col = sheet.max_column or 0
+    if read_only:
+        for row_idx, values in enumerate(
+            sheet.iter_rows(min_row=1, max_row=max_row, max_col=max_col, values_only=True),
+            start=1,
+        ):
+            yield row_idx, list(values)
+        return
+
+    merged_values: dict[tuple[int, int], Any] = {}
+    for merged_range in sheet.merged_cells.ranges:
+        if merged_range.min_row > max_row:
+            continue
+        top_left = sheet.cell(merged_range.min_row, merged_range.min_col).value
+        for row_idx in range(merged_range.min_row, min(merged_range.max_row, max_row) + 1):
+            for col_idx in range(merged_range.min_col, merged_range.max_col + 1):
+                merged_values[(row_idx, col_idx)] = top_left
+
+    for row_idx in range(1, max_row + 1):
+        yield (
+            row_idx,
+            [
+                merged_values.get((row_idx, col_idx), sheet.cell(row_idx, col_idx).value)
+                for col_idx in range(1, max_col + 1)
+            ],
+        )
+
+
+def _combine_header_rows(rows: list[list[Any]]) -> list[str]:
+    """Combine stacked Excel header rows column-by-column.
+
+    Real BOQs commonly split labels across two rows, for example
+    ``ITEM`` over ``DESCRIPTION`` and ``ITEM`` over ``QTY.``.  Treating
+    only the first row as the header loses the description column and
+    makes the entire sheet appear empty.
+    """
+    max_columns = max((len(row) for row in rows), default=0)
+    combined: list[str] = []
+    for column_idx in range(max_columns):
+        parts: list[str] = []
+        for row in rows:
+            value = row[column_idx] if column_idx < len(row) else None
+            cleaned = str(value).strip() if value is not None else ""
+            if cleaned and (not parts or cleaned != parts[-1]):
+                parts.append(cleaned)
+        combined.append(" ".join(parts))
+    return combined
+
+
+def _find_header(sheet, *, read_only: bool) -> tuple[int, int, dict[str, int]] | None:
+    """Return ``(start_row, end_row, columns)`` for the best header.
+
+    Up to three adjacent rows are considered as one stacked header.  A
+    candidate containing both the item-number and description columns is
+    preferred over a partial match; richer candidates win, then the
+    earliest occurrence wins so repeated print-page headers do not take
+    over from the first header.
+    """
+    header_rows = list(_iter_header_rows(sheet, read_only=read_only))
+    candidates: list[tuple[int, int, dict[str, int]]] = []
+    for position, (start_row, first_values) in enumerate(header_rows):
+        if all(value is None for value in first_values):
+            continue
+        for span in range(1, min(3, len(header_rows) - position) + 1):
+            selected = [header_rows[position + offset][1] for offset in range(span)]
+            mapped = detect_columns(_combine_header_rows(selected))
+            if "desc" in mapped:
+                end_row = header_rows[position + span - 1][0]
+                candidates.append((start_row, end_row, mapped))
+            # A complete single-row header should not absorb the first data rows.
+            if span == 1 and {"no", "desc"}.issubset(mapped):
+                break
+
+    if not candidates:
+        return None
+
+    return max(
+        candidates,
+        key=lambda candidate: (
+            int({"no", "desc"}.issubset(candidate[2])),
+            len(candidate[2]),
+            -(candidate[1] - candidate[0]),
+            -candidate[0],
+        ),
+    )
+
+
+def _mapped_value(row_cells: list[Any] | tuple[Any, ...], mapped_cols: dict[str, int], key: str):
+    column_idx = mapped_cols.get(key)
+    if column_idx is None or column_idx >= len(row_cells):
+        return None
+    return row_cells[column_idx]
+
+
+def _has_value(value: Any) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _is_repeated_header_row(row_cells: list[Any] | tuple[Any, ...]) -> bool:
+    """Identify print-page headers repeated inside the worksheet body."""
+    detected = detect_columns(list(row_cells))
+    if len(detected) < 3:
+        return False
+    exact_values = {_clean(value) for value in row_cells if _has_value(value)}
+    return bool(exact_values.intersection({"item", "description", "item description"}))
+
+
+def _row_is_quantified_item(
+    row_cells: list[Any] | tuple[Any, ...], mapped_cols: dict[str, int]
+) -> bool:
+    """Return whether the row has a real unit and numeric quantity."""
+    unit = _mapped_value(row_cells, mapped_cols, "unit")
+    quantity = _mapped_value(row_cells, mapped_cols, "qty")
+    if not _has_value(unit) or isinstance(quantity, bool):
+        return False
+    if isinstance(quantity, int | float):
+        return True
+    try:
+        float(str(quantity).strip().replace(",", "").replace(" ", ""))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _is_structural_fallback_row(
+    row_idx: int,
+    header_row_idx: int,
+    row_cells: list[Any] | tuple[Any, ...],
+    mapped_cols: dict[str, int],
+) -> bool:
+    """Exclude page furniture from description-only BOQ sheets."""
+    desc = str(_mapped_value(row_cells, mapped_cols, "desc") or "").strip()
+    normalized = _clean(desc)
+    if _is_page_furniture_description(normalized):
+        return True
+    number = _mapped_value(row_cells, mapped_cols, "no")
+    if row_idx <= header_row_idx + 3 and not _has_value(number):
+        letters = [char for char in desc if char.isalpha()]
+        if letters and desc.upper() == desc:
+            return True
+    return False
+
+
+def _is_page_furniture_description(description: str) -> bool:
+    normalized = _clean(description)
+    return bool(
+        re.fullmatch(r"\d+\s*/\s*\d+", normalized)
+        or re.search(r"\b(?:collection|carried forward|brought forward)\b", normalized)
+    )
+
+
+def _classification_text(context_fragments: list[str], description: str) -> str:
+    """Build AI-only text while leaving the exported description unchanged."""
+    item = str(description).strip()
+    context = [
+        fragment.strip()[:1_200]
+        for fragment in context_fragments[-2:]
+        if fragment.strip() and fragment.strip() != item
+    ]
+    if not context:
+        return item
+    return "\n".join([f"Item: {item}", *(f"BOQ context: {value}" for value in context)])
+
+
+def _sheet_has_quantified_items(sheet, header_row_idx: int, mapped_cols: dict[str, int]) -> bool:
+    """Check whether the sheet contains measured item rows.
+
+    If it does, narrative notes and section descriptions without any item
+    signal are excluded. Description-only bills (notably preliminaries)
+    remain supported because every meaningful row in those sheets is free
+    text by design.
+    """
+    rows = sheet.iter_rows(
+        min_row=header_row_idx + 1,
+        max_row=sheet.max_row,
+        max_col=sheet.max_column,
+        values_only=True,
+    )
+    for row_cells in rows:
+        desc = _mapped_value(row_cells, mapped_cols, "desc")
+        if not _has_value(desc) or _is_repeated_header_row(row_cells):
+            continue
+        if _row_is_quantified_item(row_cells, mapped_cols):
+            return True
+    return False
+
+
 def parse_excel(
     file_path: str,
     i18n=None,
@@ -496,7 +708,7 @@ def parse_excel(
     file_size = os.path.getsize(file_path)
 
     # Check if file size warrants a warning
-    size_warning = _should_warn_about_file_size(file_size)
+    size_warning = _should_warn_about_file_size(file_size, i18n)
     if size_warning:
         log.warning(size_warning)
         progress_callback(0, size_warning)
@@ -510,11 +722,10 @@ def parse_excel(
         progress_callback(0, f"Large file detected ({file_size / (1024 * 1024):.1f} MB)")
 
     try:
-        # For large files, use read_only=True to save memory
-        # Note: read_only=True is incompatible with data_only=True in openpyxl,
-        # but we can use read_only=True alone which still gives us cell values
+        # For large files, stream cached values instead of materializing the
+        # entire workbook. ``read_only`` and ``data_only`` are compatible.
         if use_read_only:
-            wb = openpyxl.load_workbook(file_path, read_only=True)
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         else:
             wb = openpyxl.load_workbook(file_path, data_only=True)
     except (InvalidFileException, zipfile.BadZipFile) as e:
@@ -584,80 +795,49 @@ def parse_excel(
     log.info("Parsing Excel file with %d worksheet(s)", total_sheets)
 
     for sheet in wb.worksheets:
-        # Find header row by scanning up to 50 rows.
-        header_row_idx: int | None = None
-        mapped_cols: dict[str, int] = {}
-        for r_idx in range(1, min(51, sheet.max_row + 1)):
-            # Build header values, handling merged cells
-            header_cells = []
-            for c_idx in range(1, sheet.max_column + 1):
-                cell = sheet.cell(row=r_idx, column=c_idx)
-                header_cells.append(cell)
+        if re.search(r"\b(?:summary|summaries)\b", sheet.title, flags=re.IGNORECASE):
+            log.info("Skipping summary worksheet '%s'", sheet.title)
+            continue
+        if (sheet.max_row or 0) > MAX_WORKSHEET_ROWS:
+            wb.close()
+            raise ValueError(
+                f"Worksheet '{sheet.title}' has {sheet.max_row:,} rows; "
+                f"the supported limit is {MAX_WORKSHEET_ROWS:,}."
+            )
+        if (sheet.max_column or 0) > MAX_WORKSHEET_COLUMNS:
+            wb.close()
+            raise ValueError(
+                f"Worksheet '{sheet.title}' has {sheet.max_column:,} columns; "
+                f"the supported limit is {MAX_WORKSHEET_COLUMNS:,}."
+            )
 
-            # Create row_vals array, handling merged cells
-            row_vals = []
-            c_idx = 1
-            while c_idx <= sheet.max_column:
-                cell = header_cells[c_idx - 1]  # Convert to 0-index
-
-                # Check if this cell is in any merged range
-                cell_coordinate = cell.coordinate
-                merged_range = None
-                for merge_rng in sheet.merged_cells.ranges:
-                    if cell_coordinate in merge_rng:
-                        merged_range = merge_rng
-                        break
-
-                if merged_range:
-                    # Use the top-left cell's value for the entire range
-                    top_left = sheet.cell(row=merged_range.min_row, column=merged_range.min_col)
-                    # Add the value for each column in the merged range
-                    for _col in range(merged_range.min_col, merged_range.max_col + 1):
-                        row_vals.append(top_left.value)
-                    # Skip to the end of the merged range
-                    c_idx = merged_range.max_col + 1
-                else:
-                    row_vals.append(cell.value)
-                    c_idx += 1
-
-            if all(v is None for v in row_vals):
-                continue
-
-            temp_map = detect_columns(row_vals)
-            # Need at least one identifier (Nr OR Description) to
-            # treat this row as a header. We don't require 2+ matches
-            # anymore — sheets with just Nr+Description are valid.
-            if "no" in temp_map or "desc" in temp_map:
-                header_row_idx = r_idx
-                mapped_cols = temp_map
-
-                # Validate the detected header pattern
-                validation_error = _validate_header_pattern(mapped_cols)
-                if validation_error:
-                    log.warning(
-                        "Unusual header pattern detected in sheet '%s': %s",
-                        sheet.title,
-                        validation_error,
-                    )
-                    # Continue with detected columns but log the warning
-
-                break
-
-        if not header_row_idx:
-            # Skip sheet if no header row was identified.
+        # Find a single- or multi-row header by scanning up to 50 rows.
+        header = _find_header(sheet, read_only=use_read_only)
+        if header is None:
             log.warning("Sheet '%s' has no recognizable header row, skipping", sheet.title)
             continue
+        header_start_idx, header_row_idx, mapped_cols = header
+
+        validation_error = _validate_header_pattern(mapped_cols)
+        if validation_error:
+            log.warning(
+                "Unusual header pattern detected in sheet '%s': %s",
+                sheet.title,
+                validation_error,
+            )
 
         # Collect pre-header metadata (project name, sheet title, etc.)
         pre_header_rows: list[str] = []
-        for r_idx in range(1, header_row_idx):
-            row_vals = [
-                str(sheet.cell(row=r_idx, column=c).value).strip()
-                for c in range(1, sheet.max_column + 1)
-                if sheet.cell(row=r_idx, column=c).value is not None
-            ]
-            if row_vals:
-                pre_header_rows.append(", ".join(row_vals))
+        if header_start_idx > 1:
+            for values in sheet.iter_rows(
+                min_row=1,
+                max_row=header_start_idx - 1,
+                max_col=sheet.max_column,
+                values_only=True,
+            ):
+                row_vals = [str(value).strip() for value in values if value is not None]
+                if row_vals:
+                    pre_header_rows.append(", ".join(row_vals))
         metadata_str = " : ".join(pre_header_rows) if pre_header_rows else ""
 
         # Record headers mapping (capitalised for the writer).
@@ -687,13 +867,23 @@ def parse_excel(
         # Parse data rows using chunked processing if enabled.
         total_rows_to_process = sheet.max_row - header_row_idx
         processed_rows = 0
+        require_quantified_item = _sheet_has_quantified_items(sheet, header_row_idx, mapped_cols)
 
         if use_chunked:
-            progress_callback(0, f"Starting chunked processing of {sheet.title}")
+            progress_callback(
+                0,
+                i18n.tr("starting_chunked_processing").format(sheet_title=sheet.title)
+                if i18n
+                else f"Starting chunked processing of {sheet.title}",
+            )
 
             # Use chunked parser generator
             row_generator = _create_chunked_parser(
-                sheet, header_row_idx, mapped_cols, global_id_counter
+                sheet,
+                header_row_idx,
+                mapped_cols,
+                global_id_counter,
+                require_quantified_item=require_quantified_item,
             )
 
             for row_data, _current_row in row_generator:
@@ -708,11 +898,13 @@ def parse_excel(
                 data_mapping[g_id] = {
                     "Nr.": nr_str,
                     "Item Description": desc,
+                    "classification_text": row_data["classification_text"],
                     "Unit": unit_str,
                     "Qty": qty_num,
                     "Rate": rate_num,
                     "Amount": amount_num,
                     "sheet_name": sheet.title,
+                    "source_row": row_data["source_row"],
                     "original_values": row_data["original_values"],
                 }
                 sheet_md.append(
@@ -727,7 +919,9 @@ def parse_excel(
                     percentage = min(100, int((processed_rows / total_rows_to_process) * 100))
                     progress_callback(
                         percentage,
-                        f"Processed {processed_rows} rows",
+                        i18n.tr("processed_rows").format(processed_rows=processed_rows)
+                        if i18n
+                        else f"Processed {processed_rows} rows",
                         {"processed": processed_rows, "total": total_rows_to_process},
                     )
 
@@ -735,12 +929,31 @@ def parse_excel(
                 global_id_counter = int(g_id[1:]) + 1
         else:
             # Fallback to original processing for small files or when chunked processing is disabled
+            context_fragments: list[str] = []
             for r_idx in range(header_row_idx + 1, sheet.max_row + 1):
                 row_cells = [
                     sheet.cell(row=r_idx, column=c).value for c in range(1, sheet.max_column + 1)
                 ]
                 if all(v is None or str(v).strip() == "" for v in row_cells):
                     continue
+                if _is_repeated_header_row(row_cells):
+                    continue
+                candidate_desc = _mapped_value(row_cells, mapped_cols, "desc")
+                if not _has_value(candidate_desc):
+                    continue
+                candidate_desc_text = str(candidate_desc).strip()
+                if require_quantified_item:
+                    if not _row_is_quantified_item(row_cells, mapped_cols):
+                        if not _is_page_furniture_description(candidate_desc_text):
+                            context_fragments.append(candidate_desc_text)
+                            context_fragments = context_fragments[-4:]
+                        continue
+                elif _is_structural_fallback_row(r_idx, header_row_idx, row_cells, mapped_cols):
+                    if not _is_page_furniture_description(candidate_desc_text):
+                        context_fragments.append(candidate_desc_text)
+                        context_fragments = context_fragments[-4:]
+                    continue
+                classification_text = _classification_text(context_fragments, candidate_desc_text)
 
                 # Bind loop variables as default args so the inner
                 # function captures *this iteration's* values, not
@@ -805,10 +1018,13 @@ def parse_excel(
                     "id": g_id,
                     "Nr.": nr_str,
                     "Item Description": desc,
+                    "classification_text": classification_text,
                     "Unit": unit_str,
                     "Qty": qty_num,
                     "Rate": rate_num,
                     "Amount": amount_num,
+                    "sheet_name": sheet.title,
+                    "source_row": r_idx,
                     "original_values": {
                         "Nr.": nr_str,
                         "nr": nr_str,
@@ -835,7 +1051,11 @@ def parse_excel(
 
         # Send final progress update
         progress_callback(
-            100, f"Completed processing {sheet.title}", {"total_items": len(data_mapping)}
+            100,
+            i18n.tr("completed_processing").format(sheet_title=sheet.title)
+            if i18n
+            else f"Completed processing {sheet.title}",
+            {"total_items": len(data_mapping)},
         )
 
         markdown_parts.append("\n".join(sheet_md))
@@ -861,97 +1081,107 @@ def sanitize_sheet_name(name: str) -> str:
 
 
 def _create_chunked_parser(
-    sheet, header_row_idx: int, mapped_cols: dict[str, int], global_id_counter: int
+    sheet,
+    header_row_idx: int,
+    mapped_cols: dict[str, int],
+    global_id_counter: int,
+    *,
+    require_quantified_item: bool,
 ):
-    """Generator that yields parsed rows in chunks for memory-efficient processing."""
-    current_row = header_row_idx + 1
+    """Stream parsed rows sequentially without random worksheet access."""
 
-    while current_row <= sheet.max_row:
-        # Process a chunk of rows
-        chunk_end = min(current_row + CHUNK_SIZE - 1, sheet.max_row)
+    def _cell(key: str, cells: tuple[Any, ...]) -> Any:
+        idx = mapped_cols.get(key)
+        if idx is None or idx >= len(cells):
+            return None
+        return cells[idx]
 
-        for r_idx in range(current_row, chunk_end + 1):
-            row_cells = [
-                sheet.cell(row=r_idx, column=c).value for c in range(1, sheet.max_column + 1)
-            ]
+    def _to_num(value: Any) -> float:
+        if value is None:
+            return 0.0
+        if isinstance(value, int | float):
+            return float(value)
+        try:
+            return float(str(value).strip().replace(",", "").replace(" ", ""))
+        except (ValueError, TypeError):
+            return 0.0
 
-            # Skip empty rows
-            if all(v is None or str(v).strip() == "" for v in row_cells):
+    rows = sheet.iter_rows(
+        min_row=header_row_idx + 1,
+        max_row=sheet.max_row,
+        max_col=sheet.max_column,
+        values_only=True,
+    )
+    context_fragments: list[str] = []
+    for r_idx, row_cells in enumerate(rows, start=header_row_idx + 1):
+        if all(value is None or str(value).strip() == "" for value in row_cells):
+            continue
+        if _is_repeated_header_row(row_cells):
+            continue
+        candidate_desc = _cell("desc", row_cells)
+        if not _has_value(candidate_desc):
+            continue
+        candidate_desc_text = str(candidate_desc).strip()
+        if require_quantified_item:
+            if not _row_is_quantified_item(row_cells, mapped_cols):
+                if not _is_page_furniture_description(candidate_desc_text):
+                    context_fragments.append(candidate_desc_text)
+                    context_fragments = context_fragments[-4:]
                 continue
+        elif _is_structural_fallback_row(r_idx, header_row_idx, row_cells, mapped_cols):
+            if not _is_page_furniture_description(candidate_desc_text):
+                context_fragments.append(candidate_desc_text)
+                context_fragments = context_fragments[-4:]
+            continue
+        classification_text = _classification_text(context_fragments, candidate_desc_text)
 
-            # Extract values using a helper function
-            def _cell(key: str, cells: list) -> Any:
-                idx = mapped_cols.get(key)
-                if idx is None or idx >= len(cells):
-                    return None
-                return cells[idx]
+        desc_val = _cell("desc", row_cells)
+        if desc_val is None or str(desc_val).strip() == "":
+            continue
 
-            desc_val = _cell("desc", row_cells)
-            if desc_val is None or str(desc_val).strip() == "":
-                # Skip rows that have no description
-                continue
+        nr = _cell("no", row_cells)
+        if nr is None:
+            nr_str = ""
+        elif isinstance(nr, float) and nr.is_integer():
+            nr_str = str(int(nr))
+        else:
+            nr_str = str(nr).strip()
 
-            nr = _cell("no", row_cells)
-            desc = str(desc_val).strip()
-            unit = _cell("unit", row_cells)
-            qty = _cell("qty", row_cells)
-            rate = _cell("rate", row_cells)
-            amount = _cell("total", row_cells)
+        desc = str(desc_val).strip()
+        unit = _cell("unit", row_cells)
+        unit_str = str(unit).strip() if unit is not None else ""
+        qty_num = _to_num(_cell("qty", row_cells))
+        rate_num = _to_num(_cell("rate", row_cells))
+        amount_num = _to_num(_cell("total", row_cells))
 
-            # Format Nr.
-            if nr is None:
-                nr_str = ""
-            elif isinstance(nr, float) and nr.is_integer():
-                nr_str = str(int(nr))
-            else:
-                nr_str = str(nr).strip()
-
-            # Numeric coercion
-            def _to_num(v: Any) -> float:
-                if v is None:
-                    return 0.0
-                if isinstance(v, int | float):
-                    return float(v)
-                try:
-                    s = str(v).strip().replace(",", "").replace(" ", "")
-                    return float(s)
-                except (ValueError, TypeError):
-                    return 0.0
-
-            unit_str = str(unit).strip() if unit is not None else ""
-            qty_num = _to_num(qty)
-            rate_num = _to_num(rate)
-            amount_num = _to_num(amount)
-
-            g_id = f"R{global_id_counter}"
-            global_id_counter += 1
-
-            row_data = {
-                "id": g_id,
+        g_id = f"R{global_id_counter}"
+        global_id_counter += 1
+        row_data = {
+            "id": g_id,
+            "Nr.": nr_str,
+            "Item Description": desc,
+            "classification_text": classification_text,
+            "Unit": unit_str,
+            "Qty": qty_num,
+            "Rate": rate_num,
+            "Amount": amount_num,
+            "source_row": r_idx,
+            "original_values": {
                 "Nr.": nr_str,
+                "nr": nr_str,
                 "Item Description": desc,
+                "description": desc,
                 "Unit": unit_str,
+                "unit": unit_str,
                 "Qty": qty_num,
+                "qty": qty_num,
                 "Rate": rate_num,
+                "rate": rate_num,
                 "Amount": amount_num,
-                "original_values": {
-                    "Nr.": nr_str,
-                    "nr": nr_str,
-                    "Item Description": desc,
-                    "description": desc,
-                    "Unit": unit_str,
-                    "unit": unit_str,
-                    "Qty": qty_num,
-                    "qty": qty_num,
-                    "Rate": rate_num,
-                    "rate": rate_num,
-                    "Amount": amount_num,
-                    "amount": amount_num,
-                },
-            }
-
-            yield row_data, r_idx
-            current_row = r_idx + 1
+                "amount": amount_num,
+            },
+        }
+        yield row_data, r_idx
 
 
 def _style_worksheet(
@@ -1031,6 +1261,8 @@ def _style_worksheet(
         vals = _to_list(item)
         for c_idx in range(1, n_cols + 1):
             v = vals[c_idx - 1] if c_idx - 1 < len(vals) else None
+            if c_idx not in (4, 5, 6):
+                v = _safe_excel_text(v)
             cell = ws.cell(row=r_idx, column=c_idx, value=v)
             cell.font = body_font
             cell.border = thin
@@ -1129,14 +1361,14 @@ def _style_cover(ws, project_name: str, date: str, i18n=None) -> None:
         ws["A4"] = i18n.tr("cover_date")
         ws["A5"] = i18n.tr("cover_application")
         # Format the application value with version
-        app_value = i18n.tr("cover_application_value").format(version="0.0.1")
+        app_value = i18n.tr("cover_application_value").format(version=__version__)
     else:
         ws["A1"] = "Tawreed"
         ws["B1"] = "BOQ Work-Package Extractor"
         ws["A3"] = "Project Name"
         ws["A4"] = "Date"
         ws["A5"] = "Application"
-        app_value = "Tawreed BOQ Processor v0.0.1"
+        app_value = f"Tawreed BOQ Processor v{__version__}"
 
     ws["A1"].font = Font(name=OUTPUT_FONT_NAME, size=26, bold=True, color="FF1F2937")
     ws["B1"].font = Font(name=OUTPUT_FONT_NAME, size=14, color="FF6B7280", italic=True)
@@ -1144,12 +1376,12 @@ def _style_cover(ws, project_name: str, date: str, i18n=None) -> None:
     ws.row_dimensions[1].height = 36
 
     # Metadata block.
-    ws["B3"] = project_name or "—"
+    ws["B3"] = _safe_excel_text(project_name) if project_name else "—"
     ws["B3"].font = value_font
     if not project_name:
         ws["B3"].fill = PatternFill(start_color="FFFEF3C7", end_color="FFFEF3C7", fill_type="solid")
 
-    ws["B4"] = date or "—"
+    ws["B4"] = _safe_excel_text(date) if date else "—"
     ws["B4"].font = value_font
     if not date:
         ws["B4"].fill = PatternFill(start_color="FFFEF3C7", end_color="FFFEF3C7", fill_type="solid")
@@ -1240,35 +1472,34 @@ def write_excel(
     if has_sheet:
         master_headers.append("Sheet")
     master_headers.append("Package")
+    master_headers.append("Global ID")
 
     # Build flat list of master rows (raw values, formulas applied in style pass).
     master_rows: list[list[Any]] = []
-    for cat_name, items in grouped_items.items():
-        for item in items:
-            vals = _to_list(item)
-            row = [vals[0], vals[1], vals[2], vals[3], vals[4], 0]
-            if has_sheet:
-                sheet_name = item.get("sheet_name", "") if isinstance(item, dict) else ""
-                row.append(sheet_name)
-            row.append(cat_name)
-            master_rows.append(row)
+    for global_id, item in row_mapping.items():
+        vals = _to_list(item)
+        row = [vals[0], vals[1], vals[2], vals[3], vals[4], 0]
+        if has_sheet:
+            sheet_name = item.get("sheet_name", "") if isinstance(item, dict) else ""
+            row.append(sheet_name)
+        row.append(item_categories.get(global_id, "General") or "General")
+        row.append(global_id)
+        master_rows.append(row)
 
     _style_worksheet(ws_master, master_headers, master_rows, master_title, desc_idx=2)
+    global_id_column = get_column_letter(master_headers.index("Global ID") + 1)
+    ws_master.column_dimensions[global_id_column].width = 14
 
     # ---- Save ------------------------------------------------------------
+    tmp_path: str | None = None
     try:
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-        # Use save_virtual_workbook for memory efficiency with large files
-        # This avoids loading the entire workbook into memory during save
-        # save_virtual_workbook is not available in openpyxl 3.1.x, so we fall back to wb.save()
-        try:
-            from openpyxl.writer.excel import save_virtual_workbook
-
-            save_virtual_workbook(wb, output_path)
-        except ImportError:
-            # Fallback to regular save for older openpyxl versions
-            wb.save(output_path)
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        os.makedirs(output_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(prefix=".tawreed-", suffix=".xlsx", dir=output_dir)
+        os.close(fd)
+        wb.save(tmp_path)
+        os.replace(tmp_path, output_path)
+        tmp_path = None
     except PermissionError as e:
         # The most common cause: the user has the file open in Excel,
         # which takes an exclusive write lock on Windows.
@@ -1288,6 +1519,13 @@ def write_excel(
             if i18n
             else f"Cannot write '{os.path.basename(output_path)}': {e}"
         ) from e
+    finally:
+        wb.close()
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def parse_excel_boq(file_path: str) -> tuple[str, dict, dict]:

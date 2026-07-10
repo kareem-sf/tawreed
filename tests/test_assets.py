@@ -1,6 +1,6 @@
 """Tests for gui.assets — path resolution in dev and PyInstaller modes.
 
-In dev, ``gui.assets.ROOT`` is the project root (parent of ``gui/``)
+In dev, ``gui.assets.ROOT`` is the ``gui`` package directory
 and both ``APP_ICON_PATH`` and ``LOGO_PNG_PATH`` point at the real
 files that ship in the repo.
 
@@ -32,9 +32,9 @@ def assets_module():
 
 
 def test_root_is_project_root_in_dev(assets_module):
-    """In dev, ROOT is the parent of the gui/ package directory."""
+    """In dev, ROOT is the package directory that ships in the wheel."""
     gui_dir = Path(assets_module.__file__).resolve().parent
-    assert assets_module.ROOT == gui_dir.parent
+    assert assets_module.ROOT == gui_dir
 
 
 def test_paths_resolve_to_existing_files(assets_module):

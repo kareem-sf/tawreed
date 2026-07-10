@@ -28,12 +28,14 @@ for the splash→main transition where we want a fast cold start.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
 import httpx
 
 from core.ai import PROVIDERS
+from core.codex_connector import CodexConnectorError, fetch_codex_models
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +76,7 @@ class ModelFetchResult:
     models: list[str] = field(default_factory=list)
     source: str = "curated"
     error: str | None = None
+    default_model: str | None = None
 
 
 def _curated(provider: str) -> list[str]:
@@ -178,6 +181,32 @@ async def fetch_models(
             models=curated,
             source="curated",
             error=f"Unknown provider: {provider!r}",
+        )
+
+    if PROVIDERS[provider].get("transport") == "codex_cli":
+        try:
+            catalog = await asyncio.to_thread(fetch_codex_models)
+        except CodexConnectorError as exc:
+            return ModelFetchResult(
+                provider=provider,
+                models=[],
+                source="error",
+                error=str(exc),
+            )
+        except Exception as exc:
+            log.warning("fetch_models: unexpected Codex error: %s", exc)
+            return ModelFetchResult(
+                provider=provider,
+                models=[],
+                source="error",
+                error="Could not fetch the Codex model catalog.",
+            )
+        return ModelFetchResult(
+            provider=provider,
+            models=[model.model_id for model in catalog.models],
+            source="live",
+            error=None,
+            default_model=catalog.default_model,
         )
 
     if not api_key:
