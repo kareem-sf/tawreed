@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self._pages: dict[str, QWidget] = {}
         self._nav_buttons: dict[str, QPushButton] = {}
         self._toast_manager = ToastManager(self)
-        self.setMinimumSize(920, 640)
+        self.setMinimumSize(960, 680)
         app = QApplication.instance()
         if app and not app.styleSheet():
             app.setStyleSheet(load_stylesheet())
@@ -76,8 +76,8 @@ class MainWindow(QMainWindow):
         bar = QWidget(self)
         bar.setObjectName("topBar")
         row = QHBoxLayout(bar)
-        row.setContentsMargins(24, 10, 18, 10)
-        row.setSpacing(10)
+        row.setContentsMargins(36, 14, 32, 14)
+        row.setSpacing(14)
 
         self.logo_label = QLabel(bar)
         self.logo_label.setObjectName("topBarLogo")
@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         if LOGO_PNG_PATH.exists():
             self.logo_label.setPixmap(
                 QPixmap(str(LOGO_PNG_PATH)).scaled(
-                    34, 34, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    38, 38, Qt.KeepAspectRatio, Qt.SmoothTransformation
                 )
             )
         row.addWidget(self.logo_label)
@@ -152,7 +152,7 @@ class MainWindow(QMainWindow):
         if geometry:
             self.restoreGeometry(geometry)
         else:
-            self.resize(1180, 780)
+            self.resize(1320, 840)
         self._ensure_visible_geometry()
         last_page = state.get("last_page", "workspace")
         self.select_page(last_page if last_page in self._pages else "workspace")
@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
         screens = QGuiApplication.screens()
         if screens and not any(frame.intersects(screen.availableGeometry()) for screen in screens):
             target = QGuiApplication.primaryScreen().availableGeometry()
-            self.resize(min(1180, target.width()), min(780, target.height()))
+            self.resize(min(1320, target.width()), min(840, target.height()))
             self.move(target.center() - self.rect().center())
 
     def bring_to_front(self, _message: str = "") -> None:

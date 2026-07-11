@@ -63,5 +63,5 @@ def test_legacy_alias_works() -> None:
 def test_known_token_substitutes() -> None:
     """Spot-check a couple of well-known substitutions."""
     s = load_stylesheet("dark")
-    assert "#0d0e15" in s, "COLOR_BG did not substitute into the QSS"
+    assert "#0b0d12" in s, "COLOR_BG did not substitute into the QSS"
     assert "#89b4fa" in s, "COLOR_ACCENT did not substitute into the QSS"

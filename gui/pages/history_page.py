@@ -5,11 +5,14 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QSize, Qt
+from PySide6.QtGui import QFont, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -18,6 +21,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -66,9 +73,120 @@ class RunListModel(QAbstractListModel):
             self.dataChanged.emit(self.index(0, 0), self.index(len(self._entries) - 1, 0))
 
 
+class RunItemDelegate(QStyledItemDelegate):
+    """Enterprise run row with stable columns and a compact narrow layout."""
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        return QSize(option.rect.width(), 74)
+
+    @staticmethod
+    def _timestamp(value: str) -> str:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").strftime("%b %d, %Y · %H:%M")
+        except (TypeError, ValueError):
+            return value
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        entry = index.data(RunListModel.EntryRole) or {}
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawPrimitive(QStyle.PE_PanelItemViewItem, option, painter, option.widget)
+
+        painter.save()
+        rect = option.rect.adjusted(18, 0, -18, 0)
+        text_color = option.palette.color(QPalette.Text)
+        muted_color = option.palette.color(QPalette.PlaceholderText)
+        accent_color = option.palette.color(QPalette.Highlight)
+        name = str(entry.get("project_name") or "Tawreed run")
+        packages = int(entry.get("packages_count") or 0)
+        package_text = self._i18n.tr("run_packages_short").format(count=packages)
+        status = self._i18n.tr("run_completed")
+        timestamp = self._timestamp(str(entry.get("timestamp") or ""))
+
+        name_font = QFont(option.font)
+        name_font.setWeight(QFont.DemiBold)
+        body_font = QFont(option.font)
+        body_font.setPointSizeF(max(9.0, body_font.pointSizeF() - 0.25))
+        metrics = painter.fontMetrics()
+
+        if rect.width() >= 760:
+            name_width = int(rect.width() * 0.36)
+            status_x = rect.left() + name_width
+            package_x = rect.left() + int(rect.width() * 0.58)
+            date_x = rect.left() + int(rect.width() * 0.76)
+            center_y = rect.center().y()
+
+            painter.setFont(name_font)
+            painter.setPen(text_color)
+            painter.drawText(
+                rect.left(),
+                rect.top(),
+                name_width - 22,
+                rect.height(),
+                Qt.AlignVCenter | Qt.AlignLeft,
+                metrics.elidedText(name, Qt.ElideMiddle, name_width - 22),
+            )
+            painter.setBrush(accent_color)
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(status_x, center_y - 4, 8, 8)
+            painter.setFont(body_font)
+            painter.setPen(text_color)
+            painter.drawText(
+                status_x + 16,
+                rect.top(),
+                package_x - status_x - 22,
+                rect.height(),
+                Qt.AlignVCenter | Qt.AlignLeft,
+                status,
+            )
+            painter.setPen(muted_color)
+            painter.drawText(
+                package_x,
+                rect.top(),
+                date_x - package_x - 16,
+                rect.height(),
+                Qt.AlignVCenter | Qt.AlignLeft,
+                package_text,
+            )
+            painter.drawText(
+                date_x,
+                rect.top(),
+                rect.right() - date_x,
+                rect.height(),
+                Qt.AlignVCenter | Qt.AlignRight,
+                timestamp,
+            )
+        else:
+            painter.setFont(name_font)
+            painter.setPen(text_color)
+            painter.drawText(
+                rect.left(),
+                rect.top() + 11,
+                rect.width(),
+                25,
+                Qt.AlignLeft | Qt.AlignVCenter,
+                metrics.elidedText(name, Qt.ElideMiddle, rect.width()),
+            )
+            painter.setFont(body_font)
+            painter.setPen(muted_color)
+            painter.drawText(
+                rect.left(),
+                rect.top() + 38,
+                rect.width(),
+                22,
+                Qt.AlignLeft | Qt.AlignVCenter,
+                f"{status}  ·  {package_text}  ·  {timestamp}",
+            )
+        painter.restore()
+
+    @property
+    def _i18n(self):
+        return get_i18n()
+
+
 class HistoryPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("pageHost")
         self._i18n = get_i18n()
         self._build_ui()
         self.refresh()
@@ -83,10 +201,18 @@ class HistoryPage(QWidget):
         outer.addWidget(scroll)
         canvas = QWidget(scroll)
         canvas.setObjectName("pageCanvas")
-        layout = QVBoxLayout(canvas)
-        layout.setContentsMargins(56, 42, 56, 42)
-        layout.setSpacing(18)
+        canvas_layout = QVBoxLayout(canvas)
+        canvas_layout.setContentsMargins(64, 46, 64, 46)
         scroll.setWidget(canvas)
+
+        self.content = QWidget(canvas)
+        self.content.setObjectName("runsContent")
+        self.content.setMaximumWidth(1240)
+        self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout = QVBoxLayout(self.content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(20)
+        canvas_layout.addWidget(self.content, 1, Qt.AlignHCenter)
 
         header = QHBoxLayout()
         title_col = QVBoxLayout()
@@ -122,6 +248,8 @@ class HistoryPage(QWidget):
         self.list_view = QListView(canvas)
         self.list_view.setObjectName("runList")
         self.list_view.setModel(self.model)
+        self.list_view.setItemDelegate(RunItemDelegate(self.list_view))
+        self.list_view.setUniformItemSizes(True)
         self.list_view.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.list_view.setSpacing(2)
@@ -138,6 +266,10 @@ class HistoryPage(QWidget):
         self.count_label.setObjectName("hintText")
         layout.addWidget(self.count_label)
         self.retranslate_ui()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.content.setFixedWidth(max(760, min(1240, self.width() - 128)))
 
     def refresh(self) -> None:
         try:

@@ -407,8 +407,12 @@ class BOQProcessor:
             warnings = (
                 (
                     self._tr(
-                        "other_items_warning",
-                        "{count} items were assigned to Other; review them in Excel after export.",
+                        "other_item_warning" if other_count == 1 else "other_items_warning",
+                        (
+                            "1 item was assigned to Other; review it in Excel after export."
+                            if other_count == 1
+                            else "{count} items were assigned to Other; review them in Excel after export."
+                        ),
                         count=other_count,
                     ),
                 )

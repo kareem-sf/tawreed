@@ -9,23 +9,23 @@ from functools import lru_cache
 from PySide6.QtGui import QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication, QStyle
 
-RADIUS_SM = 5
-RADIUS_MD = 8
-RADIUS_LG = 12
+RADIUS_SM = 6
+RADIUS_MD = 10
+RADIUS_LG = 14
 TYPE_MONO = "'Cascadia Mono', 'Consolas', monospace"
 
 _THEME_PATH = os.path.join(os.path.dirname(__file__), "themes", "tawreed_dark.qss")
 _current_theme = "system"
 
 _DARK = {
-    "color-bg": "#0d0e15",
-    "color-bg-rail": "#171a20",
-    "color-bg-card": "#181b21",
-    "color-bg-card-elev": "#20242c",
-    "color-bg-input": "#171a20",
-    "color-bg-input-focus": "#202631",
-    "color-border": "#2a2f39",
-    "color-border-input": "#3a414d",
+    "color-bg": "#0b0d12",
+    "color-bg-rail": "#101319",
+    "color-bg-card": "#141820",
+    "color-bg-card-elev": "#1b2029",
+    "color-bg-input": "#11151c",
+    "color-bg-input-focus": "#18202a",
+    "color-border": "#252b35",
+    "color-border-input": "#37404d",
     "color-border-input-focus": "#76a9ff",
     "color-text": "#f2f4f8",
     "color-text-dim": "#b4bbc7",
@@ -46,11 +46,11 @@ _LIGHT = {
     "color-bg": "#ffffff",
     "color-bg-rail": "#ffffff",
     "color-bg-card": "#ffffff",
-    "color-bg-card-elev": "#f6f8fb",
+    "color-bg-card-elev": "#f6f8fc",
     "color-bg-input": "#ffffff",
     "color-bg-input-focus": "#f7faff",
-    "color-border": "#d9dee7",
-    "color-border-input": "#b9c1cd",
+    "color-border": "#dce2ea",
+    "color-border-input": "#b8c2cf",
     "color-border-input-focus": "#075fc7",
     "color-text": "#101722",
     "color-text-dim": "#4b5666",
@@ -115,6 +115,17 @@ def _system_tokens() -> dict[str, str]:
     border = palette.color(QPalette.Mid)
     accent = palette.color(QPalette.Highlight)
     highlighted = palette.color(QPalette.HighlightedText)
+    high_contrast = (
+        abs(window.lightnessF() - text.lightnessF()) > 0.85
+        and (window.lightnessF() < 0.04 or window.lightnessF() > 0.98)
+        and accent.saturationF() > 0.55
+        and abs(window.lightnessF() - accent.lightnessF()) > 0.28
+    )
+    if not high_contrast:
+        # System follows the OS light/dark preference while retaining Tawreed's
+        # deliberate white/dark surfaces instead of Windows' utility-gray
+        # widget palette. High Contrast remains fully palette-driven below.
+        return dict(_DARK if window.lightnessF() < 0.5 else _LIGHT)
     return {
         "color-bg": window.name(),
         "color-bg-rail": window.name(),

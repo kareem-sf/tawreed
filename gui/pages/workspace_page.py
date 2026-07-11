@@ -14,9 +14,10 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAccessible, QAccessibleEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QBoxLayout,
     QFileDialog,
     QFrame,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -50,6 +52,9 @@ class DropZone(QPushButton):
         self.setObjectName("dropZone")
         self.setAcceptDrops(True)
         self.setMinimumHeight(190)
+        self.setIcon(QApplication.style().standardIcon(QStyle.SP_FileIcon))
+        self.setIconSize(QSize(34, 34))
+        self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     @staticmethod
@@ -88,6 +93,7 @@ class PhaseStrip(QWidget):
         super().__init__(parent)
         self._i18n = i18n
         self._nodes: dict[RunPhase, tuple[QLabel, QLabel]] = {}
+        self._lines: list[QFrame] = []
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
@@ -97,7 +103,7 @@ class PhaseStrip(QWidget):
             dot = QLabel(str(index + 1), self)
             dot.setObjectName("phaseDot")
             dot.setAlignment(Qt.AlignCenter)
-            dot.setFixedSize(32, 32)
+            dot.setFixedSize(40, 40)
             label = QLabel(self)
             label.setObjectName("phaseLabel")
             label.setAlignment(Qt.AlignCenter)
@@ -110,6 +116,7 @@ class PhaseStrip(QWidget):
                 line.setObjectName("phaseLine")
                 line.setFixedHeight(1)
                 row.addWidget(line, 1)
+                self._lines.append(line)
         self.retranslate_ui()
         self.set_phase(RunPhase.INSPECTING)
 
@@ -132,6 +139,11 @@ class PhaseStrip(QWidget):
                 widget.setProperty("state", state)
                 widget.style().unpolish(widget)
                 widget.style().polish(widget)
+        for index, line in enumerate(self._lines):
+            state = "complete" if index < current_index else "idle"
+            line.setProperty("state", state)
+            line.style().unpolish(line)
+            line.style().polish(line)
 
 
 class WorkspacePage(QWidget):
@@ -166,20 +178,29 @@ class WorkspacePage(QWidget):
 
         canvas = QWidget(scroll)
         canvas.setObjectName("pageCanvas")
-        self.canvas_layout = QVBoxLayout(canvas)
-        self.canvas_layout.setContentsMargins(56, 42, 56, 42)
-        self.canvas_layout.setSpacing(22)
+        outer_canvas_layout = QVBoxLayout(canvas)
+        outer_canvas_layout.setContentsMargins(64, 64, 64, 54)
+        outer_canvas_layout.setSpacing(0)
         scroll.setWidget(canvas)
 
-        self.title = QLabel(canvas)
+        self.content = QWidget(canvas)
+        self.content.setObjectName("contentColumn")
+        self.content.setMaximumWidth(1420)
+        self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.canvas_layout = QVBoxLayout(self.content)
+        self.canvas_layout.setContentsMargins(0, 0, 0, 0)
+        self.canvas_layout.setSpacing(18)
+        outer_canvas_layout.addWidget(self.content, 1, Qt.AlignHCenter)
+
+        self.title = QLabel(self.content)
         self.title.setObjectName("pageTitle")
-        self.subtitle = QLabel(canvas)
+        self.subtitle = QLabel(self.content)
         self.subtitle.setObjectName("pageSubtitle")
         self.subtitle.setWordWrap(True)
         self.canvas_layout.addWidget(self.title)
         self.canvas_layout.addWidget(self.subtitle)
 
-        self.stack = QStackedWidget(canvas)
+        self.stack = QStackedWidget(self.content)
         self.stack.setObjectName("workbenchStack")
         self.empty_view = self._build_empty_view()
         self.ready_view = self._build_ready_view()
@@ -208,14 +229,18 @@ class WorkspacePage(QWidget):
 
     def _build_empty_view(self) -> QWidget:
         view, layout = self._view()
+        layout.setContentsMargins(0, 36, 0, 0)
         self.drop_zone = DropZone(view)
+        self.drop_zone.setMinimumWidth(760)
+        self.drop_zone.setMaximumWidth(920)
         self.drop_zone.clicked.connect(self._browse_file)
         self.drop_zone.file_dropped.connect(self.select_file)
-        layout.addWidget(self.drop_zone)
+        layout.addWidget(self.drop_zone, 0, Qt.AlignHCenter)
         self.empty_hint = QLabel(view)
         self.empty_hint.setObjectName("hintText")
         self.empty_hint.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.empty_hint)
+        self.empty_hint.setMaximumWidth(760)
+        layout.addWidget(self.empty_hint, 0, Qt.AlignHCenter)
         layout.addStretch(1)
         return view
 
@@ -310,15 +335,24 @@ class WorkspacePage(QWidget):
         left_col.addWidget(self.details_panel)
         self.approval_layout.addWidget(left, 3)
 
+        divider = QFrame(view)
+        divider.setObjectName("summaryDivider")
+        divider.setFrameShape(QFrame.VLine)
+        self.approval_layout.addWidget(divider)
+
         summary = QFrame(view)
         summary.setObjectName("summaryPanel")
+        summary.setMinimumWidth(440)
+        summary.setMaximumWidth(470)
         summary_col = QVBoxLayout(summary)
-        summary_col.setContentsMargins(26, 22, 26, 22)
-        summary_col.setSpacing(12)
+        summary_col.setContentsMargins(40, 22, 28, 18)
+        summary_col.setSpacing(13)
         self.total_caption = QLabel(summary)
         self.total_caption.setObjectName("summaryCaption")
         self.total_value = QLabel(summary)
         self.total_value.setObjectName("summaryTotal")
+        self.items_suffix = QLabel(summary)
+        self.items_suffix.setObjectName("summarySuffix")
         self.packages_caption = QLabel(summary)
         self.packages_caption.setObjectName("summaryCaption")
         self.package_list = QVBoxLayout()
@@ -326,20 +360,40 @@ class WorkspacePage(QWidget):
         self.warning_label = QLabel(summary)
         self.warning_label.setObjectName("warningText")
         self.warning_label.setWordWrap(True)
+        self.warning_heading = QLabel(summary)
+        self.warning_heading.setObjectName("warningHeading")
+        self.provider_caption = QLabel(summary)
+        self.provider_caption.setObjectName("summaryCaption")
         self.provider_label = QLabel(summary)
-        self.provider_label.setObjectName("summaryMeta")
+        self.provider_label.setObjectName("summaryValue")
+        self.model_caption = QLabel(summary)
+        self.model_caption.setObjectName("summaryCaption")
         self.model_label = QLabel(summary)
-        self.model_label.setObjectName("summaryMeta")
+        self.model_label.setObjectName("summaryValue")
         summary_col.addWidget(self.total_caption)
-        summary_col.addWidget(self.total_value)
+        total_row = QHBoxLayout()
+        total_row.setSpacing(8)
+        total_row.addWidget(self.total_value)
+        total_row.addWidget(self.items_suffix, 0, Qt.AlignBottom)
+        total_row.addStretch(1)
+        summary_col.addLayout(total_row)
         summary_col.addSpacing(8)
         summary_col.addWidget(self.packages_caption)
         summary_col.addLayout(self.package_list)
         summary_col.addSpacing(6)
+        summary_col.addWidget(self.warning_heading)
         summary_col.addWidget(self.warning_label)
         summary_col.addStretch(1)
-        summary_col.addWidget(self.provider_label)
-        summary_col.addWidget(self.model_label)
+        provider_row = QHBoxLayout()
+        provider_row.addWidget(self.provider_caption)
+        provider_row.addStretch(1)
+        provider_row.addWidget(self.provider_label)
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.model_caption)
+        model_row.addStretch(1)
+        model_row.addWidget(self.model_label)
+        summary_col.addLayout(provider_row)
+        summary_col.addLayout(model_row)
         actions = QHBoxLayout()
         self.approve_button = QPushButton(summary)
         self.approve_button.setObjectName("primaryButton")
@@ -478,10 +532,12 @@ class WorkspacePage(QWidget):
             row.addWidget(name_label, 1)
             row.addWidget(count_label)
             self.package_list.addWidget(row_widget)
-        self.warning_label.setVisible(bool(summary.warnings))
-        self.warning_label.setText("\n".join(f"⚠ {warning}" for warning in summary.warnings))
-        self.provider_label.setText(f"{self._i18n.tr('provider_label')}: {summary.provider}")
-        self.model_label.setText(f"{self._i18n.tr('model_label')}: {summary.model}")
+        has_warnings = bool(summary.warnings)
+        self.warning_heading.setVisible(has_warnings)
+        self.warning_label.setVisible(has_warnings)
+        self.warning_label.setText("\n".join(summary.warnings))
+        self.provider_label.setText(summary.provider)
+        self.model_label.setText(summary.model)
         self.details_panel.setText(
             f"{summary.source_filename}\n{summary.provider} · {summary.model}\n"
             f"{self._format_elapsed(time.monotonic() - self._run_started)}"
@@ -612,7 +668,9 @@ class WorkspacePage(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        direction = QBoxLayout.TopToBottom if self.width() < 980 else QBoxLayout.LeftToRight
+        target_width = max(760, min(1420, self.width() - 128))
+        self.content.setFixedWidth(target_width)
+        direction = QBoxLayout.TopToBottom if target_width < 980 else QBoxLayout.LeftToRight
         self.approval_layout.setDirection(direction)
 
     def retranslate_ui(self) -> None:
@@ -629,8 +687,14 @@ class WorkspacePage(QWidget):
         self.approval_text.setText(self._i18n.tr("approval_subtitle"))
         self.details_toggle.setText(self._i18n.tr("technical_details"))
         self.total_caption.setText(self._i18n.tr("total_items"))
+        self.items_suffix.setText(self._i18n.tr("items_suffix"))
         self.packages_caption.setText(self._i18n.tr("work_packages"))
-        self.approve_button.setText(self._i18n.tr("approve_generate"))
+        self.warning_heading.setText(f"⚠  {self._i18n.tr('warnings_heading')}")
+        self.provider_caption.setText(self._i18n.tr("provider_label"))
+        self.model_caption.setText(self._i18n.tr("model_label"))
+        approve_text = self._i18n.tr("approve_generate")
+        self.approve_button.setText(approve_text.replace("&", "&&"))
+        self.approve_button.setAccessibleName(approve_text)
         self.approval_cancel_button.setText(self._i18n.tr("cancel"))
         self.complete_heading.setText(self._i18n.tr("complete_title"))
         self.open_excel_button.setText(self._i18n.tr("open_excel"))
