@@ -9,9 +9,9 @@ from functools import lru_cache
 from PySide6.QtGui import QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication, QStyle
 
-RADIUS_SM = 6
-RADIUS_MD = 10
-RADIUS_LG = 14
+RADIUS_SM = 8
+RADIUS_MD = 8
+RADIUS_LG = 12
 TYPE_MONO = "'Cascadia Mono', 'Consolas', monospace"
 
 _THEME_PATH = os.path.join(os.path.dirname(__file__), "themes", "tawreed_dark.qss")
@@ -46,15 +46,15 @@ _LIGHT = {
     "color-bg": "#ffffff",
     "color-bg-rail": "#ffffff",
     "color-bg-card": "#ffffff",
-    "color-bg-card-elev": "#f6f8fc",
+    "color-bg-card-elev": "#f8fafc",
     "color-bg-input": "#ffffff",
     "color-bg-input-focus": "#f7faff",
-    "color-border": "#dce2ea",
-    "color-border-input": "#b8c2cf",
+    "color-border": "#d9e0e8",
+    "color-border-input": "#c7d0dc",
     "color-border-input-focus": "#075fc7",
-    "color-text": "#101722",
-    "color-text-dim": "#4b5666",
-    "color-text-muted": "#667284",
+    "color-text": "#0d1117",
+    "color-text-dim": "#465365",
+    "color-text-muted": "#657184",
     "color-text-primary": "#ffffff",
     "color-accent": "#0b63ce",
     "color-accent-hover": "#084faa",

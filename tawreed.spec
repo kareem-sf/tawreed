@@ -8,7 +8,7 @@
 #   Users download ``Tawreed.exe`` and run it from any writable location.
 #
 # Why the long excludes list?
-#   PySide6 includes modules the app never imports (QtQuick, QtPdf, QtSvg,
+#   PySide6 includes modules the app never imports (QtQuick, QtPdf,
 #   the OpenGL software fallback, the full Qt translation pack,
 #   the Win32 API forwarder DLLs). PyInstaller's static analysis
 #   pulls in everything in site-packages, including the Qt
@@ -51,17 +51,26 @@ HIDDEN_IMPORTS = [
     "gui.single_app",
     "gui.widgets",
     "gui.widgets.chrome",
+    "gui.widgets.navigation",
     "gui.widgets.toast",
     "tawreed_app",
     "tawreed_app.__main__",
     "core",
     "core.ai",
+    "core.connection_service",
     "core.context_logging",
     "core.db",
     "core.excel",
     "core.i18n",
     "core.logging_setup",
     "core.model_catalog",
+    "core.processing_pipeline",
+    "core.provider_registry",
+    "core.run_contracts",
+    "core.settings_service",
+    "core.stream_service",
+    "core.translations",
+    "core.translations.ui",
     "core.retry_utils",
     "core.reset",
     # Optional LLM SDKs (Anthropic is implemented via raw httpx in
@@ -137,8 +146,6 @@ EXCLUDES_BINARIES = [
     "Qt6Qml.dll",
     "Qt6QmlModels.dll",
     "Qt6Pdf.dll",
-    "Qt6Svg.dll",
-    "Qt6SvgWidgets.dll",
     "Qt6WebEngineCore.dll",
     "Qt6WebEngineWidgets.dll",
     "Qt6Multimedia.dll",

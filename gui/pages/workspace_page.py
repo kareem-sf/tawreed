@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.i18n import I18n, get_i18n
-from gui.run_contracts import ApprovalRequest, RunPhase, RunProgress
+from core.run_contracts import ApprovalRequest, RunPhase, RunProgress
+from gui.design_tokens import Layout, Spacing
 from gui.styles import motion_enabled
 from gui.worker import BOQProcessor, WorkerSignals
 
@@ -51,7 +52,7 @@ class DropZone(QPushButton):
         self.setObjectName("pageHost")
         self.setObjectName("dropZone")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(190)
+        self.setFixedHeight(Layout.WORKBENCH_DROP_HEIGHT)
         self.setIcon(QApplication.style().standardIcon(QStyle.SP_FileIcon))
         self.setIconSize(QSize(34, 34))
         self.setCursor(Qt.PointingHandCursor)
@@ -179,18 +180,20 @@ class WorkspacePage(QWidget):
         canvas = QWidget(scroll)
         canvas.setObjectName("pageCanvas")
         outer_canvas_layout = QVBoxLayout(canvas)
-        outer_canvas_layout.setContentsMargins(64, 64, 64, 54)
+        outer_canvas_layout.setContentsMargins(
+            Layout.PAGE_GUTTER, Layout.PAGE_TOP, Layout.PAGE_GUTTER, Layout.PAGE_GUTTER
+        )
         outer_canvas_layout.setSpacing(0)
         scroll.setWidget(canvas)
 
         self.content = QWidget(canvas)
         self.content.setObjectName("contentColumn")
-        self.content.setMaximumWidth(1420)
+        self.content.setMaximumWidth(Layout.CONTENT_MAX)
         self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.canvas_layout = QVBoxLayout(self.content)
         self.canvas_layout.setContentsMargins(0, 0, 0, 0)
-        self.canvas_layout.setSpacing(18)
-        outer_canvas_layout.addWidget(self.content, 1, Qt.AlignHCenter)
+        self.canvas_layout.setSpacing(Spacing.LG)
+        outer_canvas_layout.addWidget(self.content, 1, Qt.AlignLeft)
 
         self.title = QLabel(self.content)
         self.title.setObjectName("pageTitle")
@@ -223,24 +226,23 @@ class WorkspacePage(QWidget):
     def _view(self) -> tuple[QWidget, QVBoxLayout]:
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 14, 0, 0)
-        layout.setSpacing(18)
+        layout.setContentsMargins(0, Spacing.SM, 0, 0)
+        layout.setSpacing(Spacing.MD)
         return widget, layout
 
     def _build_empty_view(self) -> QWidget:
         view, layout = self._view()
-        layout.setContentsMargins(0, 36, 0, 0)
+        layout.setContentsMargins(0, Spacing.XL, 0, 0)
         self.drop_zone = DropZone(view)
-        self.drop_zone.setMinimumWidth(760)
-        self.drop_zone.setMaximumWidth(920)
+        self.drop_zone.setMaximumWidth(Layout.WORKBENCH_DROP_WIDTH)
         self.drop_zone.clicked.connect(self._browse_file)
         self.drop_zone.file_dropped.connect(self.select_file)
-        layout.addWidget(self.drop_zone, 0, Qt.AlignHCenter)
+        layout.addWidget(self.drop_zone, 0, Qt.AlignLeft)
         self.empty_hint = QLabel(view)
         self.empty_hint.setObjectName("hintText")
-        self.empty_hint.setAlignment(Qt.AlignCenter)
-        self.empty_hint.setMaximumWidth(760)
-        layout.addWidget(self.empty_hint, 0, Qt.AlignHCenter)
+        self.empty_hint.setAlignment(Qt.AlignLeft)
+        self.empty_hint.setMaximumWidth(Layout.WORKBENCH_DROP_WIDTH)
+        layout.addWidget(self.empty_hint, 0, Qt.AlignLeft)
         layout.addStretch(1)
         return view
 
@@ -668,8 +670,9 @@ class WorkspacePage(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        target_width = max(760, min(1420, self.width() - 128))
+        target_width = max(480, min(Layout.CONTENT_MAX, self.width() - 2 * Layout.PAGE_GUTTER))
         self.content.setFixedWidth(target_width)
+        self.drop_zone.setFixedWidth(min(Layout.WORKBENCH_DROP_WIDTH, target_width))
         direction = QBoxLayout.TopToBottom if target_width < 980 else QBoxLayout.LeftToRight
         self.approval_layout.setDirection(direction)
 

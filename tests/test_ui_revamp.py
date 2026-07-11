@@ -10,17 +10,21 @@ from gui.run_contracts import ApprovalRequest, ApprovalSummary, RunPhase, RunPro
 from gui.styles import load_stylesheet, motion_enabled, refresh_system_theme, set_theme
 
 
-def test_shell_uses_top_navigation_without_sidebar_or_tables(qtbot):
+def test_shell_uses_persistent_rail_without_topbar_or_tables(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
 
-    assert window.findChild(QWidget, "navRail") is None
+    rail = window.findChild(QWidget, "navRail")
+    assert rail is not None
+    assert rail.width() == 220
+    assert window.findChild(QWidget, "topBar") is None
+    assert window.findChild(QWidget, "appMenuButton") is None
     assert window._nav_buttons["workspace"].text()
     assert window._nav_buttons["history"].text()
     assert not window.findChildren(QTableWidget)
-    assert window._pages["workspace"].drop_zone.minimumHeight() >= 190
-    assert window._pages["settings"].findChild(QWidget, "settingsContent").maximumWidth() == 1040
-    assert window._pages["history"].findChild(QWidget, "runsContent").maximumWidth() == 1240
+    assert window._pages["workspace"].drop_zone.minimumHeight() == 168
+    assert window._pages["settings"].content.maximumWidth() == 1040
+    assert window._pages["history"].findChild(QWidget, "runsContent").maximumWidth() == 1120
 
 
 def test_workbench_approval_is_summary_only(qtbot):
@@ -168,7 +172,7 @@ def test_system_light_palette_rejects_inverse_alternate_surface(qtbot):
         stylesheet = load_stylesheet()
         drop_zone_rule = stylesheet.split("QPushButton#dropZone {", 1)[1].split("}", 1)[0]
         assert "background: #000000" not in drop_zone_rule
-        assert "background: #f6f8fc" in drop_zone_rule
+        assert "background: #f8fafc" in drop_zone_rule
     finally:
         app.setPalette(original)
         refresh_system_theme()

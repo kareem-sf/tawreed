@@ -43,14 +43,14 @@ def test_default_project_name_translation_exists():
     assert i18n.tr("default_project_name") == "مشروع توريد"
 
 
-def test_worker_parsing_success_uses_i18n():
-    """Test that worker.py uses i18n for parsing success message."""
-    with open("gui/worker.py", encoding="utf-8") as f:
+def test_processing_pipeline_parsing_success_uses_i18n():
+    """The UI-independent pipeline owns translated processing copy."""
+    with open("core/processing_pipeline.py", encoding="utf-8") as f:
         content = f.read()
 
     # Should use i18n for the success message
     assert 'i18n.tr("successfully_parsed")' in content, (
-        "worker.py should use i18n for parsing success message"
+        "processing_pipeline.py should use i18n for parsing success message"
     )
 
     # Should not have hard-coded "Successfully parsed" in the main logic

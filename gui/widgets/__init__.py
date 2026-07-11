@@ -1,9 +1,9 @@
 """GUI widget primitives.
 
-Currently exports the page-chrome helpers from ``chrome`` (Card, PageHeader,
-Section, StatusPill). New reusable widgets go here.
+Exports the shared page, settings, and navigation primitives.
 """
 
-from .chrome import Card, PageHeader, Section, StatusPill
+from .chrome import PageHeader, PageScaffold, SettingsSection
+from .navigation import NavigationRail
 
-__all__ = ["Card", "PageHeader", "Section", "StatusPill"]
+__all__ = ["NavigationRail", "PageHeader", "PageScaffold", "SettingsSection"]

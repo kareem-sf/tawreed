@@ -1,32 +1,28 @@
-"""Minimal top-bar application shell for Tawreed."""
+"""Persistent rail application shell for Tawreed."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QGuiApplication, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
-    QLabel,
     QMainWindow,
-    QMenu,
     QPushButton,
     QStackedWidget,
-    QToolButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from core import ui_state
 from core.i18n import I18n, get_i18n
-from gui.assets import LOGO_PNG_PATH
 from gui.pages.about_page import AboutPage
 from gui.pages.history_page import HistoryPage
 from gui.pages.settings_page import SettingsPage
 from gui.pages.workspace_page import WorkspacePage
 from gui.styles import get_theme, load_stylesheet, refresh_system_theme
+from gui.widgets.navigation import NavigationRail
 from gui.widgets.toast import ToastManager
-from tawreed_app import __appname__
 
 
 class MainWindow(QMainWindow):
@@ -54,10 +50,18 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget(self)
         root.setObjectName("appRoot")
-        layout = QVBoxLayout(root)
+        layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self._build_top_bar())
+
+        self.navigation = NavigationRail(root)
+        self.navigation.page_selected.connect(self.select_page)
+        self._nav_buttons = self.navigation.buttons
+        layout.addWidget(self.navigation)
+        self.rail_divider = QFrame(root)
+        self.rail_divider.setObjectName("railDivider")
+        self.rail_divider.setFrameShape(QFrame.VLine)
+        layout.addWidget(self.rail_divider)
 
         self._stack = QStackedWidget(root)
         self._stack.setObjectName("pageStack")
@@ -71,53 +75,6 @@ class MainWindow(QMainWindow):
             self._stack.addWidget(page)
         layout.addWidget(self._stack, 1)
         self.setCentralWidget(root)
-
-    def _build_top_bar(self) -> QWidget:
-        bar = QWidget(self)
-        bar.setObjectName("topBar")
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(36, 14, 32, 14)
-        row.setSpacing(14)
-
-        self.logo_label = QLabel(bar)
-        self.logo_label.setObjectName("topBarLogo")
-        self.logo_label.setAccessibleName("Tawreed logo")
-        if LOGO_PNG_PATH.exists():
-            self.logo_label.setPixmap(
-                QPixmap(str(LOGO_PNG_PATH)).scaled(
-                    38, 38, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-            )
-        row.addWidget(self.logo_label)
-
-        self.brand_label = QLabel(__appname__, bar)
-        self.brand_label.setObjectName("topBarBrand")
-        row.addWidget(self.brand_label)
-        row.addStretch(1)
-
-        for key in ("workspace", "history"):
-            button = QPushButton(bar)
-            button.setObjectName("topNavButton")
-            button.setCheckable(True)
-            button.setCursor(Qt.PointingHandCursor)
-            button.clicked.connect(lambda _checked=False, page=key: self.select_page(page))
-            self._nav_buttons[key] = button
-            row.addWidget(button)
-
-        row.addStretch(1)
-        self.menu_button = QToolButton(bar)
-        self.menu_button.setObjectName("appMenuButton")
-        self.menu_button.setText("⋯")
-        self.menu_button.setPopupMode(QToolButton.InstantPopup)
-        self.menu_button.setAccessibleName("Application menu")
-        self.menu = QMenu(self.menu_button)
-        self.settings_action = self.menu.addAction("")
-        self.about_action = self.menu.addAction("")
-        self.settings_action.triggered.connect(lambda: self.select_page("settings"))
-        self.about_action.triggered.connect(lambda: self.select_page("about"))
-        self.menu_button.setMenu(self.menu)
-        row.addWidget(self.menu_button)
-        return bar
 
     def _install_shortcuts(self) -> None:
         bindings = (
@@ -140,8 +97,7 @@ class MainWindow(QMainWindow):
         if page is None:
             return
         self._stack.setCurrentWidget(page)
-        for nav_key, button in self._nav_buttons.items():
-            button.setChecked(nav_key == key)
+        self.navigation.select(key)
         refresh = getattr(page, "refresh", None)
         if callable(refresh):
             refresh()
@@ -195,8 +151,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self._i18n.tr("app_title"))
         self._nav_buttons["workspace"].setText(self._i18n.tr("nav_workbench"))
         self._nav_buttons["history"].setText(self._i18n.tr("nav_runs"))
-        self.settings_action.setText(self._i18n.tr("nav_settings"))
-        self.about_action.setText(self._i18n.tr("nav_about"))
+        self._nav_buttons["settings"].setText(self._i18n.tr("nav_settings"))
+        self._nav_buttons["about"].setText(self._i18n.tr("nav_about"))
         for page in self._pages.values():
             retranslate = getattr(page, "retranslate_ui", None)
             if callable(retranslate):

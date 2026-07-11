@@ -2,20 +2,19 @@
 
 ## Decision
 
-Keep PySide6/Qt Widgets and the existing logo/icon. Replace the fixed sidebar,
-card-heavy pages, visible console, history table, and editable review grid with
-a minimal agent workflow.
+Keep PySide6/Qt Widgets and the existing logo/icon. Use the approved fixed left
+navigation rail and open, disciplined page layouts for a minimal agent workflow.
 
 ## Implemented product
 
-- Top bar with Workbench, Runs, and a compact Settings/About menu.
+- 220-pixel left rail with Workbench, Runs, Settings, and About.
 - State flow: Empty, Ready, Inspecting, Structuring, Classifying, Validating,
   Approval, Exporting, Complete, and Error.
 - Row-free `RunProgress` and `ApprovalSummary` contracts.
 - Opaque approval token; the processor retains the full draft privately.
 - Count-only summary approval before workbook export.
 - Runs implemented with `QListView` and `QAbstractListModel`.
-- Staged Settings with live provider model discovery.
+- Independent Settings sections with live provider model discovery.
 - Semantic Light/Dark/System palettes, RTL, High DPI, visible focus,
   accessibility announcements, High Contrast, and reduced-motion handling.
 

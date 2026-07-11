@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from core import db
 from core.i18n import get_i18n
+from gui.design_tokens import Layout
 
 
 class RunListModel(QAbstractListModel):
@@ -202,17 +203,19 @@ class HistoryPage(QWidget):
         canvas = QWidget(scroll)
         canvas.setObjectName("pageCanvas")
         canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(64, 46, 64, 46)
+        canvas_layout.setContentsMargins(
+            Layout.PAGE_GUTTER, Layout.PAGE_TOP, Layout.PAGE_GUTTER, Layout.PAGE_GUTTER
+        )
         scroll.setWidget(canvas)
 
         self.content = QWidget(canvas)
         self.content.setObjectName("runsContent")
-        self.content.setMaximumWidth(1240)
+        self.content.setMaximumWidth(Layout.RUNS_MAX)
         self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QVBoxLayout(self.content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(20)
-        canvas_layout.addWidget(self.content, 1, Qt.AlignHCenter)
+        canvas_layout.addWidget(self.content, 1, Qt.AlignLeft)
 
         header = QHBoxLayout()
         title_col = QVBoxLayout()
@@ -269,7 +272,9 @@ class HistoryPage(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self.content.setFixedWidth(max(760, min(1240, self.width() - 128)))
+        self.content.setFixedWidth(
+            max(480, min(Layout.RUNS_MAX, self.width() - 2 * Layout.PAGE_GUTTER))
+        )
 
     def refresh(self) -> None:
         try:

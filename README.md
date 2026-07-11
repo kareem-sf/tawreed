@@ -41,7 +41,8 @@ credential manager.
 
 ## Interface
 
-- Minimal top navigation: Workbench and Runs, with Settings/About in one menu.
+- Persistent left navigation for Workbench, Runs, Settings, and About.
+- Independent Apply actions for AI Connection, Model, Appearance, and Language.
 - Truthful run phases and elapsed time.
 - Mandatory summary approval before any workbook or history entry is created.
 - Light, Dark, and System appearance modes.

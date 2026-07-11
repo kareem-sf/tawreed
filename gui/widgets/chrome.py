@@ -1,165 +1,106 @@
-"""Reusable page-chrome primitives.
-
-Senior PySide6 apps build pages out of a few small, composable
-widgets — a *page header*, a *card surface*, and a *section* — rather
-than than one-off QVBoxLayout + QLabel soup. This module gives the
-pages in ``gui/pages/`` a shared vocabulary so the Workspace, History,
-Settings, and About screens look and feel like the same product.
-
-Design tokens (colours, radii, type) live in ``gui.styles`` and the
-``.qss`` file; the helpers here just *arrange* widgets inside cards.
-"""
+"""Reusable page and section primitives for the desktop interface."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from gui.design_tokens import Layout, Spacing
+
+
+class PageScaffold(QWidget):
+    """Scrollable page with one responsive, left-aligned content column."""
+
+    def __init__(self, *, maximum_width: int = Layout.CONTENT_MAX, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("pageHost")
+        self._maximum_width = maximum_width
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
+
+        self.canvas = QWidget(scroll)
+        self.canvas.setObjectName("pageCanvas")
+        self.canvas_layout = QVBoxLayout(self.canvas)
+        self.canvas_layout.setContentsMargins(
+            Layout.PAGE_GUTTER, Layout.PAGE_TOP, Layout.PAGE_GUTTER, Layout.PAGE_GUTTER
+        )
+        scroll.setWidget(self.canvas)
+
+        self.content = QWidget(self.canvas)
+        self.content.setObjectName("pageContent")
+        self.content.setMaximumWidth(maximum_width)
+        self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.layout = QVBoxLayout(self.content)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(Spacing.LG)
+        self.canvas_layout.addWidget(self.content, 1, Qt.AlignLeft)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        available = max(480, self.width() - 2 * Layout.PAGE_GUTTER)
+        self.content.setFixedWidth(min(self._maximum_width, available))
+
 
 class PageHeader(QWidget):
-    """Title + optional subtitle, used at the top of every page.
-
-    Example:
-        i18n = get_i18n()
-        header = PageHeader(i18n.tr("workspace_page_title"), i18n.tr("workspace_page_subtitle"))
-        layout.addWidget(header)
-    """
-
-    def __init__(
-        self,
-        title: str,
-        subtitle: str = "",
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 4)
-        layout.setSpacing(4)
-
-        self._title = QLabel(title)
-        self._title.setObjectName("pageTitle")
-        layout.addWidget(self._title)
-
-        if subtitle:
-            self._subtitle = QLabel(subtitle)
-            self._subtitle.setObjectName("pageSubtitle")
-            self._subtitle.setWordWrap(True)
-            layout.addWidget(self._subtitle)
-
-
-class Card(QFrame):
-    """A rounded surface with a soft border, used to group content.
-
-    Cards are the building block of every page. The visual treatment
-    (background, border, radius) comes from the ``QFrame#card`` rule
-    in the QSS theme file; this class just provides a layout you can
-    add children to.
-
-    Example:
-        i18n = get_i18n()
-        with Card(i18n.tr("provider_card_title")) as card:
-            card_layout = card.layout()
-            card_layout.addWidget(...)
-    """
-
-    def __init__(
-        self,
-        title: str | None = None,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setObjectName("card")
-        self.setFrameShape(QFrame.NoFrame)
-        # No internal margins by default — the caller (and any
-        # section/label inside) provides the padding so cards stack
-        # cleanly with the page header.
-        self._outer = QVBoxLayout(self)
-        self._outer.setContentsMargins(20, 18, 20, 18)
-        self._outer.setSpacing(12)
-
-        if title:
-            heading = QLabel(title)
-            heading.setObjectName("cardTitle")
-            self._outer.addWidget(heading)
-
-    def layout(self) -> QVBoxLayout:
-        return self._outer
-
-    def addWidget(self, w: QWidget) -> None:
-        self._outer.addWidget(w)
-
-    def addLayout(self, l) -> None:
-        self._outer.addLayout(l)
-
-    def addStretch(self, stretch: int = 0) -> None:
-        self._outer.addStretch(stretch)
-
-
-class Section(QWidget):
-    """A titled sub-region inside a Card.
-
-    Example:
-        i18n = get_i18n()
-        s = Section(i18n.tr("provider_card_title"))
-        s.addWidget(combo_box)
-        card.addWidget(s)
-    """
-
-    def __init__(
-        self,
-        title: str,
-        parent: QWidget | None = None,
-    ) -> None:
+    def __init__(self, title: str = "", subtitle: str = "", parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        heading = QLabel(title)
-        heading.setObjectName("sectionTitle")
-        layout.addWidget(heading)
-
-        self._body = QVBoxLayout()
-        self._body.setContentsMargins(0, 0, 0, 0)
-        self._body.setSpacing(6)
-        layout.addLayout(self._body)
-
-    def addWidget(self, w: QWidget) -> None:
-        self._body.addWidget(w)
-
-    def addLayout(self, l) -> None:
-        self._body.addLayout(l)
+        layout.setSpacing(Spacing.XS)
+        self.title = QLabel(self)
+        self._title = self.title
+        self.title.setObjectName("pageTitle")
+        self.title.setText(title)
+        self.subtitle = QLabel(self)
+        self._subtitle = self.subtitle
+        self.subtitle.setObjectName("pageSubtitle")
+        self.subtitle.setText(subtitle)
+        self.subtitle.setWordWrap(True)
+        layout.addWidget(self.title)
+        layout.addWidget(self.subtitle)
 
 
-class StatusPill(QLabel):
-    """A small colored status indicator (idle / running / success / error).
+class SettingsSection(QWidget):
+    """Open settings band with an independently owned Apply action."""
 
-    Example:
-        i18n = get_i18n()
-        pill = StatusPill()
-        pill.set_state("idle", i18n.tr("idle"))
-        pill.set_state("running", i18n.tr("processing"))
-        pill.set_state("success", i18n.tr("done"))
-    """
+    apply_requested = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("statusPill")
-        self.setAlignment(Qt.AlignCenter)
-        self.set_state("idle", "Idle")
+        self.setObjectName("settingsSection")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, Spacing.SM, 0, Spacing.SM)
+        outer.setSpacing(Spacing.XS)
+        heading_row = QHBoxLayout()
+        heading_row.setContentsMargins(0, 0, 0, 0)
+        self.heading = QLabel(self)
+        self.heading.setObjectName("sectionTitle")
+        self.apply_button = QPushButton(self)
+        self.apply_button.setObjectName("primaryButton")
+        self.apply_button.setMinimumHeight(Layout.BUTTON_HEIGHT)
+        self.apply_button.clicked.connect(self.apply_requested)
+        heading_row.addWidget(self.heading)
+        heading_row.addStretch(1)
+        heading_row.addWidget(self.apply_button)
+        outer.addLayout(heading_row)
+        self.body = QVBoxLayout()
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setSpacing(Spacing.SM)
+        outer.addLayout(self.body)
 
-    def set_state(self, kind: str, text: str) -> None:
-        """Update the visual state. ``kind`` is one of idle/running/success/error."""
-        self.setText(text)
-        # The QSS rule for QLabel#statusPill uses the dynamic
-        # property ``state`` to pick colours. Properties are
-        # lowercased internally by Qt.
-        self.setProperty("state", kind)
-        # Re-polish so the style actually updates.
-        self.style().unpolish(self)
-        self.style().polish(self)
+
+__all__ = ["PageHeader", "PageScaffold", "SettingsSection"]

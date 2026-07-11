@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from core.i18n import get_i18n
 from gui.assets import LOGO_PNG_PATH
+from gui.design_tokens import Layout
 from tawreed_app import (
     __appname__,
     __author__,
@@ -45,17 +46,19 @@ class AboutPage(QWidget):
         canvas = QWidget(scroll)
         canvas.setObjectName("pageCanvas")
         canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(64, 48, 64, 48)
+        canvas_layout.setContentsMargins(
+            Layout.PAGE_GUTTER, Layout.PAGE_TOP, Layout.PAGE_GUTTER, Layout.PAGE_GUTTER
+        )
         scroll.setWidget(canvas)
 
         self.content = QFrame(canvas)
         self.content.setObjectName("aboutContent")
-        self.content.setMaximumWidth(900)
+        self.content.setMaximumWidth(Layout.CONTENT_MAX)
         self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QVBoxLayout(self.content)
-        layout.setContentsMargins(34, 32, 34, 32)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        canvas_layout.addWidget(self.content, 1, Qt.AlignHCenter)
+        canvas_layout.addWidget(self.content, 1, Qt.AlignLeft)
 
         self.mark = QLabel(self.content)
         if LOGO_PNG_PATH.exists():
@@ -114,7 +117,9 @@ class AboutPage(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self.content.setFixedWidth(max(640, min(900, self.width() - 128)))
+        self.content.setFixedWidth(
+            max(480, min(Layout.CONTENT_MAX, self.width() - 2 * Layout.PAGE_GUTTER))
+        )
 
     def retranslate_ui(self) -> None:
         self.description.setText(self._i18n.tr("about_page_subtitle"))
