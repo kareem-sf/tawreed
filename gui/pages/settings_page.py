@@ -271,7 +271,9 @@ class SettingsPage(QWidget):
                 self.model_combo.setCurrentIndex(index)
         self.model_combo.blockSignals(False)
         self.refresh_models_button.setEnabled(True)
-        self._set_model_status("live" if result.source == "live" else "unavailable", len(result.models))
+        self._set_model_status(
+            "live" if result.source == "live" else "unavailable", len(result.models)
+        )
 
     def _set_model_status(self, kind: str, count: int = 0) -> None:
         self._model_status_kind = kind
