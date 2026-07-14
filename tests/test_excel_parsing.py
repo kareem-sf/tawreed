@@ -279,7 +279,6 @@ def test_output_path_is_under_home_tawreed(monkeypatch):
     assert db.OUTPUTS_DIR == str(fake_home / ".tawreed" / "outputs")
     assert db.DB_PATH == str(fake_home / ".tawreed" / "db" / "tawreed.db")
     assert db.CONFIG_PATH == str(fake_home / ".tawreed" / "config.json")
-    assert db.PID_FILE_PATH == str(fake_home / ".tawreed" / "single-instance.pid")
     # Defensive: TAWREED_DIR must be `<fake_home>/.tawreed` — not
     # embedded in the EXE path, not under %LOCALAPPDATA%, not under
     # the project root. The fake_home itself is in TEMP for

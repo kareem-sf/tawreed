@@ -2,34 +2,38 @@
 
 ## Setup
 
+Install Python 3.12, Node.js 24, pnpm 11, Rust stable, and the official Tauri 2
+system prerequisites. Then run:
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
+pnpm --dir desktop install --frozen-lockfile
+pnpm --dir marketing-video install --frozen-lockfile
+pre-commit install
 ```
 
 ## Required checks
 
 ```powershell
-pre-commit run --all-files
-ruff check .
-ruff format --check .
-pytest -q --timeout=90
-pyinstaller --noconfirm --clean tawreed.spec
+python -m ruff check .
+python -m ruff format --check .
+python -m pytest --timeout=90
+pnpm --dir desktop check
+pnpm --dir marketing-video check
+cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check
+python scripts/build_sidecar.py
+pnpm --dir desktop tauri:build
 ```
 
-Mock provider calls in automated tests. Add regression coverage for every
-behavior change. UI changes must test English/Arabic, keyboard focus, and the
-absence of BOQ rows/raw output in the interface.
+Mock provider calls in automated tests. Add regression coverage for behavior
+changes. UI changes must verify keyboard focus, English/Arabic layout, and the
+rule that BOQ rows and raw model output are never rendered.
 
-## Pull requests
+## Pull requests and releases
 
-Branch from `master`, keep one coherent scope, and wait for the Windows/Linux
-Python matrix and wheel smoke test. Never commit secrets, generated workbooks,
-or build output.
-
-## Release
-
-`pyproject.toml` is the version source. A `vX.Y.Z` tag runs
-`.github/workflows/release.yml`, which builds and publishes only the three
-portable binaries. Release `0.0.1` is the first public version.
+Keep each change coherent and do not commit secrets, BOQ workbooks, generated
+media, binaries, or build output. A `desktop-vX.Y.Z` tag runs the portable
+release workflow. It may publish only one direct executable per platform; do
+not introduce installers or compressed release assets.

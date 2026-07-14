@@ -1,81 +1,95 @@
 # Tawreed
 
-Tawreed is a focused desktop agent that turns a BOQ Excel workbook into a
-work-package workbook for procurement and delivery planning.
+Tawreed is a cross-platform desktop application that turns a construction BOQ
+workbook into a validated work-package workbook. The interface is React and
+TypeScript inside a thin Tauri 2 host; the proven Excel and AI logic remains a
+headless Python engine embedded into the final executable.
 
-## Version 0.0.1
+The release contract is strict: one portable executable per platform, with no
+installer and no ZIP, tarball, or disk image.
 
-This is the first public release. The app provides one controlled workflow:
+## Workflow
 
-1. Choose an `.xlsx` BOQ.
-2. Tawreed inspects, structures, classifies, and validates the items.
-3. Review only the package counts and warnings.
-4. Approve the summary to generate the Excel workbook.
-5. Make any detailed corrections in Excel.
+1. Select one `.xlsx` BOQ.
+2. Tawreed inspects, batches, classifies, and validates every item.
+3. Review package counts and warnings without exposing BOQ rows in the UI.
+4. Approve the summary once.
+5. Tawreed generates the workbook and records the run locally.
 
-Tawreed never displays BOQ rows, spreadsheet previews, raw AI output, or
-technical logs in the interface.
+## Technology
 
-## Download
+- React 19, TypeScript, Mantine, XState, and i18next.
+- Tauri 2 with a small Rust process and security boundary.
+- Python, OpenPyXL, and provider adapters in an embedded PyInstaller sidecar.
+- Remotion for the product film.
 
-Open the [v0.0.1 release](https://github.com/sfkareem/tawreed/releases/tag/v0.0.1)
-and download the portable file for your operating system. There is no installer
-and no archive to unpack.
+The Rust host embeds the frozen Python engine as bytes, materializes it in a
+private temporary directory at runtime, and removes it when the app exits. End
+users still receive and manage only one file.
 
-| Platform | Portable file |
-|---|---|
-| Windows 10/11 x64 | `Tawreed-windows.exe` |
-| macOS | `Tawreed-macos` |
-| Linux x86_64 | `Tawreed-linux` |
+## Portable releases
 
-See [Installation](docs/INSTALL.md) for operating-system warnings and launch
-instructions.
+[GitHub Releases](https://github.com/sfkareem/tawreed/releases) publish direct
+executables under the `desktop-vX.Y.Z` version line:
 
-## AI connections
+| Platform | Release asset |
+| --- | --- |
+| Windows x64 | `Tawreed-Windows-x64.exe` |
+| Linux x64 | `Tawreed-Linux-x64.AppImage` |
+| macOS | `Tawreed-macOS-<architecture>` |
 
-Codex is the default provider. It reuses the existing `codex login` ChatGPT
-session and fetches the account-visible model list live. Tawreed never reads or
-stores the Codex token. OpenAI, Claude, Google Gemini, and OpenAI-compatible
-endpoints are also supported; their API keys are stored in the operating-system
-credential manager.
+See [installation notes](docs/INSTALL.md) for unsigned-app warnings. Release
+automation rejects installer targets, archives, and indirect artifact uploads.
 
-## Interface
+## Local development
 
-- Persistent left navigation for Workbench, Runs, Settings, and About.
-- Independent Apply actions for AI Connection, Model, Appearance, and Language.
-- Truthful run phases and elapsed time.
-- Mandatory summary approval before any workbook or history entry is created.
-- Light, Dark, and System appearance modes.
-- English and Arabic with complete RTL layout.
-- Keyboard operation, visible focus, accessible status announcements, high-DPI
-  layouts, reduced-motion handling, and system High Contrast colors.
-
-## Local data
-
-All application state is stored under `~/.tawreed/`:
-
-- `config.json` — provider, model, language, and appearance; no secrets.
-- `db/tawreed.db` — local run history.
-- `outputs/` — generated workbooks.
-- `logs/` — rotating diagnostic logs, not shown in the UI.
-- `ui_state.json` — window geometry and last page.
-
-Read [Security](SECURITY.md) for credential and provider-data details.
-
-## Development
+Prerequisites: Python 3.12, Node.js 24, pnpm 11, the stable Rust toolchain, and
+the [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/) for
+your operating system.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-python main.py
-pytest -q
-pyinstaller --noconfirm --clean tawreed.spec
+python -m pip install -e ".[dev]"
+pnpm --dir desktop install --frozen-lockfile
+pnpm --dir marketing-video install --frozen-lockfile
 ```
 
-Architecture and contribution guidance live in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Run and verify the app:
+
+```powershell
+pnpm --dir desktop tauri:dev
+python -m pytest --timeout=90
+python -m ruff check .
+python -m ruff format --check .
+pnpm --dir desktop check
+pnpm --dir marketing-video check
+```
+
+Build the local portable executable:
+
+```powershell
+pnpm --dir desktop tauri:build
+```
+
+The Python sidecar can be built independently with
+`python scripts/build_sidecar.py`.
+
+## Repository layout
+
+```text
+core/             Headless BOQ, provider, workbook, and persistence logic
+tawreed_engine/   Versioned JSON-lines command service
+desktop/          React frontend and Tauri Rust host
+marketing-video/  Remotion product film source
+scripts/          Sidecar builder and portable-release policy check
+tests/            Headless Python engine tests
+```
+
+All user state lives under `~/.tawreed/`: non-secret settings, SQLite history,
+generated workbooks, and diagnostic logs. Provider API keys use the operating
+system credential manager. Read [Security](SECURITY.md) and
+[Architecture](docs/ARCHITECTURE.md) for the detailed boundaries.
 
 ## License
 

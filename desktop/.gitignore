@@ -1,0 +1,13 @@
+/node_modules/
+/dist/
+/.build/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+/src-tauri/binaries/*
+!/src-tauri/binaries/README.md
+
+.env
+.env.*
+!.env.example
+*.log
+*-debug.log*

@@ -26,7 +26,7 @@ def run_analysis(
     i18n=None,
     provider: str = "OpenAI",
     *,
-    _stream_factory: Callable[..., Iterator[tuple[str, Any]]] = analyze_boq_stream,
+    _stream_factory: Callable[..., Iterator[tuple[str, Any]]] | None = None,
 ) -> dict:
     """Drive the streaming LLM call and forward tokens to the UI.
 
@@ -43,7 +43,8 @@ def run_analysis(
 
     Returns the parsed result dict. Always returns; never raises.
     """
-    gen = _stream_factory(
+    stream_factory = _stream_factory or analyze_boq_stream
+    gen = stream_factory(
         api_key=api_key,
         base_url=base_url,
         model_id=model_id,

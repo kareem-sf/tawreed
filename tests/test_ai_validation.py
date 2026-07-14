@@ -8,7 +8,8 @@ from unittest import mock
 import pytest
 
 from core import ai
-from gui.worker import _available_output_path, run_analysis
+from core.processing_pipeline import _available_output_path
+from core.stream_service import run_analysis
 
 
 def _final_result(events):
@@ -51,7 +52,7 @@ def test_claude_analysis_uses_native_messages_api(monkeypatch):
     assert result["error"] is None
 
 
-def test_run_analysis_passes_selected_provider(monkeypatch):
+def test_run_analysis_passes_selected_provider():
     captured = {}
 
     def fake_stream(**kwargs):
@@ -66,7 +67,6 @@ def test_run_analysis_passes_selected_provider(monkeypatch):
             },
         )
 
-    monkeypatch.setattr("gui.worker.analyze_boq_stream", fake_stream)
     signals = SimpleNamespace(log=SimpleNamespace(emit=lambda _message: None))
     result = run_analysis(
         "key",
@@ -76,6 +76,7 @@ def test_run_analysis_passes_selected_provider(monkeypatch):
         "user",
         signals,
         provider="Claude",
+        _stream_factory=fake_stream,
     )
 
     assert captured["provider"] == "Claude"

@@ -1,30 +1,30 @@
-# Tawreed 0.0.1
+# Tawreed 0.1
 
 ## Product boundary
 
-Input: one BOQ `.xlsx` workbook.
+Input: one construction BOQ `.xlsx` workbook.
 
-Output: one generated `.xlsx` workbook grouped into construction work packages.
+Output: one generated `.xlsx` workbook grouped into bounded construction work
+packages.
 
-The desktop UI is intentionally not an Excel editor. It exposes progress,
-package counts, warnings, provider/model metadata, and an approval action. BOQ
-rows and the complete packaging draft remain private to the processor.
+The desktop UI is intentionally not an Excel editor. It exposes workflow
+progress, package counts, warnings, provider/model metadata, approval, and local
+run history. BOQ rows and raw provider output stay inside the engine.
 
 ## Release definition
 
-- Native PySide6/Qt Widgets application.
-- Codex ChatGPT login is the default provider; models are fetched live.
-- Summary approval is mandatory before export.
-- English/Arabic, LTR/RTL, Light/Dark/System, High Contrast, and 100–200% scale.
-- Portable one-file binaries only.
-- Version `0.0.1` in code, UI, workbook metadata, and GitHub.
+- React/TypeScript UI using Mantine and XState.
+- Tauri 2 host with a narrow Rust command allowlist.
+- Embedded headless Python engine; no Python installation required by users.
+- English/Arabic, LTR/RTL, Light/Dark/System, and accessible keyboard behavior.
+- Direct portable executables only; installers and archives are forbidden.
+- Version `0.1.0` across Python, Node, Rust, Tauri, workbook metadata, and tags.
 
 ## Quality gates
 
-- Full pytest and Ruff checks.
-- Clean wheel install.
-- Clean PyInstaller one-file build.
-- Real ARCH BOQ parses at 97 and 106 items.
-- Real Codex Spark generation for both BOQs.
-- Workbook count, formula, and visual checks.
-- Keyboard, focus, Narrator, RTL, appearance, scaling, and reduced-motion checks.
+- Ruff and the complete headless pytest suite.
+- React lint, unit tests, TypeScript compilation, and production build.
+- Rust formatting and cross-platform Tauri compilation.
+- Fresh native sidecar build on Windows, Linux, and macOS.
+- Portable-release policy validation.
+- Remotion lint, TypeScript validation, and bundle compilation.

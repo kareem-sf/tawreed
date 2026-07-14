@@ -64,8 +64,8 @@ def check_connection(
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # We're inside an existing event loop (qasync).
-                # Schedule and wait synchronously via to_thread is
+                # A library caller may already own an event loop.
+                # Scheduling and waiting synchronously via to_thread is
                 # awkward; instead just create a one-shot loop in
                 # a new thread.
                 import concurrent.futures

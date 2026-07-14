@@ -1,0 +1,111 @@
+name: Desktop CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrated-check:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            platform: windows-latest
+          - name: Linux
+            platform: ubuntu-22.04
+          - name: macOS
+            platform: macos-latest
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install Python engine
+        run: python -m pip install -e ".[dev]"
+
+      - name: Verify Python engine
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+          python -m pytest --timeout=90
+
+      - name: Build native Python sidecar
+        run: python scripts/build_sidecar.py
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify React, TypeScript, and portable-only policy
+        working-directory: desktop
+        run: pnpm check
+
+      - name: Verify Rust formatting
+        run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check
+
+      - name: Compile integrated Tauri application
+        working-directory: desktop
+        run: pnpm exec tauri build --no-bundle
+
+  product-film:
+    name: Remotion product film
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: marketing-video/pnpm-lock.yaml
+
+      - name: Install product-film dependencies
+        working-directory: marketing-video
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Remotion source and bundle
+        working-directory: marketing-video
+        run: pnpm check

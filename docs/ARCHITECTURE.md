@@ -1,61 +1,61 @@
 # Architecture
 
-Tawreed is a local PySide6 desktop application with a deliberately narrow agent
-boundary.
-
-## Run flow
+Tawreed is one Tauri desktop application with three deliberate layers:
 
 ```text
-BOQ .xlsx
-  -> Inspecting
-  -> Structuring
-  -> Classifying in bounded batches
-  -> Validating exact item coverage
-  -> Summary approval
-  -> Workbook export
-  -> Local run history
+React + TypeScript webview
+          │ versioned commands and events
+          ▼
+Thin Rust/Tauri host
+          │ JSON Lines over private stdin/stdout
+          ▼
+Embedded headless Python engine
+          │
+          ├─ provider APIs or the user's Codex session
+          ├─ local SQLite/settings/keyring
+          └─ input and generated .xlsx files
 ```
 
-`RunPhase` and `RunProgress` describe the visible workflow. `ApprovalSummary`
-contains only the source filename, total count, package counts, warnings,
-provider, and model. The UI receives an opaque draft token. The full
-`PackagingDraft`, BOQ rows, and category mapping remain inside the processing pipeline.
-Approving the token exports the stored mapping.
+## Desktop layer
 
-## Modules
+`desktop/src` owns presentation only. Mantine supplies the design system,
+XState owns the workflow state machine, Zod validates engine payloads, and
+i18next handles English/Arabic direction and copy. The UI receives summaries,
+progress, and opaque approval tokens, never BOQ row data or raw model output.
 
-- `core/excel.py` parses and writes Excel workbooks.
-- `core/provider_registry.py` owns provider metadata and defaults.
-- `core/ai.py` validates provider responses and item coverage.
-- `core/connection_service.py` validates provider connectivity.
-- `core/stream_service.py` consumes the bounded categorization stream.
-- `core/processing_pipeline.py` orchestrates parsing, classification, approval,
-  export, and history without depending on Qt.
-- `core/settings_service.py` provides typed, section-level settings updates.
-- `core/run_contracts.py` contains the row-free workflow contracts.
-- `core/codex_connector.py` uses an existing Codex ChatGPT session without
-  reading its token.
-- `core/packaging_agent.py` enforces legal state transitions and approval.
-- `core/db.py` stores settings and run history locally.
-- `gui/worker.py` is a thin Qt signal and compatibility adapter.
-- `gui/run_contracts.py` preserves the historical import surface.
-- `gui/pages/workspace_page.py` renders the state-driven Workbench.
-- `gui/pages/history_page.py` uses `QListView`/`QAbstractListModel` for Runs.
-- `gui/pages/settings_page.py` provides independently applied settings sections.
+`desktop/src-tauri` is intentionally small. It embeds the frozen engine, writes
+it to a user-private temporary directory, starts it, validates command names and
+payload sizes, forwards versioned events, and removes the temporary process
+files on shutdown. Tauri's single-instance plugin owns desktop-instance
+coordination.
 
-## Safety boundaries
+## Engine layer
 
-- No arbitrary agent tools, shell access, or model-directed file access.
-- AI receives bounded JSON batches and must return the exact requested IDs.
-- Export cannot start without the current opaque approval token.
-- API keys use the OS keyring; Codex credentials are never copied.
-- Raw BOQ content, AI JSON, output paths, and logs are not rendered in Tawreed.
+- `tawreed_engine/protocol.py` defines the versioned JSON-lines envelope.
+- `tawreed_engine/service.py` owns command dispatch and one active run.
+- `core/processing_pipeline.py` orchestrates parse, classification, validation,
+  approval, export, and history.
+- `core/packaging_agent.py` enforces legal workflow transitions and exact item
+  coverage.
+- `core/excel.py` parses and writes workbooks.
+- `core/ai.py`, `core/provider_registry.py`, `core/model_catalog.py`, and
+  `core/codex_connector.py` own bounded provider integration.
+- `core/db.py` owns non-secret settings, keyring-backed credentials, history,
+  and output paths.
+- `core/i18n.py` contains only engine/workbook translations and has no UI
+  framework dependency.
 
-## UI architecture
+## Approval boundary
 
-The main shell is a fixed 220-pixel navigation rail plus a `QStackedWidget`.
-Every long page is hosted inside a resizable `QScrollArea`. Shared spacing and
-layout tokens define the 48-pixel page gutter, 1040-pixel content column, and
-40–44-pixel controls. Semantic palette tokens support Light, Dark, System, and
-High Contrast colors. Qt layouts, visible focus, accessible labels, status
-events, RTL direction, and reduced-motion checks are shared constraints.
+The model classifies bounded JSON batches and must return exactly the requested
+item IDs. The complete draft stays inside `BOQProcessingPipeline`. The frontend
+receives an `ApprovalSummary` and an opaque token. Export is impossible until
+that current token is returned, and cancellation invalidates it.
+
+## Packaging boundary
+
+`scripts/build_sidecar.py` freezes the Python engine for the current target
+triple. Tauri's Rust build embeds those bytes directly, so the published host
+is one file. Standard builds use `--no-bundle`; Linux releases explicitly build
+one AppImage. `scripts/check_portable_release.mjs` rejects installer targets,
+archives, stale package output, and workflow artifact indirection.

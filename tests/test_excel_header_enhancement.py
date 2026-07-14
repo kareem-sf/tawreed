@@ -1,7 +1,6 @@
 """Tests for enhanced Excel header detection."""
 
 from core.excel import _score_column, _validate_header_pattern, detect_columns
-from core.i18n import get_i18n
 
 
 def test_enhanced_header_detection():
@@ -57,23 +56,6 @@ def test_header_pattern_validation():
         assert expected_keyword in result, (
             f"Error message should contain '{expected_keyword}', got: {result}"
         )
-
-
-def test_header_validation_i18n():
-    """Test that header validation messages support i18n."""
-    i18n = get_i18n()
-
-    # Test English
-    i18n.set_language("en")
-    error_msg = i18n.tr("excel_missing_item_number")
-    assert "Item Number" in error_msg
-    assert "Description" in error_msg
-
-    # Test Arabic
-    i18n.set_language("ar")
-    error_msg = i18n.tr("excel_missing_item_number")
-    assert "رقم البند" in error_msg
-    assert "وصف" in error_msg
 
 
 def test_header_validation_integration():

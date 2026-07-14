@@ -1,4 +1,4 @@
-"""Tests for the streaming protocol in core.ai + gui.worker.
+"""Tests for the streaming protocol in core.ai + core.stream_service.
 
 The previous implementation used ``return parsed_data`` from a
 generator and consumed it via ``except StopIteration as e: return e.value``.
@@ -19,7 +19,7 @@ from __future__ import annotations
 from unittest import mock
 
 # conftest.py handles the project-root sys.path insertion and the
-# Qt offscreen platform setup. See tests/conftest.py.
+# shared isolation fixtures. See tests/conftest.py.
 
 
 def _make_stream(chunks: list, error: Exception | None = None):
@@ -165,13 +165,13 @@ def test_stream_yields_done_sentinel_on_empty_response(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# gui.worker.run_analysis
+# core.stream_service.run_analysis
 # ---------------------------------------------------------------------------
 
 
 def test_run_analysis_returns_parsed_dict_on_success(monkeypatch):
     """The consumer must return the parsed dict, never raise."""
-    from gui.worker import run_analysis
+    from core.stream_service import run_analysis
 
     captured: list[str] = []
 
@@ -186,7 +186,7 @@ def test_run_analysis_returns_parsed_dict_on_success(monkeypatch):
             self.error = mock.Mock()
 
     monkeypatch.setattr(
-        "gui.worker.analyze_boq_stream",
+        "core.stream_service.analyze_boq_stream",
         mock.Mock(
             return_value=iter(
                 [
@@ -223,7 +223,7 @@ def test_run_analysis_returns_parsed_dict_on_success(monkeypatch):
 def test_run_analysis_returns_structured_error_when_sentinel_missing(monkeypatch):
     """If the generator ends without a __DONE__, the consumer returns
     a structured error dict (does NOT raise)."""
-    from gui.worker import run_analysis
+    from core.stream_service import run_analysis
 
     class FakeSignals:
         def __init__(self):
@@ -232,7 +232,7 @@ def test_run_analysis_returns_structured_error_when_sentinel_missing(monkeypatch
             self.error = mock.Mock()
 
     monkeypatch.setattr(
-        "gui.worker.analyze_boq_stream",
+        "core.stream_service.analyze_boq_stream",
         mock.Mock(
             return_value=iter(
                 [
@@ -257,7 +257,7 @@ def test_run_analysis_returns_structured_error_when_sentinel_missing(monkeypatch
 def test_run_analysis_returns_structured_error_on_generator_exception(monkeypatch):
     """If the generator raises mid-iteration, the consumer returns
     a structured error dict (does NOT raise)."""
-    from gui.worker import run_analysis
+    from core.stream_service import run_analysis
 
     class FakeSignals:
         def __init__(self):
@@ -268,9 +268,8 @@ def test_run_analysis_returns_structured_error_on_generator_exception(monkeypatc
     def _boom():
         yield ("R1", "Plumbing")
         raise RuntimeError("connection reset")
-        yield ("__DONE__", {})  # noqa: unreachable
 
-    monkeypatch.setattr("gui.worker.analyze_boq_stream", mock.Mock(return_value=_boom()))
+    monkeypatch.setattr("core.stream_service.analyze_boq_stream", mock.Mock(return_value=_boom()))
 
     result = run_analysis(
         api_key="x",
@@ -287,7 +286,7 @@ def test_run_analysis_returns_structured_error_on_generator_exception(monkeypatc
 def test_run_analysis_threads_error_through_to_consumer(monkeypatch):
     """The end-to-end contract: an error embedded in the __DONE__ dict
     is visible in the consumer's result, not silently swallowed."""
-    from gui.worker import run_analysis
+    from core.stream_service import run_analysis
 
     class FakeSignals:
         def __init__(self):
@@ -296,7 +295,7 @@ def test_run_analysis_threads_error_through_to_consumer(monkeypatch):
             self.error = mock.Mock()
 
     monkeypatch.setattr(
-        "gui.worker.analyze_boq_stream",
+        "core.stream_service.analyze_boq_stream",
         mock.Mock(
             return_value=iter(
                 [

@@ -1,0 +1,11 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: #070a0f;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}

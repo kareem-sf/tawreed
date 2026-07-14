@@ -3,7 +3,8 @@
 import inspect
 
 from core.ai import analyze_boq_stream
-from gui.worker import check_connection, run_analysis
+from core.connection_service import check_connection
+from core.stream_service import run_analysis
 
 
 def test_test_connection_has_model_parameter():

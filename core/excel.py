@@ -53,7 +53,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.exceptions import InvalidFileException
 
-from tawreed_app import __version__
+from core.metadata import __version__
 
 log = logging.getLogger(__name__)
 

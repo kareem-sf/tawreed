@@ -20,6 +20,7 @@ from core import db
 from core.ai import get_provider_config, validate_categorization_result
 from core.excel import parse_excel
 from core.excel import write_excel as default_write_excel
+from core.i18n import I18n
 from core.packaging_agent import BOQPackagingAgent, canonicalise_ai_package_name
 from core.run_contracts import ApprovalRequest, ApprovalSummary, RunPhase, RunProgress
 from core.stream_service import run_analysis as default_run_analysis
@@ -72,7 +73,7 @@ class BOQProcessingPipeline:
         self._run_analysis = run_analysis_fn
         self._storage = storage
         self.settings = storage.get_settings()
-        self._i18n = i18n
+        self._i18n = i18n or I18n(str(self.settings.get("language") or "en"))
         self.agent = BOQPackagingAgent()
         self._started_at = 0.0
         self._approval_token: str | None = None
@@ -189,7 +190,7 @@ class BOQProcessingPipeline:
                 self.signals.log.emit(
                     self._i18n.tr("analyzing_batch").format(current=batch.index, total=len(batches))
                     if self._i18n
-                    else f"Analyzing batch {batch.index} of {len(batches)}Ã¢â‚¬Â¦"
+                    else f"Analyzing batch {batch.index} of {len(batches)}…"
                 )
                 parsed_batch = await asyncio.to_thread(
                     self._run_analysis,
@@ -241,7 +242,7 @@ class BOQProcessingPipeline:
             self.signals.log.emit(
                 self._i18n.tr("review_ready")
                 if self._i18n
-                else "AI proposal ready Ã¢â‚¬â€ review is required before export."
+                else "AI proposal ready — review is required before export."
             )
             draft = self.agent.prepare_review(
                 source_path=self.file_path,

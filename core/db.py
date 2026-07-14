@@ -5,9 +5,8 @@ All persistent state lives under a single per-user directory:
     Windows:  C:\\Users\\<user>\\.tawreed\\
     POSIX:    ~/.tawreed/
 
-The same layout is used in BOTH dev (``python main.py``) and frozen
-(PyInstaller) builds. Keeping the state outside the project tree
-prevents:
+The same layout is used by the source engine and its frozen sidecar build.
+Keeping state outside the project tree prevents:
 
   * Accidental commits of config.json / .db / outputs to git.
   * State being stranded inside ``dist/`` when the user copies the
@@ -20,7 +19,6 @@ Layout::
 
     ~/.tawreed/
     ├── config.json          (provider, model, base_url — no secrets)
-    ├── ui_state.json        (window geometry, last visited page)
     ├── db/tawreed.db
     ├── outputs/
     │   └── <file>_<Tawreed_Output>.xlsx
@@ -28,7 +26,6 @@ Layout::
     │   ├── tawreed.log      (rotating, 1 MB × 3)
     │   ├── crash.log        (unhandled exceptions, see core/logging_setup)
     │   └── migration.log
-    └── single-instance.pid
 
 Secret storage
 --------------
@@ -70,6 +67,7 @@ from datetime import datetime
 from typing import Any
 
 from core.ai import get_default_settings, get_provider_config, is_valid_provider
+from core.locales import SUPPORTED_LANGUAGES
 
 _log = logging.getLogger(__name__)
 
@@ -82,9 +80,9 @@ def _app_root() -> str:
     """Return the directory the persistent state tree hangs off of.
 
     Per project policy, EVERYTHING lives under the user's home
-    directory at ``~/.tawreed/`` — regardless of whether we're
-    running from source (``python main.py``) or from a frozen
-    PyInstaller build. The previous split (dev -> ``./tawreed/``,
+    directory at ``~/.tawreed/`` — regardless of whether the engine
+    is running from source or as a frozen sidecar. The previous split
+    (dev -> ``./tawreed/``,
     frozen -> ``%LOCALAPPDATA%\\Tawreed``) was confusing and meant
     the user's history didn't follow them when they upgraded.
 
@@ -106,14 +104,6 @@ DB_PATH = os.path.join(DB_DIR, "tawreed.db")
 CONFIG_PATH = os.path.join(TAWREED_DIR, "config.json")
 OUTPUTS_DIR = os.path.join(TAWREED_DIR, "outputs")
 LOGS_DIR = os.path.join(TAWREED_DIR, "logs")
-PID_FILE_PATH = os.path.join(TAWREED_DIR, "single-instance.pid")
-
-# Window-level UI state (geometry blob + last visited page).
-# Lives alongside config.json so the rule "all persistent state
-# under ~/.tawreed/" holds. See ``core/ui_state.py`` for the
-# read/write helpers — this is just the path constant so the
-# rest of the codebase has a single source of truth.
-UI_STATE_PATH = os.path.join(TAWREED_DIR, "ui_state.json")
 
 # When ``keyring`` can't find a backend (e.g. headless Linux), we
 # fall back to this file. The name starts with a dot so it's hidden
@@ -566,6 +556,24 @@ def _cleanup_stray_app_state() -> None:
             pass
 
 
+def cleanup_temp_files() -> int:
+    """Remove stale atomic-write temporary files from the state tree."""
+    if not os.path.isdir(TAWREED_DIR):
+        return 0
+    removed = 0
+    for root, _dirs, files in os.walk(TAWREED_DIR):
+        for name in files:
+            if not name.endswith(".tmp"):
+                continue
+            path = os.path.join(root, name)
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError as exc:
+                _log.warning("Could not remove stale temp file %s: %s", path, exc)
+    return removed
+
+
 def init_db() -> None:
     """Initialise the state tree (idempotent).
 
@@ -767,8 +775,6 @@ def get_settings() -> dict[str, Any]:
         settings["language"] = default_settings["language"]
     else:
         # Ensure language is supported
-        from core.i18n import SUPPORTED_LANGUAGES
-
         if settings["language"] not in SUPPORTED_LANGUAGES:
             settings["language"] = default_settings["language"]
 
@@ -850,8 +856,6 @@ def save_settings(settings: dict) -> None:
         settings["model_id"] = settings["model"]
 
     # Validate and normalize language setting
-    from core.i18n import SUPPORTED_LANGUAGES
-
     if "language" not in settings:
         settings["language"] = "en"
     else:
@@ -890,106 +894,6 @@ def save_settings(settings: dict) -> None:
         raise
 
 
-def update_settings(
-    provider: str,
-    api_key: str,
-    model: str,
-    base_url: str,
-    language: str = "en",
-    theme: str = "system",
-) -> None:
-    settings = {
-        "provider": provider,
-        "api_key": api_key,
-        "model": model,
-        "model_id": model,
-        "base_url": base_url,
-        "language": language,
-        "theme": theme,
-    }
-    save_settings(settings)
-
-
 def get_outputs_dir() -> str:
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
     return os.path.abspath(OUTPUTS_DIR)
-
-
-# Recent files tracking
-RECENT_FILES_PATH = os.path.join(TAWREED_DIR, "recent_files.json")
-MAX_RECENT_FILES = 5
-
-
-def _get_recent_files() -> list[str]:
-    """Read the list of recent files from disk."""
-    if not os.path.exists(RECENT_FILES_PATH):
-        return []
-    try:
-        with open(RECENT_FILES_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return [f for f in data if isinstance(f, str) and os.path.exists(f)]
-        return []
-    except (OSError, json.JSONDecodeError):
-        return []
-
-
-def _save_recent_files(files: list[str]) -> None:
-    """Save the list of recent files to disk."""
-    os.makedirs(TAWREED_DIR, exist_ok=True)
-    tmp_path = RECENT_FILES_PATH + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(files, f)
-        os.replace(tmp_path, RECENT_FILES_PATH)
-    except OSError:
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except OSError:
-            pass
-
-
-def add_recent_file(file_path: str) -> None:
-    """Add a file to the recent files list."""
-    recent = _get_recent_files()
-    # Remove if already exists
-    if file_path in recent:
-        recent.remove(file_path)
-    # Add to beginning
-    recent.insert(0, file_path)
-    # Trim to max
-    recent = recent[:MAX_RECENT_FILES]
-    _save_recent_files(recent)
-
-
-def get_recent_files() -> list[str]:
-    """Get the list of recent files."""
-    return _get_recent_files()
-
-
-def clear_recent_files() -> None:
-    """Clear the recent files list."""
-    _save_recent_files([])
-
-
-def cleanup_temp_files() -> int:
-    """Remove stale .tmp files from the state directory.
-
-    Returns the number of temp files removed.
-    """
-    if not os.path.isdir(TAWREED_DIR):
-        return 0
-
-    removed = 0
-    for root, _dirs, files in os.walk(TAWREED_DIR):
-        for fname in files:
-            if fname.endswith(".tmp"):
-                fpath = os.path.join(root, fname)
-                try:
-                    os.remove(fpath)
-                    removed += 1
-                    _log.debug("Removed stale temp file: %s", fpath)
-                except OSError as e:
-                    _log.warning("Could not remove temp file %s: %s", fpath, e)
-    return removed

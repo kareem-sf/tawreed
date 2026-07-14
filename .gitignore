@@ -1,88 +1,118 @@
-# ----- Python -----
+# Python bytecode, tooling, and packaging
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# ----- Virtual environments -----
-venv/
-env/
-.venv/
-.env/
-ENV/
-
-# ----- PyInstaller -----
-*.spec.bak
-*.manifest
-
-# ----- Testing -----
 .pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.hypothesis/
 .tox/
 .nox/
+.coverage
+.coverage.*
 coverage.xml
+htmlcov/
 *.cover
-.hypothesis/
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+*.egg
+MANIFEST
+*.manifest
+*.spec.bak
 
-# ----- IDE / Editor -----
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-desktop.ini
+# Python environments
+.venv/
+.venv-*/
+.build-venv/
+venv/
+env/
+ENV/
 
-# ----- Application runtime data (per user, never committed) -----
-# Tawreed stores user config + DB in %LOCALAPPDATA%/Tawreed on Windows,
-# ~/.tawreed on Linux/macOS. These don't live in the repo, but the
-# PyInstaller build drops artefacts in build/ and dist/.
+# Node, TypeScript, Vite, and Remotion
+node_modules/
+.pnpm-store/
+.vite/
+.eslintcache
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+out/
+.capture-state/
+.capture-state
 
-# ----- Local agent scratch -----
-.agents/
+# Rust and Tauri generated output
+target/
+desktop/.build/
+desktop/src-tauri/gen/schemas/
+desktop/src-tauri/binaries/*
+!desktop/src-tauri/binaries/README.md
 
-# ----- Secrets (per host security policy) -----
+# Local releases and generated media
+release/
+artifacts/
+*.exe
+*.AppImage
+*.dmg
+*.msi
+*.deb
+*.rpm
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.mp4
+*.mov
+*.webm
+
+# Tawreed runtime and private BOQ data
+.tawreed/
+outputs/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.xlsx
+*.xls
+!tests/fixtures/**/*.xlsx
+
+# Environment and credentials
 .env
 .env.*
 !.env.example
 *.key
 *.pem
-*credentials*
-*secrets*
-secret.*
+*.p12
+*.pfx
+credentials.json
+secrets.json
 service-account*.json
-.ai_config.json
-*.local.json
-# config.json is the live user config (Lives at ~/.tawreed/config.json
-# at runtime, but ignore the bare filename as belt-and-braces — never
-# commit a developer's local config.json by accident).
 config.json
+*.local.json
 
-# ----- Logs -----
+# Logs and generated reports
 *.log
 logs/
-
-# ----- SBOM -----
 sbom.json
 sbom.csv
 security-scan.json
+
+# Editors, operating systems, and local agent state
+.idea/
+.vscode/
+.fleet/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+.agents/
+.codex/

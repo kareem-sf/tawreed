@@ -13,7 +13,6 @@ def test_excel_error_translations():
 
     # Test English translations
     i18n.set_language("en")
-    assert i18n.tr("testing_connection_status") == "Testing connection…"
     assert i18n.tr("excel_file_not_found") == "Excel file not found: {file_path}"
     assert i18n.tr("cannot_read_excel") == "Cannot read '{file_name}': {error}"
     assert i18n.tr("excel_no_worksheets") == "'{file_name}' has no worksheets."
@@ -21,7 +20,6 @@ def test_excel_error_translations():
 
     # Test Arabic translations
     i18n.set_language("ar")
-    assert i18n.tr("testing_connection_status") == "جارٍ اختبار الاتصال…"
     assert i18n.tr("excel_file_not_found") == "ملف Excel غير موجود: {file_path}"
     assert i18n.tr("cannot_read_excel") == "تعذر قراءة '{file_name}': {error}"
     assert i18n.tr("excel_no_worksheets") == "'{file_name}' لا يحتوي على أي أوراق عمل."
@@ -35,19 +33,6 @@ def test_excel_error_translations():
     i18n.set_language("ar")
     formatted = i18n.tr("excel_file_not_found").format(file_path="/path/to/file.xlsx")
     assert formatted == "ملف Excel غير موجود: /path/to/file.xlsx"
-
-
-def test_settings_page_status_translation():
-    """Test that the settings page status message uses translation."""
-    i18n = get_i18n()
-
-    # Test English
-    i18n.set_language("en")
-    assert i18n.tr("testing_connection_status") == "Testing connection…"
-
-    # Test Arabic
-    i18n.set_language("ar")
-    assert i18n.tr("testing_connection_status") == "جارٍ اختبار الاتصال…"
 
 
 def test_fallback_behavior(monkeypatch):

@@ -14,7 +14,6 @@ Areas covered:
 
 from __future__ import annotations
 
-import asyncio
 import os
 import tempfile
 import zipfile
@@ -26,7 +25,6 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 from core import excel
 from core.ai import analyze_boq_stream
-from gui.worker import BOQProcessor, WorkerSignals
 
 # ---------------------------------------------------------------------------
 # Network failure tests
@@ -403,89 +401,6 @@ def test_excel_numeric_edge_cases(tmp_path):
     assert data[keys[0]]["Qty"] == 0.001
     assert data[keys[1]]["Qty"] == 999999.0
     assert data[keys[2]]["Rate"] == 0.0
-
-
-# ---------------------------------------------------------------------------
-# Worker process error handling tests
-# ---------------------------------------------------------------------------
-
-
-def test_worker_handles_excel_parse_errors():
-    """Test that worker process handles Excel parsing errors gracefully."""
-    # Create proper signals object
-    signals = WorkerSignals()
-    processor = BOQProcessor("nonexistent.xlsx", signals)
-
-    # Mock the parse_excel method to raise an error
-    with patch.object(excel, "parse_excel") as mock_parse:
-        mock_parse.side_effect = ValueError("Invalid Excel file")
-
-        # Worker should handle the error without crashing
-        try:
-            asyncio.run(processor.process())
-        except Exception:
-            pass  # Expected to fail
-
-        # The test passes if we get here without crashing
-        assert True
-
-
-def test_worker_handles_ai_call_errors():
-    """Test that worker process handles AI call errors gracefully."""
-    # Create proper signals object
-    signals = WorkerSignals()
-
-    # Create a temporary Excel file for testing
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.append(["Nr.", "Item Description", "Unit", "Qty", "Rate", "Amount"])
-        ws.append(["1", "Test item", "m2", 10, 50, 500])
-        wb.save(tmp.name)
-        tmp_path = tmp.name
-
-    try:
-        processor = BOQProcessor(tmp_path, signals)
-
-        # Mock the parse_excel method to return valid data but have AI call fail
-        with (
-            patch.object(excel, "parse_excel") as mock_parse,
-            patch("core.ai.analyze_boq_stream") as mock_ai,
-        ):
-            # Return valid Excel data but have AI call fail
-            mock_parse.return_value = (
-                {"metadata": "test"},
-                {"R1": {"Nr.": "1", "Item Description": "Test item"}},
-                ["Nr.", "Item Description"],
-            )
-            mock_ai.side_effect = Exception("AI call failed")
-
-            try:
-                asyncio.run(processor.process())
-            except Exception:
-                pass  # Expected to fail
-
-            # The test passes if we get here without crashing
-            assert True
-
-    finally:
-        # Clean up
-        os.unlink(tmp_path)
-
-
-def test_worker_handles_missing_file():
-    """Test that worker process handles missing BOQ files gracefully."""
-    # Create proper signals object
-    signals = WorkerSignals()
-    processor = BOQProcessor("nonexistent.xlsx", signals)
-
-    try:
-        asyncio.run(processor.process())
-    except Exception:
-        pass  # Expected to fail
-
-    # The test passes if we get here without crashing
-    assert True
 
 
 # ---------------------------------------------------------------------------

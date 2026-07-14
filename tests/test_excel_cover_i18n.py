@@ -9,7 +9,7 @@ import openpyxl
 
 from core.excel import write_excel
 from core.i18n import get_i18n
-from tawreed_app import __version__
+from core.metadata import __version__
 
 
 def test_cover_sheet_uses_english_when_no_i18n():

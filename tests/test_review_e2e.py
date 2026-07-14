@@ -5,17 +5,34 @@ import asyncio
 import openpyxl
 
 from core import db
-from gui.worker import BOQProcessor, WorkerSignals
+from core.processing_pipeline import BOQProcessingPipeline
 
 
-def test_parse_review_edit_export_and_history_end_to_end(isolated_tawreed_dir, monkeypatch, qtbot):
+class Signal:
+    def __init__(self) -> None:
+        self.values: list[object] = []
+
+    def emit(self, value: object) -> None:
+        self.values.append(value)
+
+
+class Signals:
+    def __init__(self) -> None:
+        self.log = Signal()
+        self.review_ready = Signal()
+        self.progress = Signal()
+        self.finished = Signal()
+        self.error = Signal()
+
+
+def test_parse_review_export_and_history_end_to_end(isolated_tawreed_dir):
     db.init_db()
     db.save_settings(
         {
             "provider": "OpenAI",
             "api_key": "test-key",
             "model": "test-model",
-            "base_url": "https://example.test/v1",
+            "base_url": "https://api.openai.com/v1",
             "language": "en",
             "theme": "dark",
         }
@@ -29,60 +46,50 @@ def test_parse_review_edit_export_and_history_end_to_end(isolated_tawreed_dir, m
     workbook.save(source)
     workbook.close()
 
-    monkeypatch.setattr(
-        "gui.worker.run_analysis",
-        lambda *_args: {
+    def classify(*_args):
+        return {
             "project_name": "Ignored batch metadata",
             "date": "2026-07-10",
             "items": {"R1": "Concrete Works", "R2": "Masonry"},
-        },
-    )
-    monkeypatch.setattr(
-        "gui.worker.db.get_settings",
-        lambda: {
-            "provider": "OpenAI",
-            "api_key": "test-key",
-            "model": "test-model",
-            "base_url": "https://example.test/v1",
-        },
-    )
-    signals = WorkerSignals()
-    drafts = []
-    outputs = []
-    errors = []
-    signals.review_ready.connect(drafts.append)
-    signals.finished.connect(outputs.append)
-    signals.error.connect(errors.append)
-    processor = BOQProcessor(str(source), signals)
+        }
 
-    asyncio.run(processor.process())
-    assert len(drafts) == 1, errors
-    assert not outputs
+    signals = Signals()
+    pipeline = BOQProcessingPipeline(
+        str(source),
+        signals,
+        run_analysis_fn=classify,
+        storage=db,
+    )
+
+    asyncio.run(pipeline.process())
+    assert len(signals.review_ready.values) == 1, signals.error.values
+    assert not signals.finished.values
     assert db.get_history() == []
 
-    approval = drafts[0]
+    approval = signals.review_ready.values[0]
     assert not hasattr(approval, "items")
     assert approval.summary.total_items == 2
-    asyncio.run(processor.approve_and_export(approval.token))
+    asyncio.run(pipeline.approve_and_export(approval.token))
 
-    assert len(outputs) == 1
-    output = outputs[0]
+    assert len(signals.finished.values) == 1
+    output = signals.finished.values[0]
     exported = openpyxl.load_workbook(output, data_only=False)
     try:
         master = exported["Master"]
         headers = [cell.value for cell in master[1]]
         package_column = headers.index("Package") + 1
         id_column = headers.index("Global ID") + 1
-        exported_assignments = {
+        assignments = {
             master.cell(row=row, column=id_column).value: master.cell(
-                row=row, column=package_column
+                row=row,
+                column=package_column,
             ).value
             for row in range(2, master.max_row + 1)
         }
     finally:
         exported.close()
 
-    assert exported_assignments == {"R1": "Concrete Works", "R2": "Masonry"}
+    assert assignments == {"R1": "Concrete Works", "R2": "Masonry"}
     history = db.get_history()
     assert len(history) == 1
     assert history[0]["output_path"] == output

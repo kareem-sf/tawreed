@@ -20,7 +20,10 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tawreed_app import __version__
+from core.metadata import __version__
+
+_active_processes: set[subprocess.Popen] = set()
+_active_processes_lock = threading.Lock()
 
 MAX_CODEX_OUTPUT_BYTES = 1_000_000
 MAX_APP_SERVER_OUTPUT_BYTES = 2_000_000
@@ -287,6 +290,23 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
         os.killpg(process.pid, signal.SIGKILL)
 
 
+def cancel_active_codex_processes() -> int:
+    """Terminate every active usage-bearing Codex process tree.
+
+    Tawreed runs Codex inside a worker thread. Cancelling the awaiting asyncio
+    task cannot stop that thread, so the desktop host calls this explicit
+    process-tree boundary before terminating the Python sidecar.
+    """
+    with _active_processes_lock:
+        processes = tuple(_active_processes)
+    cancelled = 0
+    for process in processes:
+        if process.poll() is None:
+            _terminate_process_tree(process)
+            cancelled += 1
+    return cancelled
+
+
 def _start_app_server(executable: str) -> subprocess.Popen:
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     if os.name == "nt":
@@ -503,12 +523,18 @@ def _run_process(
         creationflags=creationflags,
         start_new_session=os.name != "nt",
     )
+    with _active_processes_lock:
+        _active_processes.add(process)
     try:
-        stdout, stderr = process.communicate(prompt, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        _terminate_process_tree(process)
-        process.communicate()
-        raise TimeoutError("Codex did not finish within the safe time limit.") from exc
+        try:
+            stdout, stderr = process.communicate(prompt, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process_tree(process)
+            process.communicate()
+            raise TimeoutError("Codex did not finish within the safe time limit.") from exc
+    finally:
+        with _active_processes_lock:
+            _active_processes.discard(process)
     return ProcessOutput(process.returncode, stdout, stderr)
 
 

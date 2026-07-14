@@ -64,8 +64,7 @@ def test_set_api_key_empty_string_deletes(isolated_tawreed_dir):
 
 
 def test_clear_all_api_keys_removes_everything(isolated_tawreed_dir):
-    """core.reset.reset_all() relies on this to wipe the
-    Credential Manager when the user hits "Reset everything"."""
+    """The storage API can explicitly wipe every known provider credential."""
     db.set_api_key("OpenAI", "k1")
     db.set_api_key("Claude", "k2")
     db.set_api_key("OpenAI Compatible", "k3")

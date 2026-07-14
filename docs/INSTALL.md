@@ -1,37 +1,41 @@
-# Install Tawreed 0.0.1
+# Install Tawreed
 
-Tawreed is portable. Download one file from the
-[v0.0.1 release](https://github.com/sfkareem/tawreed/releases/tag/v0.0.1).
-Do not unzip anything and do not run an installer.
+Tawreed releases contain direct portable executables. There is no installer and
+no archive to unpack.
 
 ## Windows
 
-Download `Tawreed-windows.exe` and double-click it. The file is not code-signed,
-so Windows SmartScreen may show **Windows protected your PC**. Choose **More
-info**, then **Run anyway**.
+Download `Tawreed-Windows-x64.exe` and run it. Until the project is code-signed,
+Microsoft Defender SmartScreen may show **Windows protected your PC**. Choose
+**More info**, verify the publisher/source, then choose **Run anyway**.
 
 ## macOS
 
-Download `Tawreed-macos`, make it executable if required, and open it. If
-Gatekeeper blocks the unsigned file, right-click it and choose **Open**.
+Download the file matching the published architecture, make it executable if
+needed, and launch it:
+
+```bash
+chmod +x Tawreed-macOS-<architecture>
+./Tawreed-macOS-<architecture>
+```
+
+For an unsigned build, macOS may require a right-click **Open** confirmation or
+removing quarantine after you have verified the release source.
 
 ## Linux
 
-Download `Tawreed-linux`, then run:
+Download `Tawreed-Linux-x64.AppImage`, then run:
 
 ```bash
-chmod +x Tawreed-linux
-./Tawreed-linux
+chmod +x Tawreed-Linux-x64.AppImage
+./Tawreed-Linux-x64.AppImage
 ```
 
-Qt requires the normal desktop EGL/GL/XCB libraries. On Debian/Ubuntu:
-
-```bash
-sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
-```
+Some distributions require FUSE support for AppImage execution. The operating
+system must also provide a normal graphical desktop session.
 
 ## Codex connection
 
-Install the official Codex application/CLI, run `codex login`, and choose
-ChatGPT. Tawreed then fetches the models available to that account. No API key
-is needed for the Codex provider.
+Install the official Codex application or CLI, run `codex login`, and select
+ChatGPT. Tawreed discovers the account-visible model catalog without reading,
+copying, or storing the Codex token.

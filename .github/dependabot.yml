@@ -1,51 +1,74 @@
-# Dependabot — keep deps + GitHub Actions up to date.
-
 version: 2
 
 updates:
-  # Python deps from pyproject.toml. Weekly is enough for a
-  # project this size; Dependabot will batch PRs to keep the
-  # review queue manageable.
-  - package-ecosystem: "pip"
-    directory: "/"
+  - package-ecosystem: npm
+    directory: /desktop
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "09:00"
-      timezone: "Africa/Cairo"
-    # Group all minor + patch updates into a single weekly PR
-    # so the queue stays sane. Major bumps get their own PR
-    # because they need careful review.
+      timezone: Africa/Cairo
+    groups:
+      desktop-minor:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps(desktop)
+    labels: [dependencies, automated]
+
+  - package-ecosystem: npm
+    directory: /marketing-video
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Africa/Cairo
+    groups:
+      remotion-minor:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps(video)
+    labels: [dependencies, automated]
+
+  - package-ecosystem: cargo
+    directory: /desktop/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Africa/Cairo
+    groups:
+      tauri-minor:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps(tauri)
+    labels: [dependencies, automated]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Africa/Cairo
     groups:
       python-minor:
         applies-to: version-updates
-        update-types:
-          - "minor"
-          - "patch"
-    # Allow up to 5 open PRs from Dependabot at once. If we
-    # ever hit that limit it means nobody's reviewing, which
-    # is a separate problem.
+        update-types: [minor, patch]
     open-pull-requests-limit: 5
-    # The PR body should list what changed in the lock file, not
-    # just say "Bump requests 2.31.0 to 2.32.0".
     commit-message:
-      prefix: "deps"
-      include: "scope"
-    labels:
-      - "dependencies"
-      - "automated"
+      prefix: deps(python)
+    labels: [dependencies, automated]
 
-  # GitHub Actions — actions/checkout, actions/setup-python, etc.
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
       time: "09:00"
-      timezone: "Africa/Cairo"
+      timezone: Africa/Cairo
     commit-message:
-      prefix: "ci"
-    labels:
-      - "dependencies"
-      - "automated"
-      - "ci"
+      prefix: ci
+    labels: [dependencies, automated, ci]
