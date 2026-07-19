@@ -12,6 +12,9 @@ updates:
       npm-minor:
         applies-to: version-updates
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
     commit-message:
       prefix: deps
     labels: [dependencies, automated]
@@ -27,6 +30,9 @@ updates:
       cargo-minor:
         applies-to: version-updates
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
     commit-message:
       prefix: deps(rust)
     labels: [dependencies, automated]
