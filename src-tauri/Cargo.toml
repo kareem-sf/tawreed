@@ -22,7 +22,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
 dotenvy = "0.15"
 base64 = "0.22"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 semver = "1"
 
 [profile.release]
