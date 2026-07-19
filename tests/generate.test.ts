@@ -28,17 +28,17 @@ describe('workbook generation', () => {
     });
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(bytes.buffer as ArrayBuffer);
-    expect(wb.worksheets[0].name).toBe('Cover');
+    expect(wb.worksheets[0]!.name).toBe('Cover');
     expect(wb.worksheets.some((sheet) => sheet.name.includes('Validation'))).toBe(false);
 
-    const cover = wb.worksheets[0];
+    const cover = wb.worksheets[0]!;
     const allText: string[] = [];
     cover.eachRow((row) => row.eachCell((cell) => allText.push(cell.text)));
     const text = allText.join(' ');
     expect(text).toContain('Green Avenue');
     expect(text).toContain('TAWREED');
     expect(text).toContain('ITEMS');
-    expect(text).toContain('© 2026 Tawreed · kareemsafwat.com');
+    expect(text).toContain(`© ${new Date().getFullYear()} Tawreed · kareemsafwat.com`);
     expect(text).not.toContain('SOURCE BOQ');
     expect(text).not.toContain('GENERATED');
     expect(text).not.toContain('SCOPE');
@@ -60,7 +60,7 @@ describe('workbook generation', () => {
     await wb.xlsx.load(bytes.buffer as ArrayBuffer);
     const packageSheets = wb.worksheets.filter((sheet) => sheet.name.startsWith('WP-'));
     expect(packageSheets).toHaveLength(result.packages.length);
-    let formulaItems = 0;
+    let totalCells = 0;
     for (const sheet of packageSheets) {
       expect(sheet.getCell('A1').text).toBe('Green Avenue');
       expect(sheet.pageSetup.paperSize).toBe(9);
@@ -69,16 +69,18 @@ describe('workbook generation', () => {
       const sheetText: string[] = [];
       sheet.eachRow((row) => {
         row.eachCell((cell) => sheetText.push(cell.text));
-        if (isFormula(row.getCell(6).value, /^ROUND\(E\d+\*D\d+,2\)$/)) formulaItems++;
+        const cellValue = row.getCell(6).value;
+        // Items with source totals get static values; computed totals get ROUND formulas.
+        if (typeof cellValue === 'number' || isFormula(cellValue, /^ROUND\(E\d+\*D\d+,2\)$/)) totalCells++;
       });
       expect(sheetText.join(' ')).not.toContain('Source:');
     }
-    expect(formulaItems).toBe(result.inspection.items.length);
+    expect(totalCells).toBe(result.inspection.items.length);
   });
 
   it('places only meaningful comments in Remarks and native notes without visible NOTE rows', async () => {
     const result = await runPipeline(await commentsFixture(), 'comments.xlsx', { useLlm: false });
-    result.inspection.items[0].comments = [...(result.inspection.items[0].comments ?? []), '-', 'THANK YOU'];
+    result.inspection.items[0]!.comments = [...(result.inspection.items[0]!.comments ?? []), '-', 'THANK YOU'];
     const bytes = await buildWorkbook({
       packages: result.packages,
       items: result.inspection.items,
@@ -106,8 +108,8 @@ describe('workbook generation', () => {
 
   it('right-aligns Arabic cells and expands wrapped rows for long text', async () => {
     const result = await runPipeline(await arFixture(), 'ar.xlsx', { useLlm: false });
-    result.inspection.items[0].description = `${result.inspection.items[0].description} `.repeat(14).trim();
-    result.inspection.items[0].comments = ['يجب التنسيق مع الاستشاري واعتماد المواد قبل بدء التنفيذ '.repeat(7).trim()];
+    result.inspection.items[0]!.description = `${result.inspection.items[0]!.description} `.repeat(14).trim();
+    result.inspection.items[0]!.comments = ['يجب التنسيق مع الاستشاري واعتماد المواد قبل بدء التنفيذ '.repeat(7).trim()];
     const bytes = await buildWorkbook({
       packages: result.packages,
       items: result.inspection.items,
@@ -118,7 +120,7 @@ describe('workbook generation', () => {
     });
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(bytes.buffer as ArrayBuffer);
-    expect(wb.worksheets[0].views[0]?.rightToLeft).toBe(true);
+    expect(wb.worksheets[0]!.views[0]?.rightToLeft).toBe(true);
     const sheet = wb.worksheets.find((candidate) => candidate.name.startsWith('WP-'))!;
     const row = sheet.findRow(5)!;
     expect(row.getCell(2).alignment.horizontal).toBe('right');
@@ -138,12 +140,12 @@ describe('workbook generation', () => {
       documentLanguage: 'en',
     });
     expect(artifacts).toHaveLength(result.packages.length + 1);
-    expect(artifacts[0].fileName).toBe('Green Avenue - Work Packages - Rev 02.xlsx');
-    expect(artifacts[0].relativePath).toBe(artifacts[0].fileName);
+    expect(artifacts[0]!.fileName).toBe('Green Avenue - Work Packages - Rev 02.xlsx');
+    expect(artifacts[0]!.relativePath).toBe(artifacts[0]!.fileName);
     expect(artifacts.slice(1).every((artifact) => artifact.relativePath.startsWith('Packages/'))).toBe(true);
     expect(artifacts.slice(1).every((artifact) => artifact.fileName.includes(' - WP-'))).toBe(true);
 
-    const packageArtifact = artifacts[1];
+    const packageArtifact = artifacts[1]!;
     const packageWb = new ExcelJS.Workbook();
     await packageWb.xlsx.load(packageArtifact.bytes.buffer as ArrayBuffer);
     expect(packageWb.worksheets.map((sheet) => sheet.name)[0]).toBe('Cover');

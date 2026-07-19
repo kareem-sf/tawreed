@@ -6,8 +6,8 @@ rust-version = "1.80"
 description = "Portable BOQ → work-package workbook converter"
 license = "MIT"
 authors = ["Kareem Safwat"]
-repository = "https://github.com/sfkareem/tawreed"
-homepage = "https://github.com/sfkareem/tawreed"
+repository = "https://github.com/kareem-sf/tawreed"
+homepage = "https://github.com/kareem-sf/tawreed"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -17,6 +17,7 @@ tauri = { version = "2", features = ["macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+tokio = { version = "1", features = ["time"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
 dotenvy = "0.15"

@@ -17,6 +17,7 @@ interface Props {
 export default function SettingsModal({ dataDir, hasKey, onOpenAbout }: Props) {
   const { t } = useTranslation();
   const [key, setKey] = useState('');
+  const [keySaved, setKeySaved] = useState(false);
   const [status, setStatus] = useState<'idle' | 'saved' | 'removed' | 'error'>('idle');
   const [error, setError] = useState('');
   const [codex, setCodex] = useState<CodexStatus | null>(null);
@@ -43,12 +44,19 @@ export default function SettingsModal({ dataDir, hasKey, onOpenAbout }: Props) {
       .finally(() => setModelsLoading(false));
   }, [codex?.authenticated]);
 
+  useEffect(() => {
+    if (status !== 'idle') {
+      const timer = window.setTimeout(() => setStatus('idle'), 3000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [status]);
+
   const save = async () => {
-    try { await setApiKey(key); setKey(''); setStatus('saved'); }
+    try { await setApiKey(key); setKey(''); setKeySaved(true); setStatus('saved'); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); setStatus('error'); }
   };
   const remove = async () => {
-    try { await deleteApiKey(); setStatus('removed'); }
+    try { await deleteApiKey(); setKeySaved(false); setStatus('removed'); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); setStatus('error'); }
   };
   const install = async () => {
@@ -58,7 +66,7 @@ export default function SettingsModal({ dataDir, hasKey, onOpenAbout }: Props) {
     finally { setInstalling(false); }
   };
   const login = async () => {
-    try { await codexLogin(); }
+    try { await codexLogin(); await refreshCodex(); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); setStatus('error'); }
   };
   const pickModel = async (slug: string | null) => {
@@ -132,10 +140,10 @@ export default function SettingsModal({ dataDir, hasKey, onOpenAbout }: Props) {
         onChange={(e) => setKey(e.currentTarget.value)}
         size="xs"
       />
-      <Text size="xs" c="dimmed">{t('apiKeyHint', { path: `${dataDir}\\.env` })}</Text>
+      <Text size="xs" c="dimmed">{t('apiKeyHint', { path: [dataDir, '.env'].join('/') })}</Text>
       <Group>
         <Button color="yellow" size="xs" onClick={save} disabled={!key.trim()}>{t('save')}</Button>
-        {hasKey && <Button variant="subtle" color="red" size="xs" onClick={remove}>{t('remove')}</Button>}
+        {(keySaved || hasKey) && <Button variant="subtle" color="red" size="xs" onClick={remove}>{t('remove')}</Button>}
       </Group>
 
       {status === 'saved' && <Alert color="green" p="xs"><Text size="xs">{t('keySaved')}</Text></Alert>}

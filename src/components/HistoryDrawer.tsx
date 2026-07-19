@@ -5,14 +5,22 @@ import { useTranslation } from 'react-i18next';
 import { listRuns, openGeneratedFolder, openWorkbook } from '../bridge';
 import type { RunRecord } from '../../shared/types';
 
-export default function HistoryDrawer() {
+export default function HistoryDrawer({ opened }: { opened: boolean }) {
   const { t } = useTranslation();
   const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listRuns().then(setRuns).catch(() => setRuns([]));
-  }, []);
+    if (opened) {
+      setLoading(true);
+      listRuns()
+        .then(setRuns)
+        .catch(() => setRuns([]))
+        .finally(() => setLoading(false));
+    }
+  }, [opened]);
 
+  if (loading) return <Text c="dimmed" ta="center" mt="xl">{t('loading')}</Text>;
   if (runs.length === 0) return <Text c="dimmed" ta="center" mt="xl">{t('emptyHistory')}</Text>;
 
   return (

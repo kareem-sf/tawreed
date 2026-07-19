@@ -19,13 +19,14 @@ export interface PipelineData {
 interface Props {
   data: PipelineData;
   busy: boolean;
+  hasErrors: boolean;
   onGenerate: () => void;
   onReset: () => void;
 }
 
-const compact = (n: number) => new Intl.NumberFormat('en', { maximumFractionDigits: 1, notation: 'compact' }).format(n);
+const compact = (n: number, locale: string) => new Intl.NumberFormat(locale, { maximumFractionDigits: 1, notation: 'compact' }).format(n);
 
-export default function ReviewPanel({ data, busy, onGenerate, onReset }: Props) {
+export default function ReviewPanel({ data, busy, hasErrors, onGenerate, onReset }: Props) {
   const { t, i18n } = useTranslation();
   const ar = i18n.language === 'ar';
   const errors = data.issues.filter((i) => i.severity === 'error');
@@ -67,9 +68,9 @@ export default function ReviewPanel({ data, busy, onGenerate, onReset }: Props) 
                       {ar ? p.nameAr : p.nameEn}
                     </span>
                   </div>
-                  <div className="flex shrink-0 items-center gap-3 pl-2">
+                  <div className="flex shrink-0 items-center gap-3 ps-2">
                     <span className="text-[10px] text-zinc-400">{p.itemCount}</span>
-                    <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{compact(p.totalCost)}</span>
+                    <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{compact(p.totalCost, i18n.language)}</span>
                   </div>
                 </div>
               </Tooltip.Floating>
@@ -100,7 +101,7 @@ export default function ReviewPanel({ data, busy, onGenerate, onReset }: Props) 
 
       <Group justify="space-between" mt={2}>
         <Button variant="subtle" size="xs" color="gray" onClick={onReset}>← {t('newFile')}</Button>
-        <ShimmerButton disabled={busy} onClick={onGenerate} className="px-5 py-2 text-[13px]">
+        <ShimmerButton disabled={busy || hasErrors} onClick={onGenerate} className="px-5 py-2 text-[13px]">
           {busy ? t('generatingShort') : t('generateOpenBtn')}
         </ShimmerButton>
       </Group>

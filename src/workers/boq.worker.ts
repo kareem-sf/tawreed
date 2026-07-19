@@ -24,7 +24,7 @@ self.onmessage = async (event: MessageEvent<Request>) => {
         type: 'result', ok: true,
         data: artifacts,
       },
-      { transfer: artifacts.map((artifact) => artifact.bytes.buffer) },
+      { transfer: [...new Set(artifacts.map((artifact) => artifact.bytes.buffer))] },
     );
   } catch (error) {
     self.postMessage({

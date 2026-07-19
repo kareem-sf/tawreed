@@ -10,11 +10,11 @@ describe('grounded document agent', () => {
     const comments = inspection.items.flatMap((item) => item.comments ?? []);
     const refined = await refineInspectionWithAgent(inspection, async () => JSON.stringify({
       projectName: 'Factory Extension',
-      comments: comments.map((_, index) => ({ commentId: `${index < (inspection.items[0].comments?.length ?? 0) ? 1 : 2}-${index < (inspection.items[0].comments?.length ?? 0) ? index + 1 : index - (inspection.items[0].comments?.length ?? 0) + 1}`, itemId: index < 4 ? 1 : 2 })),
+      comments: comments.map((_, index) => ({ commentId: `${index < (inspection.items[0]!.comments?.length ?? 0) ? 1 : 2}-${index < (inspection.items[0]!.comments?.length ?? 0) ? index + 1 : index - (inspection.items[0]!.comments?.length ?? 0) + 1}`, itemId: index < 4 ? 1 : 2 })),
     }));
     expect(refined.projectName).toBe('Factory Extension');
     expect(refined.projectNameConfidence).toBeGreaterThanOrEqual(0.85);
-    expect(refined.items[0].comments?.length).toBeGreaterThan(0);
+    expect(refined.items[0]!.comments?.length).toBeGreaterThan(0);
   });
 
   it('rejects project names that were not extracted from the document', async () => {

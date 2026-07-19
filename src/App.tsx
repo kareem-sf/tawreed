@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Drawer, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { AnimatePresence } from 'motion/react';
 import { FileSpreadsheet, FolderOpen } from 'lucide-react';
@@ -37,12 +37,17 @@ export default function App() {
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
   const updateRequest = useRef<Promise<void> | null>(null);
   const startupUpdateStarted = useRef(false);
+  const generatingRef = useRef(false);
+  const abortRef = useRef(false);
 
   const refreshConfiguration = () => {
     Promise.all([bootstrap(), getSettings()])
       .then(([info, settings]) => {
         setBoot(info);
         setModelSlug(typeof settings.model === 'string' && settings.model ? settings.model : null);
+        if (typeof settings.language === 'string' && ['en', 'ar'].includes(settings.language)) {
+          void i18n.changeLanguage(settings.language);
+        }
       })
       .catch(() => setBoot(null));
   };
@@ -73,7 +78,8 @@ export default function App() {
     document.documentElement.lang = i18n.language;
   }, [i18n.language]);
 
-  async function handleFile(file: File) {
+  const handleFile = useCallback(async (file: File) => {
+    abortRef.current = false;
     setError(null);
     setOutput(null);
     setView('busy');
@@ -84,7 +90,9 @@ export default function App() {
         import('../engine/classify'),
         import('../engine/validate'),
       ]);
+      if (abortRef.current) return;
       const bytes = new Uint8Array(await file.arrayBuffer());
+      if (abortRef.current) return;
       const startedAt = Date.now();
       let inspection = await inspectInWorker(bytes, file.name, (progress) => {
         if (progress.phase === 'ocr') {
@@ -95,6 +103,7 @@ export default function App() {
           setBusyMsg(t('analyzingDocument'));
         }
       });
+      if (abortRef.current) return;
       void appLog(`inspection: file=${file.name} source=${inspection.sourceKind} project=${inspection.projectName} items=${inspection.items.length} confidence=${inspection.mapping.confidence.toFixed(2)}`);
 
       const provider = boot?.provider ?? 'none';
@@ -110,6 +119,7 @@ export default function App() {
           void appLog(`document intelligence fallback: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      if (abortRef.current) return;
 
       setBusyMsg(t('classifying'));
       let classifications;
@@ -124,6 +134,7 @@ export default function App() {
         void appLog(`classification fallback: ${err instanceof Error ? err.message : String(err)}`);
         classifications = await classifyAll(inspection.items, { useLlm: false });
       }
+      if (abortRef.current) return;
       const packages = buildPackages(inspection.items, classifications);
       const issues = validate(inspection.items, classifications, packages);
       const llmApplied = classifications.some((c) => c.source === 'llm' && c.packageCode !== 'WP-99');
@@ -142,56 +153,68 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
       setView('idle');
     }
-  }
+  }, [t, boot, modelSlug]);
 
   async function generate() {
-    if (!data) return;
-    setView('busy');
-    setBusyMsg(t('generatingShort'));
-    let reservation: RevisionReservation | null = null;
+    if (generatingRef.current) return;
+    generatingRef.current = true;
+    setError(null);
     try {
-      reservation = await reserveRevision(data.inspection.projectName);
-      const outputArabic = data.inspection.language === 'ar' || (data.inspection.language === 'mixed' && /[\u0600-\u06ff]/.test(data.inspection.projectName));
-      setBusyMsg(t('generatingBundle', { revision: reservation.revisionLabel }));
-      const generated = await generateInWorker({
-        packages: data.packages,
-        items: data.inspection.items,
-        projectName: reservation.projectName,
-        revision: reservation.revision,
-        locale: outputArabic ? 'ar' : 'en',
-        documentLanguage: data.inspection.language,
-      });
-      const published = await writeRevisionBundle(reservation, generated);
-      await recordRun({
-        startedAt: new Date(data.startedAt).toISOString(),
-        fileName: data.fileName,
-        fileHash: await sha256Hex(data.bytes),
-        itemCount: data.inspection.items.length,
-        packageCount: data.packages.length,
-        errorCount: data.issues.filter((i) => i.severity === 'error').length,
-        warningCount: data.issues.filter((i) => i.severity === 'warning').length,
-        outputFile: published.masterPath,
-        durationMs: Date.now() - data.startedAt,
-        llmUsed: data.llmUsed,
-        projectName: published.projectName,
-        revision: published.revision,
-        packageFolder: published.packageFolder,
-        sourceKind: data.inspection.sourceKind,
-        ocrUsed: data.inspection.ocrPages > 0,
-      });
-      setOutput(published);
-      setView('done');
-      void openWorkbook(published.masterPath).catch((err) => {
+      if (!data) return;
+      setView('busy');
+      setBusyMsg(t('generatingShort'));
+      let reservation: RevisionReservation | null = null;
+      try {
+        reservation = await reserveRevision(data.inspection.projectName);
+        const outputArabic = data.inspection.language === 'ar' || (data.inspection.language === 'mixed' && /[\u0600-\u06ff]/.test(data.inspection.projectName));
+        setBusyMsg(t('generatingBundle', { revision: reservation.revisionLabel }));
+        const generated = await generateInWorker({
+          packages: data.packages,
+          items: data.inspection.items,
+          projectName: reservation.projectName,
+          revision: reservation.revision,
+          locale: outputArabic ? 'ar' : 'en',
+          documentLanguage: data.inspection.language,
+        });
+        const published = await writeRevisionBundle(reservation, generated);
+        try {
+          await recordRun({
+            startedAt: new Date(data.startedAt).toISOString(),
+            fileName: data.fileName,
+            fileHash: await sha256Hex(data.bytes),
+            itemCount: data.inspection.items.length,
+            packageCount: data.packages.length,
+            errorCount: data.issues.filter((i) => i.severity === 'error').length,
+            warningCount: data.issues.filter((i) => i.severity === 'warning').length,
+            outputFile: published.masterPath,
+            durationMs: Date.now() - data.startedAt,
+            llmUsed: data.llmUsed,
+            projectName: published.projectName,
+            revision: published.revision,
+            packageFolder: published.packageFolder,
+            sourceKind: data.inspection.sourceKind,
+            ocrUsed: data.inspection.ocrPages > 0,
+          });
+        } catch (recordErr) {
+          void appLog(`recordRun failed (non-fatal): ${recordErr instanceof Error ? recordErr.message : String(recordErr)}`);
+        }
+        setOutput(published);
+        setView('done');
+        void openWorkbook(published.masterPath).catch((err) => {
+          setError(err instanceof Error ? err.message : String(err));
+        });
+      } catch (err) {
+        if (reservation) void discardRevision(reservation).catch(() => undefined);
         setError(err instanceof Error ? err.message : String(err));
-      });
-    } catch (err) {
-      if (reservation) void discardRevision(reservation).catch(() => undefined);
-      setError(err instanceof Error ? err.message : String(err));
-      setView('review');
+        setView('review');
+      }
+    } finally {
+      generatingRef.current = false;
     }
   }
 
   const reset = () => {
+    abortRef.current = true;
     setData(null);
     setOutput(null);
     setError(null);
@@ -218,19 +241,27 @@ export default function App() {
                   {t('welcomeBody', { dir: boot.data_dir })}
                 </Text>
               )}
-              {error && <Text size="xs" c="red" ta="center" maw={390}>{error}</Text>}
+              {error && <Text size="xs" c="red" ta="center" maw={390} role="alert">{error}</Text>}
             </BlurFade>
           )}
 
           {view === 'busy' && (
             <BlurFade key="busy" className="flex h-full flex-col items-center justify-center gap-2 px-8">
-              <AnimatedShinyText className="text-xl">{busyMsg}</AnimatedShinyText>
+              <div role="status" aria-live="polite">
+                <AnimatedShinyText className="text-xl">{busyMsg}</AnimatedShinyText>
+              </div>
             </BlurFade>
           )}
 
           {view === 'review' && data && (
             <BlurFade key="review" className="h-full pt-1">
-              <ReviewPanel data={data} busy={false} onGenerate={generate} onReset={reset} />
+              <ReviewPanel
+                data={data}
+                busy={generatingRef.current}
+                hasErrors={data.issues.some((i) => i.severity === 'error')}
+                onGenerate={generate}
+                onReset={reset}
+              />
             </BlurFade>
           )}
 
@@ -240,7 +271,7 @@ export default function App() {
               <Text fw={650}>{t('doneTitle')}</Text>
               <Text size="sm" fw={600}>{output?.projectName} · {output?.revisionLabel}</Text>
               <Text size="xs" c="dimmed" ta="center" maw={430} style={{ wordBreak: 'break-all' }}>{output?.masterPath}</Text>
-              {error && <Text size="xs" c="red" ta="center" maw={400}>{error}</Text>}
+              {error && <Text size="xs" c="red" ta="center" maw={400} role="alert">{error}</Text>}
               <Group gap="xs">
                 <Tooltip label={t('openWorkbookDetail')} openDelay={180}>
                   <Button
@@ -293,7 +324,7 @@ export default function App() {
         position={i18n.language === 'ar' ? 'left' : 'right'}
         size={560}
       >
-        <HistoryDrawer />
+        <HistoryDrawer opened={historyOpen} />
       </Drawer>
     </div>
   );

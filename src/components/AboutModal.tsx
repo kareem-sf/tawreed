@@ -126,9 +126,9 @@ export default function AboutModal({ version, update, onCheckUpdate, onOpenUpdat
         </BlurFade>
 
         <BlurFade className="mt-3 flex items-center gap-3 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-400" delay={0.17}>
-          <button className="transition hover:text-amber-600" onClick={() => void openUrl('https://github.com/sfkareem/tawreed').catch(() => undefined)}>{t('viewRepo')}</button>
+          <button className="transition hover:text-amber-600" onClick={() => void openUrl('https://github.com/kareem-sf/tawreed').catch(() => undefined)}>{t('viewRepo')}</button>
           <span aria-hidden="true">·</span>
-          <button className="transition hover:text-amber-600" onClick={() => void openUrl('https://github.com/sfkareem/tawreed/blob/main/LICENSE').catch(() => undefined)}>{t('mitLicense')}</button>
+          <button className="transition hover:text-amber-600" onClick={() => void openUrl('https://github.com/kareem-sf/tawreed/blob/main/LICENSE').catch(() => undefined)}>{t('mitLicense')}</button>
         </BlurFade>
 
         <BlurFade className="mt-4 flex items-end justify-between gap-5" delay={0.18}>

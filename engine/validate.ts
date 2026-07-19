@@ -1,6 +1,7 @@
 // Validation rule engine — errors block generation, warnings don't.
 import type { BoqItem, Classification, ValidationIssue, WorkPackage } from '../shared/types';
 import { TAXONOMY, UNCLASSIFIED } from './classify/taxonomy';
+import { normalizeText } from './normalize';
 
 const TOTAL_TOLERANCE_PCT = 0.015; // 1.5%
 const TOTAL_TOLERANCE_ABS = 100; // EGP
@@ -35,7 +36,6 @@ export function buildPackages(items: BoqItem[], classifications: Classification[
 export function validate(items: BoqItem[], classifications: Classification[], packages: WorkPackage[]): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const byItem = new Map(items.map((i) => [i.id, i]));
-  const classByItem = new Map(classifications.map((c) => [c.itemId, c]));
 
   // 1. Unclassified items
   const unclassified = classifications.filter((c) => c.packageCode === 'WP-99').map((c) => c.itemId);
@@ -59,14 +59,25 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
     });
   }
 
-  // 3. Non-positive quantities — hard error
-  const badQty = items.filter((i) => i.qty <= 0).map((i) => i.id);
+  // 3. Zero quantities — hard error
+  const badQty = items.filter((i) => i.qty === 0).map((i) => i.id);
   if (badQty.length > 0) {
     issues.push({
       severity: 'error', code: 'ZERO_QTY',
-      messageEn: `${badQty.length} item(s) have zero or negative quantity — fix the source BOQ.`,
-      messageAr: `${badQty.length} بند بكمية صفرية أو سالبة — صحح جدول الكميات المصدر.`,
+      messageEn: `${badQty.length} item(s) have zero quantity — fix the source BOQ.`,
+      messageAr: `${badQty.length} بند بكمية صفرية — صحح جدول الكميات المصدر.`,
       itemIds: badQty,
+    });
+  }
+
+  // 3b. Negative quantities — warning (deduction lines)
+  const negativeQty = items.filter((i) => i.qty < 0).map((i) => i.id);
+  if (negativeQty.length > 0) {
+    issues.push({
+      severity: 'warning', code: 'NEGATIVE_QTY',
+      messageEn: `${negativeQty.length} item(s) have negative quantity — verify these are deduction lines.`,
+      messageAr: `${negativeQty.length} بند بكمية سالبة — تحقق من أن هذه بنود خصم.`,
+      itemIds: negativeQty,
     });
   }
 
@@ -90,7 +101,7 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
   // 5. Duplicate descriptions
   const seen = new Map<string, number[]>();
   for (const i of items) {
-    const key = i.description.trim().toLowerCase();
+    const key = normalizeText(i.description);
     seen.set(key, [...(seen.get(key) ?? []), i.id]);
   }
   const dups = [...seen.values()].filter((ids) => ids.length > 1).flat();
@@ -107,7 +118,7 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
   const outliers: number[] = [];
   for (const pkg of packages) {
     const priced = pkg.itemIds.map((id) => byItem.get(id)!).filter((i) => i.rate !== null && i.rate > 0);
-    if (priced.length < 5) continue;
+    if (priced.length < 8) continue;
     const rates = priced.map((i) => i.rate!);
     const mean = rates.reduce((s, r) => s + r, 0) / rates.length;
     const sd = Math.sqrt(rates.reduce((s, r) => s + (r - mean) ** 2, 0) / rates.length);

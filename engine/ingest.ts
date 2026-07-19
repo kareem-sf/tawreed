@@ -1,6 +1,6 @@
 // Dynamic XLSX ingestion: discovers a BOQ table from workbook structure, not a fixed template.
 import ExcelJS from 'exceljs';
-import type { BoqItem, ColumnMapping, InspectionResult } from '../shared/types';
+import type { BoqItem, ColumnMapping, InspectionResult, Unit } from '../shared/types';
 import { canonicalUnit, normalizeText, parseNumber } from './normalize';
 import {
   detectDocumentLanguage, detectProjectName, filterMeaningfulComments,
@@ -40,9 +40,12 @@ const HEADER_TOKENS: Record<Field, string[]> = {
   ],
 };
 
+const headerTokenCache = new Map<string, string>();
+
 const MAX_HEADER_SCAN = 100;
 const MAX_HEADER_SPAN = 3;
 const MAX_INFER_COLUMNS = 80;
+const MAX_DATA_ROW = 10_000;
 const TOTAL_WORDS = [
   'total', 'subtotal', 'sub total', 'grand total', 'carried forward', 'brought forward', 'page total',
   'الاجمالي', 'الإجمالي', 'المجموع', 'اجمالي الصفحه', 'منقول',
@@ -62,7 +65,12 @@ function cellText(v: ExcelJS.CellValue): string {
 
 function cellNumber(v: ExcelJS.CellValue): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  if (v != null && typeof v === 'object' && 'result' in v) return parseNumber(v.result);
+  if (typeof v === 'object' && v !== null && 'result' in v) {
+    const r = (v as any).result;
+    if (typeof r === 'number') return Number.isFinite(r) ? r : null;
+    if (typeof r === 'string') return cellNumber(r); // re-route through the text path
+    return null;
+  }
   const text = cellText(v).trim();
   if (!text) return null;
   // Never turn embedded specification digits ("Concrete C30", "Cable 4x25") into prices.
@@ -74,13 +82,27 @@ function cellNumber(v: ExcelJS.CellValue): number | null {
   return parseNumber(numericText);
 }
 
+/** Shared numeric classifier — aligned with cellNumber's Arabic-Indic + currency handling. */
+function isNumericLike(raw: unknown): boolean {
+  if (raw === null || raw === undefined) return false;
+  if (typeof raw === 'number') return Number.isFinite(raw);
+  if (typeof raw === 'object' && raw !== null && 'result' in raw) return isNumericLike((raw as Record<string, unknown>).result);
+  const text = String(raw).trim();
+  if (!text) return false;
+  // Strip currency symbols, separators, parens, percent — same as cellNumber
+  const stripped = text.replace(/[\s,.$€£¥%()\-٬]/g, '').replace(/[ًٌٍَُِّْـ]/g, '');
+  return /^[\d٠-٩۰-۹.]+$/.test(stripped) && stripped.length > 0;
+}
+
 function cleanHeader(raw: string): string {
   return normalizeText(raw).replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function tokenScore(raw: string, token: string): number {
-  const text = cleanHeader(raw);
-  const wanted = cleanHeader(token);
+function tokenScore(raw: string, token: string, cache: Map<string, string>): number {
+  const text = cache.get(raw) ?? cleanHeader(raw);
+  cache.set(raw, text);
+  const wanted = cache.get(token) ?? cleanHeader(token);
+  cache.set(token, wanted);
   if (!text || !wanted) return 0;
   if (text === wanted) return 8;
   if (wanted.length >= 4 && text.includes(wanted)) return 5;
@@ -89,10 +111,10 @@ function tokenScore(raw: string, token: string): number {
   return 0;
 }
 
-function bestFieldForHeader(text: string): { field: Field; score: number } | null {
+function bestFieldForHeader(text: string, cache: Map<string, string>): { field: Field; score: number } | null {
   let best: { field: Field; score: number } | null = null;
   for (const [field, tokens] of Object.entries(HEADER_TOKENS) as [Field, string[]][]) {
-    const score = Math.max(0, ...tokens.map((token) => tokenScore(text, token)));
+    const score = Math.max(0, ...tokens.map((token) => tokenScore(text, token, cache)));
     if (score > 0 && (!best || score > best.score)) best = { field, score };
   }
   return best;
@@ -117,13 +139,14 @@ function detectHeaders(sheet: ExcelJS.Worksheet): HeaderHit[] {
   const hits: HeaderHit[] = [];
   const last = Math.min(sheet.rowCount, MAX_HEADER_SCAN);
   const maxCol = Math.min(Math.max(sheet.columnCount, sheet.actualColumnCount), MAX_INFER_COLUMNS);
+  const cleanCache = new Map<string, string>();
 
   for (let start = 1; start <= last; start++) {
     for (let span = 1; span <= MAX_HEADER_SPAN && start + span - 1 <= last; span++) {
       const end = start + span - 1;
       const choices = new Map<Field, { col: number; score: number }>();
       for (let col = 1; col <= maxCol; col++) {
-        const choice = bestFieldForHeader(combinedHeaderText(sheet, start, end, col));
+        const choice = bestFieldForHeader(combinedHeaderText(sheet, start, end, col), cleanCache);
         if (!choice) continue;
         const current = choices.get(choice.field);
         if (!current || choice.score > current.score) choices.set(choice.field, { col, score: choice.score });
@@ -167,6 +190,7 @@ interface RowShape {
 
 function rowShape(sheet: ExcelJS.Worksheet, rowNumber: number): RowShape {
   const row = sheet.getRow(rowNumber);
+  if (row.hidden) return { row: rowNumber, nonEmpty: 0, textCells: 0, numericCells: 0, unitCells: 0, longestText: 0 };
   let nonEmpty = 0;
   let textCells = 0;
   let numericCells = 0;
@@ -177,7 +201,7 @@ function rowShape(sheet: ExcelJS.Worksheet, rowNumber: number): RowShape {
     if (!text && cellNumber(cell.value) === null) return;
     nonEmpty++;
     const number = cellNumber(cell.value);
-    if (number !== null && text.replace(/[\s,.$€£¥%()\-]/g, '').match(/^\d+(\.\d+)?$/)) {
+    if (number !== null && isNumericLike(cell.value)) {
       numericCells++;
     } else if (text) {
       textCells++;
@@ -197,21 +221,21 @@ interface DataBlock { start: number; end: number; rows: number[]; }
 
 function findDataBlock(sheet: ExcelJS.Worksheet, minRow = 1): DataBlock | null {
   const candidates: number[] = [];
-  for (let row = Math.max(1, minRow); row <= sheet.rowCount; row++) {
+  for (let row = Math.max(1, minRow); row <= Math.min(sheet.rowCount, MAX_DATA_ROW); row++) {
     if (isDataLike(rowShape(sheet, row))) candidates.push(row);
   }
-  if (candidates.length < 2) return null;
+  if (candidates.length < 1) return null;
 
   const groups: number[][] = [];
   let current: number[] = [];
   for (const row of candidates) {
-    if (current.length === 0 || row - current[current.length - 1] <= 4) current.push(row);
+    if (current.length === 0 || row - current[current.length - 1]! <= 4) current.push(row);
     else { groups.push(current); current = [row]; }
   }
   if (current.length) groups.push(current);
-  const best = groups.sort((a, b) => b.length - a.length || (b[b.length - 1] - b[0]) - (a[a.length - 1] - a[0]))[0];
-  if (!best || best.length < 2) return null;
-  return { start: best[0], end: best[best.length - 1], rows: best };
+  const best = groups.sort((a, b) => b.length - a.length || (b[b.length - 1]! - b[0]!) - (a[a.length - 1]! - a[0]!))[0];
+  if (!best || best.length < 1) return null;
+  return { start: best[0]!, end: best[best.length - 1]!, rows: best };
 }
 
 interface ColumnStats {
@@ -236,12 +260,13 @@ function profileColumns(sheet: ExcelJS.Worksheet, rows: number[]): ColumnStats[]
   for (const rowNumber of rows) {
     const row = sheet.getRow(rowNumber);
     for (const stat of stats) {
+      if (sheet.getColumn(stat.col).hidden) continue;
       const value = row.getCell(stat.col).value;
       const text = cellText(value).trim();
       const number = cellNumber(value);
       if (!text && number === null) continue;
       stat.nonEmpty++;
-      if (number !== null && text.replace(/[\s,.$€£¥%()\-]/g, '').match(/^\d+(\.\d+)?$/)) {
+      if (number !== null && isNumericLike(value)) {
         stat.numeric++;
         stat.numbers.push(number);
         if (Number.isInteger(number)) stat.integerNumbers++;
@@ -261,7 +286,7 @@ function median(values: number[]): number {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
 function inferArithmeticColumns(
@@ -273,7 +298,7 @@ function inferArithmeticColumns(
   for (let i = 0; i < numericCols.length; i++) {
     for (let j = i + 1; j < numericCols.length; j++) {
       for (let k = 0; k < numericCols.length; k++) {
-        const a = numericCols[i], b = numericCols[j], total = numericCols[k];
+        const a = numericCols[i]!, b = numericCols[j]!, total = numericCols[k]!;
         if (total === a || total === b) continue;
         let compared = 0;
         let matched = 0;
@@ -294,7 +319,12 @@ function inferArithmeticColumns(
         if (!best || score > best.score) {
           const aValues = rows.map((r) => cellNumber(sheet.getRow(r).getCell(a).value)).filter((v): v is number => v !== null);
           const bValues = rows.map((r) => cellNumber(sheet.getRow(r).getCell(b).value)).filter((v): v is number => v !== null);
-          const qty = median(aValues) <= median(bValues) ? a : b;
+          const aIntegers = aValues.filter(v => Number.isInteger(v)).length;
+          const bIntegers = bValues.filter(v => Number.isInteger(v)).length;
+          const aMedian = median(aValues);
+          const bMedian = median(bValues);
+          // Prefer the column with more integers as qty; break ties by smaller median
+          const qty = aIntegers > bIntegers ? a : bIntegers > aIntegers ? b : (aMedian <= bMedian ? a : b);
           best = { qty, rate: qty === a ? b : a, total, score };
         }
       }
@@ -312,7 +342,7 @@ function inferMapping(
   if (!stats.length) return null;
 
   const description = seed?.description || stats
-    .filter((s) => s.text >= 2)
+    .filter((s) => s.text >= 1)
     .sort((a, b) => {
       const score = (s: ColumnStats) => {
         const avg = s.textLength / Math.max(1, s.text);
@@ -343,7 +373,7 @@ function inferMapping(
   if (total === null && unused.length) total = unused.pop()!.col;
 
   const code = seed?.code ?? stats
-    .filter((s) => s.col !== description && s.col !== unit && s.col !== seed?.remarks && s.text >= 2)
+    .filter((s) => s.col !== description && s.col !== unit && s.col !== seed?.remarks && s.text >= 1)
     .sort((a, b) => {
       const score = (s: ColumnStats) => s.codeLike * (s.distinct.size / Math.max(1, s.text)) - s.textLength / Math.max(1, s.text) * 0.05;
       return score(b) - score(a);
@@ -356,7 +386,11 @@ function inferMapping(
 }
 
 function isHeaderLike(text: string): boolean {
-  return bestFieldForHeader(text) !== null;
+  const normalized = normalizeText(text);
+  if (normalized.length > 40) return false;
+  const choice = bestFieldForHeader(text, headerTokenCache);
+  if (!choice) return false;
+  return choice.score >= 6;
 }
 
 function isSummaryDescription(text: string): boolean {
@@ -408,8 +442,9 @@ function extractItems(
 ): BoqItem[] {
   const items: BoqItem[] = [];
   let pendingComments: string[] = [];
-  for (let r = startRow; r <= endRow; r++) {
+  for (let r = startRow; r <= Math.min(endRow, MAX_DATA_ROW); r++) {
     const row = sheet.getRow(r);
+    if (row.hidden) continue; // hidden rows are excluded from BOQ extraction
     const get = (col: number | null) => col === null ? null : row.getCell(col).value;
     const description = cellText(get(mapping.description)).trim();
     const remarks = mapping.remarks !== null ? cellText(get(mapping.remarks)).trim() : '';
@@ -418,25 +453,26 @@ function extractItems(
     const explicitComment = isExplicitComment(description);
     if (!description || (isHeaderLike(description) && !explicitComment) || isSummaryDescription(description)) {
       if (rowComments.length) {
-        if (items.length) addComments(items[items.length - 1], rowComments);
+        if (items.length) addComments(items[items.length - 1]!, rowComments);
         else pendingComments = uniqueComments([...pendingComments, ...rowComments]);
       }
       continue;
     }
 
     const codeText = mapping.code !== null ? cellText(get(mapping.code)).trim() : '';
+    const hasUnitColumn = mapping.unit !== null;
     const rawUnit = get(mapping.unit);
-    const unitLabel = cellText(rawUnit).trim();
-    const unit = canonicalUnit(rawUnit);
+    const unitLabel = hasUnitColumn ? cellText(rawUnit).trim() : 'other';
+    const unit: Unit = hasUnitColumn ? canonicalUnit(rawUnit) : 'other';
     const qty = cellNumber(get(mapping.qty));
     let rate = cellNumber(get(mapping.rate));
     let total = cellNumber(get(mapping.total));
 
-    // Procurement items must be complete enough to quantify: description + source unit + positive source quantity.
-    if (!unitLabel || qty === null || qty <= 0) {
+    // Procurement items must have a description and a source quantity (negative quantities represent deductions and are kept).
+    if ((hasUnitColumn && !unitLabel) || qty === null) {
       const comments = uniqueComments([...(explicitComment ? [description] : []), ...rowComments]);
       if (comments.length) {
-        if (items.length) addComments(items[items.length - 1], comments);
+        if (items.length) addComments(items[items.length - 1]!, comments);
         else pendingComments = uniqueComments([...pendingComments, ...comments]);
       }
       continue;
@@ -460,7 +496,7 @@ function extractItems(
     pendingComments = [];
     items.push(item);
   }
-  if (pendingComments.length && items.length) addComments(items[items.length - 1], pendingComments);
+  if (pendingComments.length && items.length) addComments(items[items.length - 1]!, pendingComments);
   return items;
 }
 
@@ -474,7 +510,7 @@ interface SheetCandidate {
 }
 
 function candidateScore(items: BoqItem[], mapping: ColumnMapping, lexicalScore: number): number {
-  if (items.length < 2) return -Infinity;
+  if (items.length < 1) return -Infinity;
   const priced = items.filter((i) => i.total !== null || i.rate !== null).length;
   const distinct = new Set(items.map((i) => normalizeText(i.description))).size;
   const duplicatePenalty = Math.max(0, items.length - distinct) * 3;
@@ -488,7 +524,7 @@ function analyzeSheet(sheet: ExcelJS.Worksheet): SheetCandidate | null {
     const block = findDataBlock(sheet, hit.row + 1);
     if (!block) continue;
     const mapping = inferMapping(sheet, block, hit.mapping) ?? hit.mapping;
-    const items = extractItems(sheet, mapping, hit.row + 1, Math.max(block.end, sheet.rowCount));
+    const items = extractItems(sheet, mapping, hit.row + 1, Math.min(block.end + 5, MAX_DATA_ROW));
     const score = candidateScore(items, mapping, hit.lexicalScore);
     if (!best || score > best.score) {
       best = { sheet, headerRow: hit.row, mapping, items, score, inferred: false };
@@ -500,7 +536,7 @@ function analyzeSheet(sheet: ExcelJS.Worksheet): SheetCandidate | null {
   if (block) {
     const mapping = inferMapping(sheet, block);
     if (mapping) {
-      const items = extractItems(sheet, mapping, block.start, Math.max(block.end, sheet.rowCount));
+      const items = extractItems(sheet, mapping, block.start, Math.min(block.end + 5, MAX_DATA_ROW));
       const score = candidateScore(items, mapping, 0);
       if (!best || score > best.score) {
         best = { sheet, headerRow: Math.max(0, block.start - 1), mapping, items, score, inferred: true };
@@ -512,7 +548,7 @@ function analyzeSheet(sheet: ExcelJS.Worksheet): SheetCandidate | null {
 
 export async function inspectWorkbook(bytes: ArrayBuffer | Uint8Array, fileName: string): Promise<InspectionResult> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(bytes as ArrayBuffer);
+  await wb.xlsx.load(bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes);
 
   const candidates: SheetCandidate[] = [];
   wb.eachSheet((sheet) => {
@@ -535,6 +571,9 @@ export async function inspectWorkbook(bytes: ArrayBuffer | Uint8Array, fileName:
     warnings.push('No total column detected — totals were computed as quantity × rate.');
   }
   if (best.mapping.confidence < 0.6) warnings.push('Low structural confidence — review validation warnings before generating.');
+  if (best.sheet.rowCount > MAX_DATA_ROW) {
+    warnings.push(`Sheet has ${best.sheet.rowCount} rows — only the first ${MAX_DATA_ROW} were scanned.`);
+  }
 
   const projectCandidates: ProjectNameCandidate[] = [];
   if (wb.title) projectCandidates.push({ text: wb.title, source: 'workbook-metadata', prominence: 0.9, order: 0 });

@@ -31,7 +31,7 @@ available without a provider.
 ## Update Checks
 
 At every startup and when requested from About, Tawreed makes an unauthenticated
-HTTPS request to GitHub's latest-release API for `sfkareem/tawreed`. GitHub may
+HTTPS request to GitHub's latest-release API for `kareem-sf/tawreed`. GitHub may
 observe standard request metadata such as IP address, time, application user
 agent, and network headers. Tawreed sends no BOQ content, filenames, project
 metadata, history, API keys, or persistent application identifier.

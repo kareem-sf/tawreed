@@ -87,7 +87,7 @@ export async function noTotalFixture(): Promise<Uint8Array> {
 export async function largeFixture(n: number): Promise<Uint8Array> {
   const rows: FixtureRow[] = [];
   for (let i = 0; i < n; i++) {
-    const src = EN_ROWS[i % 10];
+    const src = EN_ROWS[i % 10]!;
     rows.push({ ...src, code: `L${i}`, description: `${src.description} — zone ${i % 12}`, qty: 10 + (i % 50) });
   }
   return makeWorkbook({ rows, headers: ['Item', 'Description', 'Unit', 'Qty', 'Rate', 'Total'] });

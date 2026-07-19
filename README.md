@@ -29,7 +29,7 @@ The supported release packages are:
 - Linux x64: `Tawreed-Linux-x64.AppImage` or `Tawreed-Linux-x64.deb`
 - macOS Intel and Apple Silicon: `Tawreed-macOS-universal.dmg`
 
-Download them from [GitHub Releases](https://github.com/sfkareem/tawreed/releases).
+Download them from [GitHub Releases](https://github.com/kareem-sf/tawreed/releases).
 Version `0.2.0` does not use commercial platform signing, so Windows SmartScreen
 or macOS Gatekeeper may display a warning. Each release includes SHA-256
 checksums and GitHub build provenance. See
@@ -48,7 +48,7 @@ Requirements:
 
 - Windows x64, Linux x64, or macOS 12+ on Intel or Apple Silicon
 - Node.js 24
-- Rust 1.97.0 with the target for the current platform
+- Rust 1.80+ (CI uses 1.97.0) with the target for the current platform
 - Platform-native Tauri build dependencies documented by Tauri
 
 ```powershell
@@ -58,6 +58,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run tauri -- build --no-bundle --ci -- --locked
+npm audit --audit-level=high --omit=dev
+cargo install cargo-audit --locked && cargo audit -f src-tauri/Cargo.lock
 ```
 
 Run the desktop application during development with `npm run tauri -- dev`.

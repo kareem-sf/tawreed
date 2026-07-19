@@ -2,8 +2,8 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-const RELEASE_API: &str = "https://api.github.com/repos/sfkareem/tawreed/releases/latest";
-const RELEASE_PAGE_ROOT: &str = "https://github.com/sfkareem/tawreed/releases/tag";
+const RELEASE_API: &str = "https://api.github.com/repos/kareem-sf/tawreed/releases/latest";
+const RELEASE_PAGE_ROOT: &str = "https://github.com/kareem-sf/tawreed/releases/tag";
 #[cfg(target_os = "windows")]
 const PLATFORM_ASSET: &str = "Tawreed-Windows-x64.exe";
 #[cfg(target_os = "linux")]
@@ -268,7 +268,7 @@ mod tests {
     fn constructs_only_the_canonical_official_release_page() {
         assert_eq!(
             update_release_url("1.2.3").unwrap(),
-            "https://github.com/sfkareem/tawreed/releases/tag/v1.2.3"
+            "https://github.com/kareem-sf/tawreed/releases/tag/v1.2.3"
         );
         for version in ["v1.2.3", "1.2", "1.2.3/other", "1.2.3-beta.1"] {
             assert_eq!(update_release_url(version), Err("invalid_release".into()));

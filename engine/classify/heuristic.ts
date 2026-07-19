@@ -5,6 +5,14 @@ import { TAXONOMY } from './taxonomy';
 
 const MIN_SCORE = 2; // below this → unclassified (goes to LLM or fallback)
 
+/** Word-boundary-aware match: long keywords are safe for substring, short ones need a token match. */
+function matchesKeyword(text: string, kw: string): boolean {
+  if (kw.length >= 6) return text.includes(kw); // long keywords are safe for substring
+  // For short keywords, require word-boundary match (exact token or prefix).
+  const tokens = text.split(/\s+/);
+  return tokens.some((t) => t === kw || t.startsWith(kw));
+}
+
 function score(item: BoqItem): { packageCode: string; confidence: number; hits: number } {
   const text = normalizeText(item.description + ' ' + item.code);
   let bestCode = '';
@@ -12,8 +20,9 @@ function score(item: BoqItem): { packageCode: string; confidence: number; hits: 
   let secondHits = 0;
   for (const pkg of TAXONOMY) {
     let hits = 0;
-    for (const kw of pkg.keywords) {
-      if (text.includes(kw)) hits += kw.length >= 5 ? 2 : 1; // longer matches are more specific
+    // Deduplicate: distinct raw keywords can normalize to the same string (e.g. خرسانه/خرسانة).
+    for (const kw of new Set(pkg.keywords)) {
+      if (matchesKeyword(text, kw)) hits += kw.length >= 5 ? 2 : 1; // longer matches are more specific
     }
     if (hits > bestHits) { secondHits = bestHits; bestHits = hits; bestCode = pkg.code; }
     else if (hits > secondHits) secondHits = hits;

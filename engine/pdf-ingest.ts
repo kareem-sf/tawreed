@@ -56,14 +56,27 @@ function clean(value: unknown): string {
 }
 
 function groupLines(tokens: PositionedToken[]): PositionedLine[] {
-  const sorted = [...tokens].filter((token) => token.text).sort((a, b) => a.y - b.y || a.x - b.x);
+  const sorted = [...tokens].filter((token) => token.text).sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x);
   const lines: PositionedToken[][] = [];
+  const BUCKET_SIZE = 3;
+  const bucketMap = new Map<number, PositionedToken[]>();
   for (const token of sorted) {
     const tolerance = Math.max(3, token.height * 0.45);
-    let line = lines.find((candidate) => Math.abs(candidate[0].y - token.y) <= tolerance);
+    const bucketKey = token.page * 100000 + Math.round(token.y / BUCKET_SIZE);
+    const range = Math.ceil(tolerance / BUCKET_SIZE);
+    let line: PositionedToken[] | undefined;
+    for (let b = bucketKey - range; b <= bucketKey + range; b++) {
+      const candidate = bucketMap.get(b);
+      const first = candidate?.[0];
+      if (first && first.page === token.page && Math.abs(first.y - token.y) <= tolerance) {
+        line = candidate;
+        break;
+      }
+    }
     if (!line) {
       line = [];
       lines.push(line);
+      bucketMap.set(bucketKey, line);
     }
     line.push(token);
   }
@@ -85,7 +98,7 @@ function groupLines(tokens: PositionedToken[]): PositionedLine[] {
         }
       }
       return {
-        page: line[0].page,
+        page: line[0]!.page,
         y: line.reduce((sum, token) => sum + token.y, 0) / line.length,
         cells,
         fontSize: Math.max(...line.map((token) => token.fontSize)),
@@ -171,52 +184,38 @@ async function ocrPageTokens(
   page: any,
   pageNumber: number,
   total: number,
+  worker: any,
   onProgress?: (progress: PdfProgress) => void,
 ): Promise<PositionedToken[]> {
   if (typeof OffscreenCanvas === 'undefined') {
     throw new Error('Scanned PDF OCR requires a WebView with OffscreenCanvas support.');
   }
-  const viewport = page.getViewport({ scale: 2 });
+  const baseViewport = page.getViewport({ scale: 1 });
+  const maxDim = Math.max(baseViewport.width, baseViewport.height);
+  const scale = maxDim > 0 ? Math.min(2, 3000 / maxDim) : 1;
+  const viewport = page.getViewport({ scale });
   const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Could not create an OCR canvas.');
   await page.render({ canvasContext: context as any, viewport }).promise;
 
-  const Tesseract = await import('tesseract.js');
-  const origin = self.location.origin.endsWith('/') ? self.location.origin : `${self.location.origin}/`;
-  const worker = await Tesseract.createWorker(['eng', 'ara'], Tesseract.OEM.LSTM_ONLY, {
-    workerPath: new URL('ocr/worker.min.js', origin).href,
-    langPath: new URL('ocr/lang', origin).href,
-    corePath: new URL('ocr/core', origin).href,
-    workerBlobURL: false,
-    logger: (message) => onProgress?.({
-      phase: 'ocr',
-      page: pageNumber,
-      total,
-      progress: message.progress,
-    }),
-  });
-  try {
-    await worker.setParameters({
-      tessedit_pageseg_mode: Tesseract.PSM.AUTO,
-      preserve_interword_spaces: '1',
-    });
-    const result = await worker.recognize(canvas, {}, { blocks: true, text: true });
-    const words = (result.data.blocks ?? []).flatMap((block) =>
-      block.paragraphs.flatMap((paragraph) => paragraph.lines.flatMap((line) => line.words)),
-    );
-    return words.filter((word) => clean(word.text)).map((word) => ({
-      text: clean(word.text),
-      x: word.bbox.x0,
-      y: word.bbox.y0,
-      width: Math.max(1, word.bbox.x1 - word.bbox.x0),
-      height: Math.max(1, word.bbox.y1 - word.bbox.y0),
-      page: pageNumber,
-      fontSize: Math.max(8, word.bbox.y1 - word.bbox.y0),
-    }));
-  } finally {
-    await worker.terminate();
-  }
+  const result = await worker.recognize(canvas, {}, { blocks: true, text: true });
+  const words = (result.data.blocks ?? []).flatMap((block: any) =>
+    block.paragraphs.flatMap((paragraph: any) => paragraph.lines.flatMap((line: any) => line.words)),
+  );
+  // Release the canvas bitmap to free memory in long OCR runs
+  canvas.width = 0;
+  canvas.height = 0;
+
+  return words.filter((word: any) => clean(word.text)).map((word: any) => ({
+    text: clean(word.text),
+    x: word.bbox.x0,
+    y: word.bbox.y0,
+    width: Math.max(1, word.bbox.x1 - word.bbox.x0),
+    height: Math.max(1, word.bbox.y1 - word.bbox.y0),
+    page: pageNumber,
+    fontSize: Math.max(8, word.bbox.y1 - word.bbox.y0),
+  }));
 }
 
 export async function inspectPdf(
@@ -239,106 +238,141 @@ export async function inspectPdf(
     wasmUrl: nodeRuntime ? undefined : new URL('pdfjs/wasm/', origin).href,
   });
   let pdf: any;
-  try {
-    pdf = await loadingTask.promise;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/password/i.test(message)) throw new Error('Password-protected PDFs are not supported. Remove the password and try again.');
-    throw new Error(`Could not open PDF: ${message}`);
-  }
-  if (pdf.numPages > 250) throw new Error('PDF exceeds the 250-page processing limit.');
-
   const tokens: PositionedToken[] = [];
   const annotations: PdfAnnotation[] = [];
   const projectCandidates: ProjectNameCandidate[] = [];
   let ocrPages = 0;
+  let ocrWorker: any = null;
+  let ocrCurrentPage = 0;
 
-  const metadata = await pdf.getMetadata().catch(() => null);
-  const info = metadata?.info as Record<string, unknown> | undefined;
-  if (info?.Title) projectCandidates.push({ text: clean(info.Title), source: 'document-metadata', prominence: 1, order: 0 });
-  if (info?.Subject) projectCandidates.push({ text: clean(info.Subject), source: 'document-metadata', prominence: 0.7, order: 1 });
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-    options.onProgress?.({ phase: 'pdf', page: pageNumber, total: pdf.numPages });
-    const page = await pdf.getPage(pageNumber);
-    let pageTokens = await nativePageTokens(page, pageNumber);
-    const nativeText = pageTokens.map((token) => token.text).join(' ');
-    let usedOcr = false;
-    if (options.enableOcr !== false && (pageTokens.length < 8 || nativeText.length < 80)) {
-      pageTokens = await ocrPageTokens(page, pageNumber, pdf.numPages, options.onProgress);
-      ocrPages++;
-      usedOcr = true;
+  try {
+    try {
+      pdf = await loadingTask.promise;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/password/i.test(message)) throw new Error('Password-protected PDFs are not supported. Remove the password and try again.');
+      throw new Error(`Could not open PDF: ${message}`);
     }
-    tokens.push(...pageTokens);
+    if (pdf.numPages > 250) throw new Error('PDF exceeds the 250-page processing limit.');
 
-    const pageHeight = page.view[3] - page.view[1];
-    const pageAnnotations = await page.getAnnotations({ intent: 'display' }).catch(() => []);
-    for (const annotation of pageAnnotations as Array<Record<string, unknown>>) {
-      const text = annotationText(annotation);
-      const filtered = filterMeaningfulComments([text]);
-      if (!filtered.length) continue;
-      const rect = Array.isArray(annotation.rect) ? annotation.rect as number[] : [];
-      annotations.push({ text: filtered[0], page: pageNumber, y: rect.length >= 4 ? pageHeight - rect[3] : pageHeight / 2 });
+    const metadata = await pdf.getMetadata().catch(() => null);
+    const info = metadata?.info as Record<string, unknown> | undefined;
+    if (info?.Title) projectCandidates.push({ text: clean(info.Title), source: 'document-metadata', prominence: 1, order: 0 });
+    if (info?.Subject) projectCandidates.push({ text: clean(info.Subject), source: 'document-metadata', prominence: 0.7, order: 1 });
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      options.onProgress?.({ phase: 'pdf', page: pageNumber, total: pdf.numPages });
+      const page = await pdf.getPage(pageNumber);
+      try {
+        let pageTokens = await nativePageTokens(page, pageNumber);
+        const nativeText = pageTokens.map((token) => token.text).join(' ');
+        let usedOcr = false;
+        if (options.enableOcr !== false && !nodeRuntime && (pageTokens.length < 8 || nativeText.length < 80)) {
+          if (!ocrWorker) {
+            const Tesseract = await import('tesseract.js');
+            const ocrOrigin = self.location.origin.endsWith('/') ? self.location.origin : `${self.location.origin}/`;
+            ocrWorker = await Tesseract.createWorker(['eng', 'ara'], Tesseract.OEM.LSTM_ONLY, {
+              workerPath: new URL('ocr/worker.min.js', ocrOrigin).href,
+              langPath: new URL('ocr/lang', ocrOrigin).href,
+              corePath: new URL('ocr/core', ocrOrigin).href,
+              workerBlobURL: false,
+              logger: (message) => options.onProgress?.({
+                phase: 'ocr',
+                page: ocrCurrentPage,
+                total: pdf.numPages,
+                progress: message.progress,
+              }),
+            });
+            await ocrWorker.setParameters({
+              tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+              preserve_interword_spaces: '1',
+            });
+          }
+          try {
+            ocrCurrentPage = pageNumber;
+            pageTokens = await ocrPageTokens(page, pageNumber, pdf.numPages, ocrWorker, options.onProgress);
+            ocrPages++;
+            usedOcr = true;
+          } catch {
+            // OCR failed for this page — keep the sparse native tokens
+          }
+        }
+        tokens.push(...pageTokens);
+
+        const pageHeight = page.view[3] - page.view[1];
+        const pageAnnotations = await page.getAnnotations({ intent: 'display' }).catch(() => []);
+        for (const annotation of pageAnnotations as Array<Record<string, unknown>>) {
+          const text = annotationText(annotation);
+          const filtered = filterMeaningfulComments([text]);
+          if (!filtered.length) continue;
+          const rect = Array.isArray(annotation.rect) ? annotation.rect as number[] : [];
+          annotations.push({ text: filtered[0]!, page: pageNumber, y: rect.length >= 4 ? pageHeight - rect[3]! : pageHeight / 2 });
+        }
+
+        if (pageNumber <= 3) {
+          const pageLines = groupLines(pageTokens).slice(0, 25);
+          pageLines.forEach((line, index) => {
+            const text = line.cells.map((cell) => cell.text).join(' ').trim();
+            if (text) projectCandidates.push({
+              text,
+              source: usedOcr ? 'ocr' : 'title',
+              order: pageNumber * 100 + index,
+              fontSize: line.fontSize,
+              prominence: Math.min(1, line.fontSize / 24 + (index < 8 ? 0.2 : 0)),
+            });
+          });
+        }
+      } finally {
+        page.cleanup();
+      }
     }
 
-    if (pageNumber <= 3) {
-      const pageLines = groupLines(pageTokens).slice(0, 25);
-      pageLines.forEach((line, index) => {
-        const text = line.cells.map((cell) => cell.text).join(' ').trim();
-        if (text) projectCandidates.push({
-          text,
-          source: usedOcr ? 'ocr' : 'title',
-          order: pageNumber * 100 + index,
-          fontSize: line.fontSize,
-          prominence: Math.min(1, line.fontSize / 24 + (index < 8 ? 0.2 : 0)),
-        });
-      });
+    options.onProgress?.({ phase: 'analyze', page: pdf.numPages, total: pdf.numPages });
+    const lines = groupLines(tokens);
+    const { rows, rowSources } = linesToGrid(lines);
+    const synthetic = new ExcelJS.Workbook();
+    const sheet = synthetic.addWorksheet('PDF BOQ');
+    rows.forEach((row) => sheet.addRow(row));
+    const syntheticBytes = new Uint8Array(await synthetic.xlsx.writeBuffer() as ArrayBuffer);
+    const result = await inspectWorkbook(syntheticBytes, fileName);
+
+    const itemPositions = result.items.map((item) => ({ item, source: rowSources.get(item.row) }));
+    const annotationAssignments = new Map<number, string[]>();
+    for (const annotation of annotations) {
+      const nearest = itemPositions
+        .filter((candidate) => candidate.source?.page === annotation.page)
+        .map((candidate) => ({ candidate, distance: Math.abs(annotation.y - (candidate.source?.y ?? annotation.y)) }))
+        .sort((a, b) => a.distance - b.distance)[0];
+      if (!nearest || nearest.distance > 100) continue; // don't assign annotations more than 100 units away
+      const current = annotationAssignments.get(nearest.candidate.item.id) ?? [];
+      current.push(annotation.text);
+      annotationAssignments.set(nearest.candidate.item.id, current);
     }
-    page.cleanup();
-  }
+    for (const { item, source } of itemPositions) {
+      if (source) item.page = source.page;
+      const assigned = annotationAssignments.get(item.id) ?? [];
+      if (assigned.length) item.comments = filterMeaningfulComments([...(item.comments ?? []), ...assigned]);
+    }
 
-  options.onProgress?.({ phase: 'analyze', page: pdf.numPages, total: pdf.numPages });
-  const lines = groupLines(tokens);
-  const { rows, rowSources } = linesToGrid(lines);
-  const synthetic = new ExcelJS.Workbook();
-  const sheet = synthetic.addWorksheet('PDF BOQ');
-  rows.forEach((row) => sheet.addRow(row));
-  const syntheticBytes = new Uint8Array(await synthetic.xlsx.writeBuffer() as ArrayBuffer);
-  const result = await inspectWorkbook(syntheticBytes, fileName);
-
-  const itemPositions = result.items.map((item) => ({ item, source: rowSources.get(item.row) }));
-  const annotationAssignments = new Map<number, string[]>();
-  for (const annotation of annotations) {
-    const nearest = itemPositions
-      .filter((candidate) => candidate.source?.page === annotation.page)
-      .map((candidate) => ({ candidate, distance: Math.abs(annotation.y - (candidate.source?.y ?? annotation.y)) }))
-      .sort((a, b) => a.distance - b.distance)[0];
-    if (!nearest) continue;
-    const current = annotationAssignments.get(nearest.candidate.item.id) ?? [];
-    current.push(annotation.text);
-    annotationAssignments.set(nearest.candidate.item.id, current);
+    const project = detectProjectName(projectCandidates, fileName);
+    const language = detectDocumentLanguage([
+      project.value,
+      ...result.items.slice(0, 100).flatMap((item) => [item.description, ...(item.comments ?? [])]),
+    ]);
+    return {
+      ...result,
+      sourceKind: 'pdf',
+      projectName: project.value,
+      projectNameConfidence: project.confidence,
+      projectNameCandidates: [...new Set(projectCandidates.map((candidate) => candidate.text.trim()).filter(Boolean))].slice(0, 40),
+      language,
+      pageCount: pdf.numPages,
+      ocrPages,
+      annotationCount: annotations.length,
+      sheetName: 'PDF BOQ',
+    };
+  } finally {
+    if (ocrWorker) await ocrWorker.terminate().catch(() => {});
+    await loadingTask.destroy().catch(() => {});
   }
-  for (const { item, source } of itemPositions) {
-    if (source) item.page = source.page;
-    const assigned = annotationAssignments.get(item.id) ?? [];
-    if (assigned.length) item.comments = filterMeaningfulComments([...(item.comments ?? []), ...assigned]);
-  }
-
-  const project = detectProjectName(projectCandidates, fileName);
-  const language = detectDocumentLanguage([
-    project.value,
-    ...result.items.slice(0, 100).flatMap((item) => [item.description, ...(item.comments ?? [])]),
-  ]);
-  return {
-    ...result,
-    sourceKind: 'pdf',
-    projectName: project.value,
-    projectNameConfidence: project.confidence,
-    projectNameCandidates: [...new Set(projectCandidates.map((candidate) => candidate.text.trim()).filter(Boolean))].slice(0, 40),
-    language,
-    pageCount: pdf.numPages,
-    ocrPages,
-    annotationCount: annotations.length,
-    sheetName: 'PDF BOQ',
-  };
 }

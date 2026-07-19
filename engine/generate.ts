@@ -42,7 +42,10 @@ function safeSheetName(raw: string, used: Set<string>): string {
   let base = raw.replace(/[[\]:*?/\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || 'Sheet';
   let name = base;
   let suffix = 2;
-  while (used.has(name)) name = `${base.slice(0, 28)}-${suffix++}`;
+  while (used.has(name)) {
+    const suffixStr = String(suffix++);
+    name = `${base.slice(0, 31 - suffixStr.length - 1)}-${suffixStr}`;
+  }
   used.add(name);
   return name;
 }
@@ -104,7 +107,7 @@ function configurePrint(ws: ExcelJS.Worksheet, projectName: string, printArea: s
   ws.pageSetup.margins = { left: 0.25, right: 0.25, top: 0.45, bottom: 0.4, header: 0.2, footer: 0.2 };
   ws.pageSetup.printArea = printArea;
   if (repeatRows) ws.pageSetup.printTitlesRow = repeatRows;
-  ws.headerFooter.oddHeader = `&C&10${headerSafe(projectName)}`;
+  ws.headerFooter.oddHeader = `&C&10 ${headerSafe(projectName)}`;
   ws.headerFooter.evenHeader = ws.headerFooter.oddHeader;
   ws.headerFooter.oddFooter = '&LTawreed · kareemsafwat.com&RPage &P of &N';
   ws.headerFooter.evenFooter = ws.headerFooter.oddFooter;
@@ -132,7 +135,10 @@ function applyTextDirection(cell: ExcelJS.Cell, value: string, defaultArabic: bo
 }
 
 function calculatedItemTotal(item: BoqItem): number {
-  return Math.round(item.qty * (item.rate ?? 0) * 100) / 100;
+  if (item.total !== null && Number.isFinite(item.total)) return item.total;
+  const qty = Number.isFinite(item.qty) ? item.qty : 0;
+  const rate = item.rate !== null && Number.isFinite(item.rate) ? item.rate : 0;
+  return Math.round(qty * rate * 100) / 100;
 }
 
 interface PackageSheetInfo {
@@ -201,16 +207,22 @@ function addPackageSheet(
     const remarks = comments.join('\n');
     const result = calculatedItemTotal(item);
     calculatedTotal += result;
+    const qty = Number.isFinite(item.qty) ? item.qty : 0;
+    const rate = item.rate !== null && Number.isFinite(item.rate) ? item.rate : null;
     const row = ws.addRow([
       item.code,
       item.description,
       item.unitLabel || item.unit,
-      item.qty,
-      item.rate,
+      qty,
+      rate,
       null,
       remarks || null,
     ]);
-    row.getCell(6).value = { formula: `ROUND(E${row.number}*D${row.number},2)`, result };
+    if (item.total !== null && Number.isFinite(item.total)) {
+      row.getCell(6).value = item.total;
+    } else {
+      row.getCell(6).value = { formula: `ROUND(E${row.number}*D${row.number},2)`, result };
+    }
     row.getCell(4).numFmt = QTY_FMT;
     row.getCell(5).numFmt = MONEY_FMT;
     row.getCell(6).numFmt = MONEY_FMT;
@@ -227,7 +239,11 @@ function addPackageSheet(
   const dataEnd = ws.rowCount;
   const totalRow = ws.addRow([ar ? 'إجمالي الحزمة' : 'PACKAGE TOTAL', null, null, null, null, null, null]);
   ws.mergeCells(totalRow.number, 1, totalRow.number, 5);
-  totalRow.getCell(6).value = { formula: `SUM(F5:F${Math.max(5, dataEnd)})`, result: calculatedTotal };
+  if (dataEnd >= 5) {
+    totalRow.getCell(6).value = { formula: `SUM(F5:F${dataEnd})`, result: calculatedTotal };
+  } else {
+    totalRow.getCell(6).value = 0;
+  }
   totalRow.getCell(6).numFmt = MONEY_FMT;
   totalRow.height = 28;
   totalRow.eachCell({ includeEmpty: true }, (cell) => {
@@ -237,7 +253,7 @@ function addPackageSheet(
     cell.border = { top: { style: 'medium', color: { argb: GOLD } } };
   });
 
-  ws.autoFilter = { from: 'A4', to: 'G4' };
+  ws.autoFilter = { from: 'A4', to: `G${Math.max(4, dataEnd)}` };
   configurePrint(ws, projectName, `A1:G${totalRow.number}`, '1:4');
   return { package: p, sheetName: name, totalRow: totalRow.number, calculatedTotal };
 }
@@ -276,7 +292,7 @@ function populateProjectCover(
   ];
   const kpiRanges = [['A6:A7', 'A6'], ['B6:B7', 'B6'], ['C6:D7', 'C6']] as const;
   kpis.forEach((kpi, index) => {
-    const [range, address] = kpiRanges[index];
+    const [range, address] = kpiRanges[index]!;
     cover.mergeCells(range);
     const cell = cover.getCell(address);
     cell.value = `${kpi.label}\n${index === 2 ? grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : kpi.value}`;
@@ -321,7 +337,11 @@ function populateProjectCover(
   const summaryEnd = cover.rowCount;
   const totalRow = cover.addRow([ar ? 'الإجمالي العام' : 'GRAND TOTAL', null, null, null]);
   cover.mergeCells(totalRow.number, 1, totalRow.number, 2);
-  totalRow.getCell(3).value = { formula: `SUM(C${summaryStart}:C${Math.max(summaryStart, summaryEnd)})`, result: grandTotal };
+  if (summaryEnd >= summaryStart) {
+    totalRow.getCell(3).value = { formula: `SUM(C${summaryStart}:C${summaryEnd})`, result: grandTotal };
+  } else {
+    totalRow.getCell(3).value = 0;
+  }
   totalRow.getCell(3).numFmt = MONEY_FMT;
   totalRow.getCell(4).value = { formula: grandTotal > 0 ? `C${totalRow.number}/C${totalRow.number}` : '0', result: grandTotal > 0 ? 1 : 0 };
   totalRow.getCell(4).numFmt = '0.0%';
@@ -335,7 +355,7 @@ function populateProjectCover(
   for (let rowNumber = summaryStart; rowNumber < totalRow.number; rowNumber++) {
     cover.getCell(`D${rowNumber}`).value = {
       formula: `IFERROR(C${rowNumber}/$C$${totalRow.number},0)`,
-      result: grandTotal > 0 ? packageSheets[rowNumber - summaryStart].calculatedTotal / grandTotal : 0,
+      result: grandTotal > 0 ? packageSheets[rowNumber - summaryStart]!.calculatedTotal / grandTotal : 0,
     };
     cover.getCell(`D${rowNumber}`).numFmt = '0.0%';
   }
@@ -394,18 +414,19 @@ async function workbookBytes(wb: ExcelJS.Workbook): Promise<Uint8Array> {
 }
 
 export async function buildWorkbooks(input: GenerateInput): Promise<GeneratedArtifact[]> {
-  const projectName = safeFileComponent(input.projectName);
-  const ar = containsArabic(projectName) || input.documentLanguage === 'ar';
+  const displayProjectName = input.projectName || 'Untitled Project';
+  const fileProjectName = safeFileComponent(input.projectName);
+  const ar = containsArabic(displayProjectName) || input.documentLanguage === 'ar';
   const byItem = new Map(input.items.map((item) => [item.id, item]));
 
-  const master = createWorkbook(projectName);
+  const master = createWorkbook(displayProjectName);
   const masterNames = new Set<string>();
   const masterCover = master.addWorksheet(safeSheetName('Cover', masterNames), {
     views: [{ rightToLeft: ar, showGridLines: false }],
   });
-  const packageSheets = input.packages.map((p) => addPackageSheet(master, p, byItem, masterNames, projectName, ar));
-  populateProjectCover(masterCover, { ...input, projectName }, packageSheets);
-  const masterName = masterFileName(projectName, input.revision);
+  const packageSheets = input.packages.map((p) => addPackageSheet(master, p, byItem, masterNames, displayProjectName, ar));
+  populateProjectCover(masterCover, { ...input, projectName: displayProjectName }, packageSheets);
+  const masterName = masterFileName(fileProjectName, input.revision);
   const artifacts: GeneratedArtifact[] = [{
     kind: 'master',
     fileName: masterName,
@@ -414,12 +435,12 @@ export async function buildWorkbooks(input: GenerateInput): Promise<GeneratedArt
   }];
 
   for (const p of input.packages) {
-    const wb = createWorkbook(projectName);
+    const wb = createWorkbook(displayProjectName);
     const used = new Set<string>();
     const cover = wb.addWorksheet(safeSheetName('Cover', used), { views: [{ rightToLeft: ar, showGridLines: false }] });
-    const info = addPackageSheet(wb, p, byItem, used, projectName, ar);
-    populateMiniCover(cover, { ...input, projectName }, p, info.calculatedTotal);
-    const fileName = packageFileName(projectName, p, input.revision, ar);
+    const info = addPackageSheet(wb, p, byItem, used, displayProjectName, ar);
+    populateMiniCover(cover, { ...input, projectName: displayProjectName }, p, info.calculatedTotal);
+    const fileName = packageFileName(fileProjectName, p, input.revision, ar);
     artifacts.push({
       kind: 'package',
       packageCode: p.code,
@@ -433,7 +454,7 @@ export async function buildWorkbooks(input: GenerateInput): Promise<GeneratedArt
 
 /** Compatibility helper used by headless callers: returns the master workbook. */
 export async function buildWorkbook(input: GenerateInput): Promise<Uint8Array> {
-  return (await buildWorkbooks({ ...input, revision: input.revision || 1 }))[0].bytes;
+  return (await buildWorkbooks({ ...input, revision: input.revision || 1 }))[0]!.bytes;
 }
 
 export function suggestedFileName(projectName: string, revision = 1): string {

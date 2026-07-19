@@ -145,7 +145,7 @@ export function detectProjectName(
     if (!best || score > best.score) best = { value, score, labeled };
   });
 
-  if (best && (best.labeled || best.score >= 30)) {
+  if (best && (best.labeled || best.score >= 40)) {
     return {
       value: best.value,
       confidence: Math.round(Math.min(0.99, Math.max(0.35, best.score / 110)) * 100) / 100,
@@ -210,10 +210,12 @@ export function detectDocumentLanguage(text: string | readonly unknown[]): Docum
     : String(text ?? '');
   const arabicCount = joined.match(ARABIC_GLOBAL_RE)?.length ?? 0;
   const latinCount = joined.match(LATIN_GLOBAL_RE)?.length ?? 0;
-  if (arabicCount > 0 && latinCount > 0) return 'mixed';
-  if (arabicCount > 0) return 'ar';
-  if (latinCount > 0) return 'en';
-  return 'unknown';
+  const total = arabicCount + latinCount;
+  if (total === 0) return 'unknown';
+  const arabicRatio = arabicCount / total;
+  if (arabicRatio > 0.8) return 'ar';
+  if (arabicRatio < 0.2) return 'en';
+  return 'mixed';
 }
 
 function glyphWidth(character: string): number {

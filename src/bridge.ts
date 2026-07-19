@@ -45,10 +45,12 @@ export async function bootstrap(): Promise<BootstrapInfo> {
 }
 
 export async function setApiKey(key: string): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('set_api_key', { key });
 }
 
 export async function deleteApiKey(): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('delete_api_key');
 }
 
@@ -91,18 +93,22 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
 }
 
 export async function codexStatus(): Promise<CodexStatus> {
+  if (!isDesktop()) return { installed: false, authenticated: false, version: null, path: null };
   return invoke<CodexStatus>('codex_status');
 }
 
 export async function codexInstall(): Promise<string> {
+  if (!isDesktop()) return '';
   return invoke<string>('codex_install');
 }
 
 export async function codexLogin(): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('codex_login');
 }
 
 export async function writeWorkbook(bytes: Uint8Array, filename: string): Promise<string> {
+  if (!isDesktop()) return '';
   return invoke<string>('write_workbook', { bytesB64: encodeBytes(bytes), filename });
 }
 
@@ -133,6 +139,7 @@ export interface RevisionOutput {
 }
 
 export async function reserveRevision(projectName: string): Promise<RevisionReservation> {
+  if (!isDesktop()) throw new Error('Desktop only');
   return invoke<RevisionReservation>('reserve_revision', { projectName });
 }
 
@@ -140,6 +147,7 @@ export async function writeRevisionBundle(
   reservation: RevisionReservation,
   artifacts: GeneratedArtifact[],
 ): Promise<RevisionOutput> {
+  if (!isDesktop()) throw new Error('Desktop only');
   return invoke<RevisionOutput>('write_revision_bundle', {
     projectName: reservation.projectName,
     session: reservation.session,
@@ -153,6 +161,7 @@ export async function writeRevisionBundle(
 }
 
 export async function discardRevision(reservation: RevisionReservation): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('discard_revision', { projectName: reservation.projectName, session: reservation.session });
 }
 
@@ -164,6 +173,7 @@ export async function readInputFile(path: string): Promise<File> {
 }
 
 export async function recordRun(entry: Omit<RunRecord, 'id'>): Promise<number> {
+  if (!isDesktop()) return 0;
   return invoke<number>('record_run', { entry });
 }
 
@@ -173,18 +183,22 @@ export async function listRuns(): Promise<RunRecord[]> {
 }
 
 export async function openOutputFolder(): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('open_output_folder');
 }
 
 export async function openGeneratedFolder(path: string): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('open_generated_folder', { path });
 }
 
 export async function openWorkbook(path: string): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('open_workbook', { path });
 }
 
 export async function openUrl(url: string): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('open_url', { url });
 }
 
@@ -194,6 +208,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
 }
 
 export async function openUpdateRelease(version: string): Promise<void> {
+  if (!isDesktop()) return;
   await invoke('open_update_release', { version });
 }
 
@@ -202,6 +217,6 @@ export async function appLog(message: string): Promise<void> {
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest('SHA-256', bytes.buffer as ArrayBuffer);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

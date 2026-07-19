@@ -6,13 +6,13 @@
   "description": "Portable desktop app that turns a construction BOQ workbook into a validated, procurement-ready work-package workbook.",
   "license": "MIT",
   "author": "Kareem Safwat",
-  "homepage": "https://github.com/sfkareem/tawreed",
+  "homepage": "https://github.com/kareem-sf/tawreed",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sfkareem/tawreed.git"
+    "url": "https://github.com/kareem-sf/tawreed.git"
   },
   "bugs": {
-    "url": "https://github.com/sfkareem/tawreed/issues"
+    "url": "https://github.com/kareem-sf/tawreed/issues"
   },
   "engines": {
     "node": ">=24"

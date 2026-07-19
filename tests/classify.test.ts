@@ -5,6 +5,27 @@ import { heuristicClassify } from '../engine/classify/heuristic';
 import { requestToPrompt, type AnthropicRequest } from '../engine/classify/anthropic';
 import { buildPackages } from '../engine/validate';
 import { enFixture, arFixture, EN_ROWS } from './fixtures';
+import type { BoqItem } from '../shared/types';
+import type { LlmProgress } from '../engine/classify/types-internal';
+
+/** Items with no taxonomy keywords so the heuristic pass leaves them all for the LLM. */
+function gibberishItems(n: number): BoqItem[] {
+  return Array.from({ length: n }, (_, i) => ({
+    id: i + 1,
+    code: `Z${i + 1}`,
+    description: `Zqx item ${i + 1}`,
+    unit: 'nr' as const,
+    qty: 1,
+    rate: 100,
+    total: 100,
+    row: i + 1,
+  }));
+}
+
+/** Pull the item ids back out of a classification request so the mock can answer every one. */
+function requestedIds(req: AnthropicRequest): number[] {
+  return [...req.messages[0]!.content.matchAll(/^(\d+) \|/gm)].map((m) => Number(m[1]));
+}
 
 describe('heuristic classifier (offline)', () => {
   it('classifies obvious English items into the right packages', async () => {
@@ -121,5 +142,50 @@ describe('requestToPrompt (Codex/CLI flattening)', () => {
     const { items } = await inspectWorkbook(await enFixture(), 'en.xlsx');
     const all = await classifyAll(items, { useLlm: true, transport: cliTransport });
     expect(all.find((c) => c.itemId === 11)!.packageCode).toBe('WP-04');
+  });
+});
+
+describe('LLM batching (BATCH_SIZE = 100)', () => {
+  it('splits 250 heuristic-unclassifiable items into 3 transport calls and keeps them all', async () => {
+    const items = gibberishItems(250);
+    const calls: AnthropicRequest[] = [];
+    const transport = async (req: AnthropicRequest) => {
+      calls.push(req);
+      const ids = requestedIds(req);
+      return JSON.stringify({
+        classifications: ids.map((id) => ({ itemId: id, packageCode: 'WP-09', confidence: 0.8 })),
+      });
+    };
+    const progress: LlmProgress[] = [];
+    const all = await classifyAll(items, { useLlm: true, transport, onProgress: (p) => progress.push(p) });
+
+    expect(all).toHaveLength(250);
+    expect(new Set(all.map((c) => c.itemId)).size).toBe(250);
+    expect(all.every((c) => c.source === 'llm' && c.packageCode === 'WP-09')).toBe(true);
+    // ceil(250 / 100) === 3 batches of sizes 100 / 100 / 50.
+    expect(calls).toHaveLength(3);
+    expect(calls.map((c) => requestedIds(c).length)).toEqual([100, 100, 50]);
+    expect(progress.map((p) => [p.done, p.total])).toEqual([[1, 3], [2, 3], [3, 3]]);
+  });
+
+  it('falls back per-batch when later LLM calls fail, without throwing', async () => {
+    const items = gibberishItems(250);
+    const transport = async (req: AnthropicRequest) => {
+      const ids = requestedIds(req);
+      if (Math.min(...ids) > 100) throw new Error('LLM batch failure');
+      return JSON.stringify({
+        classifications: ids.map((id) => ({ itemId: id, packageCode: 'WP-09', confidence: 0.8 })),
+      });
+    };
+
+    const all = await classifyAll(items, { useLlm: true, transport });
+
+    expect(all).toHaveLength(250);
+    const batch1 = all.filter((c) => c.itemId <= 100);
+    expect(batch1).toHaveLength(100);
+    expect(batch1.every((c) => c.source === 'llm' && c.packageCode === 'WP-09')).toBe(true);
+    const failed = all.filter((c) => c.itemId > 100);
+    expect(failed).toHaveLength(150);
+    expect(failed.every((c) => c.source === 'fallback')).toBe(true);
   });
 });

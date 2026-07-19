@@ -33,9 +33,9 @@ describe('PDF ingestion', () => {
     expect(result.ocrPages).toBe(0);
     expect(result.projectName).toBe('Green Avenue Factory Extension');
     expect(result.items.map((item) => item.code)).toEqual(['C-01', 'E-01']);
-    expect(result.items[0].qty).toBe(12);
-    expect(result.items[0].unitLabel).toBe('m3');
-    expect(result.items[0].comments).toContain('Testing');
+    expect(result.items[0]!.qty).toBe(12);
+    expect(result.items[0]!.unitLabel).toBe('m3');
+    expect(result.items[0]!.comments).toContain('Testing');
     expect(result.items.flatMap((item) => item.comments ?? [])).not.toContain('THANK YOU');
   }, 20_000);
 
@@ -43,5 +43,27 @@ describe('PDF ingestion', () => {
     const pdf = await searchableBoqPdf();
     expect(detectDocumentKind(pdf, 'offer.pdf')).toBe('pdf');
     expect(() => detectDocumentKind(new Uint8Array([1, 2, 3]), 'offer.pdf')).toThrow(/valid/i);
+  });
+
+  it('rejects PDFs that exceed the 250-page processing limit', async () => {
+    const pdf = await PDFDocument.create();
+    for (let i = 0; i < 251; i++) pdf.addPage([200, 200]);
+    const bytes = await pdf.save();
+    await expect(inspectPdf(bytes, 'huge.pdf', { enableOcr: false })).rejects.toThrow(/250/);
+  }, 60_000);
+
+  it('rejects a ZIP-signed file carrying a .pdf extension', () => {
+    const zipMagic = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    expect(() => detectDocumentKind(zipMagic, 'sheet.pdf')).toThrow(/valid/i);
+  });
+
+  it('rejects a PDF-signed file carrying a .xlsx extension', () => {
+    const pdfMagic = new TextEncoder().encode('%PDF-1.4\n%trailing bytes');
+    expect(() => detectDocumentKind(pdfMagic, 'sheet.xlsx')).toThrow(/valid/i);
+  });
+
+  it('accepts .xlsm files as xlsx', () => {
+    const zipMagic = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    expect(detectDocumentKind(zipMagic, 'macro.xlsm')).toBe('xlsx');
   });
 });

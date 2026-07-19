@@ -146,7 +146,13 @@ pub fn open_db() -> Result<rusqlite::Connection, String> {
         "ALTER TABLE runs ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'xlsx'",
         "ALTER TABLE runs ADD COLUMN ocr_used INTEGER NOT NULL DEFAULT 0",
     ] {
-        let _ = conn.execute(migration, []);
+        if let Err(e) = conn.execute(migration, []) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column name") {
+                // Log but don't fail — the column may already exist from a prior partial migration
+                log_line(&format!("migration warning: {e}"));
+            }
+        }
     }
     Ok(conn)
 }
@@ -180,8 +186,15 @@ pub fn get_settings() -> serde_json::Value {
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
+/// Keys the frontend is allowed to persist. Anything else is rejected so a compromised
+/// renderer can't scribble arbitrary entries into settings.json.
+const ALLOWED_SETTINGS: &[&str] = &["language", "model", "theme"];
+
 /// Merge one key into settings.json.
 pub fn set_setting(key: &str, value: serde_json::Value) -> Result<(), String> {
+    if !ALLOWED_SETTINGS.contains(&key) {
+        return Err(format!("unknown setting: {key}"));
+    }
     let path = data_dir()?.join("settings.json");
     let mut settings = get_settings();
     if !settings.is_object() {
@@ -214,22 +227,48 @@ pub fn write_env_key(value: Option<&str>) -> Result<(), String> {
     if !replaced {
         lines.push(format!("ANTHROPIC_API_KEY={}", value.unwrap_or("")));
     }
-    fs::write(&path, lines.join("\n") + "\n").map_err(|e| format!("write .env: {e}"))
+    let content = lines.join("\n") + "\n";
+    // The .env holds the API key — on Unix set owner-only permissions at creation time
+    // so the file is never world-readable, even for an instant (no separate chmod step).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, content.as_bytes()))
+            .map_err(|e| format!("write .env: {e}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(&path, &content).map_err(|e| format!("write .env: {e}"))?;
+    }
+    Ok(())
 }
 
 pub fn log_line(message: &str) {
+    // Strip newlines so a caller-supplied message can't forge extra log lines.
+    let sanitized = message.replace(['\n', '\r'], " ");
     if let Ok(path) = log_path() {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() > 10 * 1024 * 1024 {
+                let _ = std::fs::write(&path, ""); // truncate
+            }
+        }
         let _ = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
             .map(|mut f| {
                 use std::io::Write;
-                let _ = writeln!(f, "[{stamp}] {message}");
+                let _ = writeln!(f, "[{stamp}] {sanitized}");
             });
     }
 }

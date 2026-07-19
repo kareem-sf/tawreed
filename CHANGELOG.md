@@ -36,5 +36,5 @@ Versioning.
 - Replaced the previous Python/PySide and embedded-sidecar implementations with
   a root-level React, TypeScript, Tauri 2, and Rust application.
 
-[0.1.0]: https://github.com/sfkareem/tawreed/releases/tag/v0.1.0
-[0.2.0]: https://github.com/sfkareem/tawreed/releases/tag/v0.2.0
+[0.1.0]: https://github.com/kareem-sf/tawreed/releases/tag/v0.1.0
+[0.2.0]: https://github.com/kareem-sf/tawreed/releases/tag/v0.2.0

@@ -20,9 +20,10 @@ export function NumberTicker({ value, duration = 900, className, formatter }: Nu
     const tick = (t: number) => {
       const p = Math.min(1, (t - t0) / duration);
       const eased = 1 - Math.pow(1 - p, 3);
-      setDisplay(from + (value - from) * eased);
+      const currentValue = from + (value - from) * eased;
+      setDisplay(currentValue);
+      fromRef.current = currentValue; // track live value each tick
       if (p < 1) raf = requestAnimationFrame(tick);
-      else fromRef.current = value;
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);

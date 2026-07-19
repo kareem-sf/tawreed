@@ -1,5 +1,5 @@
 // Generates src-tauri/icons/icon.ico (PNG-in-ICO, 256x256) — gold diamond on dark slate.
-// Usage: node scripts/make-icon.js
+// Usage: node scripts/make-icon.cjs
 const zlib = require('zlib');
 const fs = require('fs');
 const path = require('path');

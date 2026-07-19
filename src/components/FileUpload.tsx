@@ -9,12 +9,14 @@ import Logo from './Logo';
 export default function FileUpload({ onFile }: { onFile: (file: File) => void }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
+  const rejectTimer = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reject = (message: string) => {
     setError(message);
-    window.setTimeout(() => setError(null), 3500);
+    if (rejectTimer.current !== null) window.clearTimeout(rejectTimer.current);
+    rejectTimer.current = window.setTimeout(() => { setError(null); rejectTimer.current = null; }, 3500);
   };
 
   const accept = (file: File | undefined) => {
@@ -27,33 +29,35 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
   };
 
   useEffect(() => {
-    if (!isDesktop()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    getCurrentWindow().onDragDropEvent(async (event) => {
-      if (event.payload.type === 'over') {
-        setDragging(true);
-        return;
-      }
-      if (event.payload.type === 'drop') {
-        setDragging(false);
-        const path = event.payload.paths[0];
-        if (!path) return;
-        try {
-          accept(await readInputFile(path));
-        } catch (err) {
-          reject(err instanceof Error ? err.message : String(err));
+    if (isDesktop()) {
+      getCurrentWindow().onDragDropEvent(async (event) => {
+        if (event.payload.type === 'over') {
+          setDragging(true);
+          return;
         }
-        return;
-      }
-      setDragging(false);
-    }).then((stop) => {
-      if (disposed) stop();
-      else unlisten = stop;
-    });
+        if (event.payload.type === 'drop') {
+          setDragging(false);
+          const path = event.payload.paths[0];
+          if (!path) return;
+          try {
+            accept(await readInputFile(path));
+          } catch (err) {
+            reject(err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+        setDragging(false);
+      }).then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      });
+    }
     return () => {
       disposed = true;
       unlisten?.();
+      if (rejectTimer.current !== null) window.clearTimeout(rejectTimer.current);
     };
   }, [onFile, t]);
 

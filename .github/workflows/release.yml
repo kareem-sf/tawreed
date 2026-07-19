@@ -87,6 +87,15 @@ jobs:
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.21.0 --locked
+
+      - name: Audit Rust dependencies
+        run: cargo audit -f src-tauri/Cargo.lock
+
       - name: Build Windows portable executable
         if: runner.os == 'Windows'
         run: npm run tauri -- build --no-bundle --ci -- --locked
@@ -239,7 +248,7 @@ jobs:
           (cd release && sha256sum --check SHA256SUMS.txt)
 
       - name: Attest platform packages
-        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: |
             release/Tawreed-Linux-x64.AppImage
@@ -302,7 +311,7 @@ jobs:
 
           uploaded=false
           for attempt in {1..6}; do
-            if gh release upload "$tag" \
+            if gh release upload "$tag" --clobber \
               release/LICENSES.txt \
               release/SHA256SUMS.txt \
               release/THIRD_PARTY_NOTICES.md \

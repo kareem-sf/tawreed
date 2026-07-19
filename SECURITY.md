@@ -14,7 +14,7 @@ Only the latest stable release is supported with security fixes.
 Do not disclose vulnerabilities in a public issue. Use the repository's
 private security advisory form:
 
-https://github.com/sfkareem/tawreed/security/advisories/new
+https://github.com/kareem-sf/tawreed/security/advisories/new
 
 Include affected versions, reproduction steps, impact, and any suggested
 mitigation. Do not include customer BOQs, API keys, Codex credentials, or

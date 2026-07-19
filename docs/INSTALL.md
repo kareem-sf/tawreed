@@ -12,7 +12,7 @@ Excel is not required to analyze documents or generate workbooks.
 
 ## Download And Verify
 
-1. Open the latest release at https://github.com/sfkareem/tawreed/releases.
+1. Open the latest release at https://github.com/kareem-sf/tawreed/releases.
 2. Download `SHA256SUMS.txt` and the package for your platform:
    - Windows: `Tawreed-Windows-x64.exe`
    - Linux: `Tawreed-Linux-x64.AppImage` or `Tawreed-Linux-x64.deb`
@@ -32,7 +32,7 @@ shasum -a 256 Tawreed-macOS-universal.dmg
    verify provenance:
 
 ```powershell
-gh attestation verify .\Tawreed-Windows-x64.exe --repo sfkareem/tawreed
+gh attestation verify .\Tawreed-Windows-x64.exe --repo kareem-sf/tawreed
 ```
 
 Use the downloaded filename in the attestation command on Linux or macOS.

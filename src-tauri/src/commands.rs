@@ -35,8 +35,49 @@ pub async fn llm_complete(request: Value) -> Result<String, String> {
         .ok_or("No Anthropic API key configured. Open Settings in Tawreed to add one.")?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
+        .https_only(true)
         .build()
         .map_err(|e| format!("http client: {e}"))?;
+
+    // Validate and sanitize the webview request before it ever reaches the API.
+    // Only a known-good, minimal shape is forwarded; every other field is dropped.
+    const ALLOWED_MODELS: &[&str] = &[
+        "claude-sonnet-4-20250514",
+        "claude-haiku-4-20250414",
+        "claude-3-5-haiku-20241022",
+        "claude-3-5-sonnet-20241022",
+    ];
+    let model = request
+        .get("model")
+        .and_then(Value::as_str)
+        .ok_or("request.model must be a string")?;
+    if !ALLOWED_MODELS.contains(&model) {
+        return Err(format!("model '{model}' is not an approved model"));
+    }
+    let messages = request
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or("request.messages must be an array")?;
+    if messages.is_empty() {
+        return Err("request.messages must not be empty".into());
+    }
+    let max_tokens = match request.get("max_tokens").and_then(Value::as_u64) {
+        Some(n) => n.min(8192),
+        None => 4096,
+    };
+    let mut sanitized = json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    });
+    if let Some(system) = request.get("system").and_then(Value::as_str) {
+        sanitized["system"] = json!(system);
+    }
+    if let Some(temperature) = request.get("temperature").and_then(Value::as_f64) {
+        if (0.0..=1.0).contains(&temperature) {
+            sanitized["temperature"] = json!(temperature);
+        }
+    }
 
     let mut last_err = String::new();
     for attempt in 0..2 {
@@ -48,7 +89,7 @@ pub async fn llm_complete(request: Value) -> Result<String, String> {
             .header("x-api-key", &key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&request)
+            .json(&sanitized)
             .send()
             .await;
         match result {
@@ -100,16 +141,15 @@ pub async fn llm_complete(request: Value) -> Result<String, String> {
 }
 
 async fn tokio_sleep(ms: u64) {
-    // Avoid a direct tokio dependency: Tauri's async runtime provides one.
-    tauri::async_runtime::spawn(async move {
-        std::thread::sleep(Duration::from_millis(ms));
-    })
-    .await
-    .ok();
+    tokio::time::sleep(Duration::from_millis(ms)).await;
 }
 
 #[tauri::command]
 pub fn write_workbook(bytes_b64: String, filename: String) -> Result<String, String> {
+    // Reject oversized payloads before decoding (~268M base64 chars ≈ 200 MB decoded).
+    if bytes_b64.len() > 268_435_456 {
+        return Err("Workbook payload exceeds the 200 MB limit".into());
+    }
     // Sanitize: file name only, must be .xlsx
     let name = std::path::Path::new(&filename)
         .file_name()
@@ -119,6 +159,12 @@ pub fn write_workbook(bytes_b64: String, filename: String) -> Result<String, Str
     if !name.to_lowercase().ends_with(".xlsx") {
         return Err("Output file must be an .xlsx workbook".into());
     }
+    let stem = std::path::Path::new(&name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("workbook");
+    let safe_stem = safe_component(stem, 200);
+    let name = format!("{}.xlsx", safe_stem);
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(bytes_b64)
         .map_err(|e| format!("decode workbook bytes: {e}"))?;
@@ -302,6 +348,10 @@ pub fn write_revision_bundle(
     let mut master_relative: Option<String> = None;
     let write_result = (|| -> Result<(), String> {
         for artifact in artifacts {
+            if artifact.bytes_b64.len() > 268_435_456 {
+                let _ = std::fs::remove_dir_all(&temp);
+                return Err("Artifact exceeds the 200 MB limit".into());
+            }
             let path = safe_artifact_path(&temp, &artifact.relative_path)?;
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)
@@ -355,6 +405,9 @@ pub fn write_revision_bundle(
 pub fn discard_revision(project_name: String, session: String) -> Result<(), String> {
     if session.contains(['/', '\\']) || !session.starts_with(".tawreed-rev-") {
         return Err("Invalid revision session".into());
+    }
+    if !session.ends_with(".tmp") {
+        return Err("Invalid session directory name".into());
     }
     let temp = store::output_dir()?
         .join(safe_component(&project_name, 100))
@@ -630,16 +683,16 @@ mod external_url_tests {
     #[test]
     fn permits_only_approved_https_hosts_without_credentials() {
         for url in [
-            "https://github.com/sfkareem/tawreed",
+            "https://github.com/kareem-sf/tawreed",
             "https://kareemsafwat.com",
             "https://www.kareemsafwat.com/work",
         ] {
             assert!(approved_external_url(url).is_ok());
         }
         for url in [
-            "http://github.com/sfkareem/tawreed",
-            "https://github.com.evil.example/sfkareem/tawreed",
-            "https://user:password@github.com/sfkareem/tawreed",
+            "http://github.com/kareem-sf/tawreed",
+            "https://github.com.evil.example/kareem-sf/tawreed",
+            "https://user:password@github.com/kareem-sf/tawreed",
             "file:///C:/Windows/System32/calc.exe",
         ] {
             assert!(approved_external_url(url).is_err());

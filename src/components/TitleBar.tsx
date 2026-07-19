@@ -3,7 +3,7 @@ import { ActionIcon, Tooltip, useMantineColorScheme } from '@mantine/core';
 import { Clock, Info, Minus, Monitor, Moon, Settings2, Sun, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTranslation } from 'react-i18next';
-import { isDesktop } from '../bridge';
+import { isDesktop, setSetting } from '../bridge';
 import Logo from './Logo';
 
 interface Props {
@@ -37,7 +37,11 @@ export default function TitleBar({ onSettings, onHistory, onAbout, updateAvailab
   const cycleTheme = () => {
     setColorScheme(colorScheme === 'auto' ? 'light' : colorScheme === 'light' ? 'dark' : 'auto');
   };
-  const switchLanguage = () => i18n.changeLanguage(i18n.language === 'ar' ? 'en' : 'ar');
+  const switchLanguage = () => {
+    const newLang = i18n.language === 'ar' ? 'en' : 'ar';
+    void i18n.changeLanguage(newLang);
+    void setSetting('language', newLang).catch(() => undefined);
+  };
   const ThemeIcon = colorScheme === 'light' ? Sun : colorScheme === 'dark' ? Moon : Monitor;
 
   useEffect(() => {
@@ -59,7 +63,7 @@ export default function TitleBar({ onSettings, onHistory, onAbout, updateAvailab
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  });
+  }, [colorScheme, setColorScheme, i18n, onHistory, onAbout, onSettings, appWindow]);
 
   return (
     <div className="titlebar" data-tauri-drag-region>

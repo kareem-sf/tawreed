@@ -51,10 +51,21 @@ const UNIT_MAP: Record<string, Unit> = {
   'day': 'day', 'يوم': 'day', 'ايام': 'day',
 };
 
+// Build a normalized lookup so Arabic letter variants (ة→ه, ى→ي, أإآ→ا) and
+// diacritics/tatweel differences match the UNIT_MAP keys consistently.
+const NORMALIZED_UNIT_MAP = new Map<string, Unit>();
+for (const [key, unit] of Object.entries(UNIT_MAP)) {
+  NORMALIZED_UNIT_MAP.set(normalizeText(key), unit);
+}
+
 export function canonicalUnit(raw: unknown): Unit {
-  if (raw == null) return 'other';
+  const text = normalizeText(String(raw ?? ''));
+  if (!text) return 'other';
+  const mapped = NORMALIZED_UNIT_MAP.get(text);
+  if (mapped) return mapped;
+  // English lowercase fallback checks.
   const s = normalizeDigits(String(raw))
-    .replace(/[ًٌٍَُِّْ]/g, '') // strip Arabic diacritics
+    .replace(/[ًٌٍَُِّْـ]/g, '') // strip Arabic diacritics + tatweel
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
@@ -65,8 +76,9 @@ export function canonicalUnit(raw: unknown): Unit {
 export function normalizeText(input: string): string {
   return normalizeDigits(input)
     .replace(/[ًٌٍَُِّْـ]/g, '')
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ى/g, 'ي')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/[ىئ]/g, 'ي')
+    .replace(/ؤ/g, 'و')
     .replace(/ة/g, 'ه')
     .replace(/\s+/g, ' ')
     .trim()

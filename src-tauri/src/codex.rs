@@ -36,6 +36,9 @@ pub fn invalidate_cache() {
     if let Ok(mut guard) = DETECT_CACHE.lock() {
         *guard = None;
     }
+    if let Ok(mut guard) = MODELS_CACHE.lock() {
+        *guard = None;
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -173,16 +176,42 @@ fn candidate_paths() -> Vec<PathBuf> {
 }
 
 fn exe_version(path: &PathBuf) -> Option<String> {
-    let out = quiet_command(path).arg("--version").output().ok()?;
-    if !out.status.success() {
+    let mut child = quiet_command(path)
+        .arg("--version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    // A hostile or broken binary on PATH could hang forever; give up after 10s so
+    // detection never blocks the UI.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() > deadline {
+                    let _ = child.kill();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Err(_) => return None,
+        }
+    };
+    if !status.success() {
         return None;
     }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
+    let mut stdout = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut stdout);
     }
+    let version_str = stdout.trim().to_string();
+    // Real Codex CLI prints a version like "codex-cli 0.1.x" or "codex 0.x.x".
+    // A non-Codex binary squatting on the name is rejected here.
+    if version_str.is_empty() || version_str.len() > 200 {
+        return None; // not a real Codex binary
+    }
+    Some(version_str)
 }
 
 fn auth_json_exists() -> bool {
@@ -239,7 +268,14 @@ pub fn complete(prompt: &str, model: Option<&str>) -> Result<String, String> {
         );
     }
     let exe = status.path.ok_or("Codex path missing")?;
-    let tmp = std::env::temp_dir().join(format!("tawreed-codex-{}.txt", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "tawreed-codex-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
 
     let mut args: Vec<String> = vec![
         "exec".into(),
@@ -258,9 +294,11 @@ pub fn complete(prompt: &str, model: Option<&str>) -> Result<String, String> {
     // Read the prompt from stdin so large BOQ batches never hit Windows' command-line limit.
     args.push("-".into());
 
+    let work_dir = store::data_dir()?;
+    std::fs::create_dir_all(&work_dir).map_err(|e| format!("create data dir: {e}"))?;
     let mut child = quiet_command(&exe)
         .args(&args)
-        .current_dir(store::data_dir()?)
+        .current_dir(work_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -268,16 +306,19 @@ pub fn complete(prompt: &str, model: Option<&str>) -> Result<String, String> {
         .map_err(|e| format!("spawn codex: {e}"))?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|e| format!("write prompt to codex: {e}"))?;
+        if let Err(e) = stdin.write_all(prompt.as_bytes()) {
+            let _ = child.kill();
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("write codex stdin: {e}"));
+        }
     }
 
     // Drain stdout on a reader thread so a chatty CLI can't deadlock on a full pipe.
-    let mut stdout_pipe = child.stdout.take().expect("piped");
+    // Cap at 10 MB so a runaway CLI can't exhaust memory.
+    let stdout_pipe = child.stdout.take().expect("piped");
     let reader = std::thread::spawn(move || {
         let mut buf = String::new();
-        let _ = stdout_pipe.read_to_string(&mut buf);
+        let _ = stdout_pipe.take(10 * 1024 * 1024).read_to_string(&mut buf);
         buf
     });
 
@@ -351,6 +392,8 @@ pub async fn install() -> Result<String, String> {
     let client = reqwest::Client::builder()
         .user_agent("tawreed-app")
         .timeout(Duration::from_secs(300))
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| format!("http client: {e}"))?;
 
@@ -381,19 +424,71 @@ pub async fn install() -> Result<String, String> {
         .ok_or("asset has no download URL")?;
 
     store::log_line(&format!("downloading codex from {url}"));
-    let bytes = client
-        .get(url)
-        .send()
+    // Redirects are disabled on the client; follow them manually so every hop stays HTTPS
+    // and a malicious 3xx can't bounce the download to a plain-HTTP or attacker host.
+    const MAX_DOWNLOAD: usize = 500 * 1024 * 1024;
+    let mut current_url = url.to_string();
+    let mut response: Option<reqwest::Response> = None;
+    // Initial request plus up to 3 HTTPS-only redirects.
+    for _ in 0..=3 {
+        let res = client
+            .get(&current_url)
+            .send()
+            .await
+            .map_err(|e| format!("download codex: {e}"))?;
+        if res.status().is_redirection() {
+            let location = res
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .ok_or("redirect response missing a Location header")?;
+            if !location.starts_with("https://") {
+                return Err("refusing to follow a non-HTTPS redirect".into());
+            }
+            // Only follow redirects to GitHub domains
+            let redirect_host = reqwest::Url::parse(location)
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
+                .unwrap_or_default();
+            if !redirect_host.ends_with(".github.com")
+                && redirect_host != "github.com"
+                && !redirect_host.ends_with(".githubusercontent.com")
+            {
+                return Err(format!(
+                    "refusing to follow redirect to untrusted host: {redirect_host}"
+                ));
+            }
+            store::log_line(&format!("following codex download redirect to {location}"));
+            current_url = location.to_string();
+            continue;
+        }
+        response = Some(res);
+        break;
+    }
+    let mut res = response.ok_or("too many redirects while downloading codex")?;
+    let res_status = res.status();
+    if !res_status.is_success() {
+        return Err(format!("codex download failed with HTTP {res_status}"));
+    }
+
+    // Stream the body and enforce the size cap as it arrives.
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = res
+        .chunk()
         .await
-        .map_err(|e| format!("download codex: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("read codex bytes: {e}"))?;
+        .map_err(|e| format!("read codex bytes: {e}"))?
+    {
+        if bytes.len() + chunk.len() > MAX_DOWNLOAD {
+            return Err("codex download exceeded the 500 MB limit".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
 
     let dest = managed_bin()?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("create bin dir: {e}"))?;
     }
+    let tmp_dest = dest.with_extension("exe.tmp");
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("unzip: {e}"))?;
     // The archive ships several tools: codex-command-runner.exe,
@@ -422,12 +517,32 @@ pub async fn install() -> Result<String, String> {
     }
     let i = chosen.ok_or("codex CLI binary not found inside the downloaded archive")?;
     let mut file = archive.by_index(i).map_err(|e| format!("zip entry: {e}"))?;
+    let entry_name = file.name().to_string();
     store::log_line(&format!(
-        "extracting codex binary from archive entry: {}",
-        file.name()
+        "extracting codex binary from archive entry: {entry_name}"
     ));
-    let mut out = std::fs::File::create(&dest).map_err(|e| format!("create codex.exe: {e}"))?;
-    std::io::copy(&mut file, &mut out).map_err(|e| format!("extract codex.exe: {e}"))?;
+    // Extract to a temp file first, then rename into place on success.
+    // Cap the *actual* bytes written rather than trusting the zip header's declared
+    // size (which an attacker controls); a zip-bomb entry can't blow past the limit.
+    let extract = (|| -> Result<(), String> {
+        let mut limited = (&mut file).take(MAX_DOWNLOAD as u64 + 1);
+        let mut out =
+            std::fs::File::create(&tmp_dest).map_err(|e| format!("create codex temp: {e}"))?;
+        let copied =
+            std::io::copy(&mut limited, &mut out).map_err(|e| format!("extract codex.exe: {e}"))?;
+        if copied > MAX_DOWNLOAD as u64 {
+            return Err("codex archive entry exceeds the 500 MB limit".into());
+        }
+        Ok(())
+    })();
+    if let Err(e) = extract {
+        let _ = std::fs::remove_file(&tmp_dest);
+        return Err(e);
+    }
+    std::fs::rename(&tmp_dest, &dest).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_dest);
+        format!("install codex.exe: {e}")
+    })?;
     store::log_line("codex cli installed to managed bin");
     invalidate_cache();
     Ok(dest.to_string_lossy().to_string())

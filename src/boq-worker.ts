@@ -21,10 +21,11 @@ function execute<T>(
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./workers/boq.worker.ts', import.meta.url), { type: 'module' });
+    const timeoutMs = options.timeoutMs ?? 120_000;
     const timeout = window.setTimeout(() => {
       worker.terminate();
-      reject(new Error('Workbook processing timed out after 2 minutes'));
-    }, options.timeoutMs ?? 120_000);
+      reject(new Error(`Workbook processing timed out after ${Math.round(timeoutMs / 60_000)} minutes`));
+    }, timeoutMs);
 
     const finish = (callback: () => void) => {
       window.clearTimeout(timeout);
@@ -70,5 +71,5 @@ export function inspectInWorker(
 }
 
 export function generateInWorker(input: GenerateInput): Promise<GeneratedArtifact[]> {
-  return execute({ type: 'generate', input });
+  return execute({ type: 'generate', input }, [], { timeoutMs: 10 * 60_000 });
 }
