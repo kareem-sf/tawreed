@@ -17,10 +17,16 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Spawn a process with NO console window — a GUI app must never flash terminals.
 pub fn quiet_command<P: AsRef<std::ffi::OsStr>>(program: P) -> Command {
-    let mut c = Command::new(program);
     #[cfg(windows)]
-    c.creation_flags(CREATE_NO_WINDOW);
-    c
+    {
+        let mut command = Command::new(program);
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(program)
+    }
 }
 
 // Detection is expensive (probing a 325MB exe) — cache it; explicit status checks bypass.
@@ -122,7 +128,8 @@ pub fn list_models() -> Result<Vec<ModelInfo>, String> {
 }
 
 pub fn managed_bin() -> Result<PathBuf, String> {
-    Ok(store::data_dir()?.join("bin").join("codex.exe"))
+    let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
+    Ok(store::data_dir()?.join("bin").join(binary))
 }
 
 fn candidate_paths() -> Vec<PathBuf> {
@@ -130,7 +137,8 @@ fn candidate_paths() -> Vec<PathBuf> {
     if let Ok(p) = managed_bin() {
         v.push(p);
     }
-    // npm global installs of the official Codex CLI (@openai/codex)
+    // npm global installs of the official Codex CLI (@openai/codex) on Windows.
+    #[cfg(windows)]
     if let Some(appdata) = std::env::var_os("APPDATA") {
         let base = PathBuf::from(appdata).join(r"npm\node_modules\@openai");
         if let Ok(vendors) = std::fs::read_dir(&base) {
@@ -149,6 +157,15 @@ fn candidate_paths() -> Vec<PathBuf> {
                 if direct.exists() {
                     v.push(direct);
                 }
+            }
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
+        for directory in std::env::split_paths(&path) {
+            let candidate = directory.join(binary);
+            if candidate.is_file() {
+                v.push(candidate);
             }
         }
     }
@@ -199,24 +216,6 @@ fn detect_uncached() -> CodexStatus {
                     version: Some(ver),
                     path: Some(p.to_string_lossy().to_string()),
                 };
-            }
-        }
-    }
-    // PATH lookup — accept only real .exe entries (skip .cmd shims to avoid shell limits)
-    if let Ok(out) = quiet_command("where").arg("codex").output() {
-        if out.status.success() {
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                let p = PathBuf::from(line.trim());
-                if p.extension().is_some_and(|e| e == "exe") && p.exists() {
-                    if let Some(ver) = exe_version(&p) {
-                        return CodexStatus {
-                            installed: true,
-                            authenticated: auth_json_exists(),
-                            version: Some(ver),
-                            path: Some(p.to_string_lossy().to_string()),
-                        };
-                    }
-                }
             }
         }
     }
@@ -347,6 +346,7 @@ pub fn login() -> Result<(), String> {
 }
 
 /// Download the official Codex CLI binary (latest GitHub release) into ~/.tawreed/bin.
+#[cfg(windows)]
 pub async fn install() -> Result<String, String> {
     let client = reqwest::Client::builder()
         .user_agent("tawreed-app")
@@ -431,4 +431,9 @@ pub async fn install() -> Result<String, String> {
     store::log_line("codex cli installed to managed bin");
     invalidate_cache();
     Ok(dest.to_string_lossy().to_string())
+}
+
+#[cfg(not(windows))]
+pub async fn install() -> Result<String, String> {
+    Err("Automatic Codex installation is available on Windows only. Install the official CLI with `npm install -g @openai/codex`, then restart Tawreed.".into())
 }

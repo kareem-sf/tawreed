@@ -279,7 +279,7 @@ export default function App() {
       </Modal>
       <Modal opened={aboutOpen} onClose={() => setAboutOpen(false)} centered size="md" withCloseButton={false}>
         <AboutModal
-          version={boot?.version ?? '0.1.0'}
+          version={boot?.version ?? '0.2.0'}
           update={update}
           onCheckUpdate={refreshUpdate}
           onOpenUpdate={openUpdateRelease}

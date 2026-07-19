@@ -6,7 +6,7 @@ Describe the behavior and why the change is needed.
 
 - [ ] `npm run check`
 - [ ] Rust formatting, Clippy, tests, and checks pass with `--locked`
-- [ ] Windows portable build succeeds when native code changed
+- [ ] Windows, Linux, and macOS package builds succeed when native code changed
 
 ## Risk
 

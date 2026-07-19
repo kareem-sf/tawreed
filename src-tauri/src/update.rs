@@ -4,7 +4,12 @@ use std::time::Duration;
 
 const RELEASE_API: &str = "https://api.github.com/repos/sfkareem/tawreed/releases/latest";
 const RELEASE_PAGE_ROOT: &str = "https://github.com/sfkareem/tawreed/releases/tag";
-const WINDOWS_ASSET: &str = "Tawreed-Windows-x64.exe";
+#[cfg(target_os = "windows")]
+const PLATFORM_ASSET: &str = "Tawreed-Windows-x64.exe";
+#[cfg(target_os = "linux")]
+const PLATFORM_ASSET: &str = "Tawreed-Linux-x64.AppImage";
+#[cfg(target_os = "macos")]
+const PLATFORM_ASSET: &str = "Tawreed-macOS-universal.dmg";
 
 #[derive(Debug, Deserialize)]
 struct ReleaseAsset {
@@ -53,7 +58,7 @@ fn validate_release(current: &str, release: GithubRelease) -> Result<UpdateInfo,
     let matching_assets: Vec<&ReleaseAsset> = release
         .assets
         .iter()
-        .filter(|asset| asset.name == WINDOWS_ASSET)
+        .filter(|asset| asset.name == PLATFORM_ASSET)
         .collect();
     let update_available = latest_version > current_version;
     let asset_sha256 = if update_available {
@@ -76,7 +81,7 @@ fn validate_release(current: &str, release: GithubRelease) -> Result<UpdateInfo,
         latest_version: latest_version.to_string(),
         latest_tag: release.tag_name,
         update_available,
-        asset_name: WINDOWS_ASSET.into(),
+        asset_name: PLATFORM_ASSET.into(),
         asset_sha256,
         published_at: release.published_at,
     })
@@ -181,7 +186,7 @@ mod tests {
 
     #[test]
     fn reports_newer_semantic_version() {
-        let info = validate_release("0.9.9", release("v1.0.0", &[WINDOWS_ASSET])).unwrap();
+        let info = validate_release("0.9.9", release("v1.0.0", &[PLATFORM_ASSET])).unwrap();
         assert!(info.update_available);
         assert_eq!(info.latest_version, "1.0.0");
     }
@@ -204,19 +209,19 @@ mod tests {
     fn rejects_noncanonical_or_unstable_tags() {
         for tag in ["1.0.0", "vv1.0.0", "v1.0", "v1.0.0-beta.1", "v1.0.0+build"] {
             assert_eq!(
-                validate_release("0.1.0", release(tag, &[WINDOWS_ASSET])),
+                validate_release("0.1.0", release(tag, &[PLATFORM_ASSET])),
                 Err("invalid_release".into())
             );
         }
     }
 
     #[test]
-    fn requires_one_exact_windows_asset() {
+    fn requires_one_exact_platform_asset() {
         for assets in [
             vec![],
-            vec!["tawreed-windows-x64.exe"],
-            vec!["Tawreed-Windows-x64.exe.zip"],
-            vec![WINDOWS_ASSET, WINDOWS_ASSET],
+            vec!["tawreed-platform-package"],
+            vec!["Tawreed-platform-package.zip"],
+            vec![PLATFORM_ASSET, PLATFORM_ASSET],
         ] {
             assert_eq!(
                 validate_release("0.1.0", release("v0.2.0", &assets)),
@@ -227,14 +232,14 @@ mod tests {
 
     #[test]
     fn requires_a_github_sha256_for_an_available_update() {
-        let mut missing_digest = release("v0.2.0", &[WINDOWS_ASSET]);
+        let mut missing_digest = release("v0.2.0", &[PLATFORM_ASSET]);
         missing_digest.assets[0].digest = None;
         assert_eq!(
             validate_release("0.1.0", missing_digest),
             Err("invalid_release".into())
         );
 
-        let mut invalid_digest = release("v0.2.0", &[WINDOWS_ASSET]);
+        let mut invalid_digest = release("v0.2.0", &[PLATFORM_ASSET]);
         invalid_digest.assets[0].digest = Some("sha256:not-a-digest".into());
         assert_eq!(
             validate_release("0.1.0", invalid_digest),
@@ -244,14 +249,14 @@ mod tests {
 
     #[test]
     fn rejects_drafts_and_prereleases() {
-        let mut draft = release("v0.2.0", &[WINDOWS_ASSET]);
+        let mut draft = release("v0.2.0", &[PLATFORM_ASSET]);
         draft.draft = true;
         assert_eq!(
             validate_release("0.1.0", draft),
             Err("no_stable_release".into())
         );
 
-        let mut prerelease = release("v0.2.0", &[WINDOWS_ASSET]);
+        let mut prerelease = release("v0.2.0", &[PLATFORM_ASSET]);
         prerelease.prerelease = true;
         assert_eq!(
             validate_release("0.1.0", prerelease),
