@@ -1,6 +1,6 @@
 # Tawreed
 
-Tawreed is a Windows desktop application that converts construction BOQs into
+Tawreed is a cross-platform desktop application that converts construction BOQs into
 validated, revision-controlled procurement work packages. It reads dynamic
 Excel layouts and searchable or scanned PDF documents without requiring a
 fixed template.
@@ -23,13 +23,16 @@ or comments.
 
 ## Download
 
-The supported release is a portable Windows x64 executable:
+The supported release packages are:
 
-`Tawreed-Windows-x64.exe`
+- Windows x64: `Tawreed-Windows-x64.exe`
+- Linux x64: `Tawreed-Linux-x64.AppImage` or `Tawreed-Linux-x64.deb`
+- macOS Intel and Apple Silicon: `Tawreed-macOS-universal.dmg`
 
-Download it from [GitHub Releases](https://github.com/sfkareem/tawreed/releases).
-Version `0.1.0` is unsigned, so Windows SmartScreen may display a warning. Each
-release includes SHA-256 checksums and GitHub build provenance. See
+Download them from [GitHub Releases](https://github.com/sfkareem/tawreed/releases).
+Version `0.2.0` does not use commercial platform signing, so Windows SmartScreen
+or macOS Gatekeeper may display a warning. Each release includes SHA-256
+checksums and GitHub build provenance. See
 [Installation](docs/INSTALL.md) before running the application.
 
 ## Privacy
@@ -43,11 +46,10 @@ an unauthenticated request to the GitHub Releases API. See [Privacy](docs/PRIVAC
 
 Requirements:
 
-- Windows x64
+- Windows x64, Linux x64, or macOS 12+ on Intel or Apple Silicon
 - Node.js 24
-- Rust 1.97.0 with the MSVC target
-- Visual Studio 2022 Build Tools with Desktop development with C++
-- Microsoft Edge WebView2 Runtime
+- Rust 1.97.0 with the target for the current platform
+- Platform-native Tauri build dependencies documented by Tauri
 
 ```powershell
 npm ci

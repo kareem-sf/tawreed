@@ -2,7 +2,7 @@
 
 Tawreed includes open-source libraries through the npm and Cargo lockfiles.
 Their respective licenses continue to apply. The following assets are copied
-into `public/` and embedded in the portable executable.
+into `public/` and embedded in each desktop package.
 
 ## Tesseract.js
 

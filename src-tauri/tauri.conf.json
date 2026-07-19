@@ -1,13 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Tawreed",
-  "version": "0.1.0",
-  "identifier": "com.tawreed.app",
+  "version": "0.2.0",
+  "identifier": "com.tawreed.desktop",
   "build": {
     "frontendDist": "../dist",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Tawreed",

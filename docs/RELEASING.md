@@ -1,7 +1,8 @@
 # Releasing
 
-Tawreed releases are Windows x64 portable executables built by GitHub Actions.
-Local binaries are never uploaded as release artifacts.
+Tawreed releases are built by GitHub Actions for Windows x64, Linux x64, and
+macOS Intel and Apple Silicon. Local binaries are never uploaded as release
+artifacts.
 
 ## Version Preparation
 
@@ -26,26 +27,30 @@ If signed Git tags are not configured, use an annotated tag and rely on the
 GitHub Actions build provenance for artifact verification. The release workflow
 rejects tags that do not exactly match the manifest version.
 
-The workflow builds and verifies a fresh executable, generates checksums,
-attests the executable, and publishes:
+The workflow builds and verifies fresh packages, generates checksums, attests
+all platform packages, and publishes:
 
 - `Tawreed-Windows-x64.exe`
+- `Tawreed-Linux-x64.AppImage`
+- `Tawreed-Linux-x64.deb`
+- `Tawreed-macOS-universal.dmg`
 - `SHA256SUMS.txt`
 - `THIRD_PARTY_NOTICES.md`
 - `LICENSES.txt`, containing Tawreed and locked production dependency licenses
 
 ## Current Signing Policy
 
-Version `0.1.0` is unsigned. Release notes must state the SmartScreen warning,
-WebView2 requirement, Visual C++ runtime requirement, SHA-256 verification, and
-GitHub attestation command. Do not claim Authenticode signing until the release
-workflow verifies a valid timestamped signature.
+Version `0.2.0` has no commercial platform certificates. Windows remains
+unsigned and macOS uses ad-hoc signing without notarization. Release notes must
+state the platform warnings, native runtime requirements, SHA-256 verification,
+and GitHub provenance. Do not claim Authenticode, Developer ID signing, or
+notarization until the workflow verifies those identities.
 
 ## Post-Release Verification
 
 1. Download assets from the published release into a clean directory.
 2. Verify checksum and provenance.
-3. Start the executable on a supported Windows x64 machine.
+3. Start each package on its supported platform.
 4. Confirm About reports the released version and no newer update.
-5. Confirm the repository latest-release endpoint returns the exact executable
-   asset expected by the in-app checker.
+5. Confirm the latest-release endpoint returns the exact package expected by
+   the in-app checker on each platform.

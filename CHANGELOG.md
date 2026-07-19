@@ -3,6 +3,21 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## [0.2.0] - 2026-07-19
+
+### Added
+
+- Linux x64 AppImage and Debian packages.
+- Universal macOS package for Intel and Apple Silicon.
+- Native package builds and verification in cross-platform CI.
+
+### Changed
+
+- Update validation now requires the exact release package for the running OS.
+- Codex CLI discovery now supports executables installed on the Linux and macOS
+  `PATH`; automatic Codex installation remains Windows-only.
+- Release checksums and GitHub provenance now cover every platform package.
+
 ## [0.1.0] - 2026-07-19
 
 ### Added
@@ -22,3 +37,4 @@ Versioning.
   a root-level React, TypeScript, Tauri 2, and Rust application.
 
 [0.1.0]: https://github.com/sfkareem/tawreed/releases/tag/v0.1.0
+[0.2.0]: https://github.com/sfkareem/tawreed/releases/tag/v0.2.0

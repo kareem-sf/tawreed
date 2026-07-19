@@ -54,13 +54,13 @@ for (const [lockPath, pkg] of Object.entries(packageLock.packages || {})) {
 
 const cargo = JSON.parse(childProcess.execFileSync(
   'cargo',
-  ['metadata', '--format-version', '1', '--locked', '--filter-platform', 'x86_64-pc-windows-msvc', '--manifest-path', 'src-tauri/Cargo.toml'],
+  ['metadata', '--format-version', '1', '--locked', '--manifest-path', 'src-tauri/Cargo.toml'],
   { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 ));
 const resolvedCargoPackages = new Set(cargo.resolve?.nodes.map((node) => node.id) || []);
 for (const pkg of cargo.packages) {
   if (!resolvedCargoPackages.has(pkg.id)) continue;
-  if (pkg.name === 'tawreed' && pkg.version === '0.1.0') continue;
+  if (pkg.name === 'tawreed') continue;
   const directory = path.dirname(pkg.manifest_path);
   const explicit = pkg.license_file ? path.resolve(directory, pkg.license_file) : null;
   const metadata = `Declared license: ${pkg.license || 'not specified'}\nRepository: ${pkg.repository || pkg.source || 'not specified'}`;

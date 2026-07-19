@@ -14,9 +14,25 @@ concurrency:
 
 jobs:
   build:
-    name: Build Windows portable
-    runs-on: windows-2022
-    timeout-minutes: 60
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-2022
+            artifact: windows-x64
+            rust-targets: x86_64-pc-windows-msvc
+          - name: Linux x64
+            runner: ubuntu-24.04
+            artifact: linux-x64
+            rust-targets: x86_64-unknown-linux-gnu
+          - name: macOS universal
+            runner: macos-15-intel
+            artifact: macos-universal
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
 
     steps:
       - name: Check out tagged source
@@ -24,6 +40,21 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            xvfb
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -35,7 +66,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: 1.97.0
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.rust-targets }}
           components: clippy,rustfmt
 
       - name: Install frontend dependencies
@@ -56,20 +87,27 @@ jobs:
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-      - name: Build fresh portable executable
-        run: cargo build --manifest-path src-tauri/Cargo.toml --release --locked
+      - name: Build Windows portable executable
+        if: runner.os == 'Windows'
+        run: npm run tauri -- build --no-bundle --ci -- --locked
 
-      - name: Prepare and verify release assets
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        run: npm run tauri -- build --bundles appimage,deb --ci -- --locked
+
+      - name: Build universal macOS package
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npm run tauri -- build --target universal-apple-darwin --bundles dmg --ci -- --locked
+
+      - name: Prepare Windows release asset
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Path "release" -Force | Out-Null
           Copy-Item "src-tauri/target/release/tawreed.exe" "release/Tawreed-Windows-x64.exe"
-          Copy-Item "THIRD_PARTY_NOTICES.md" "release/THIRD_PARTY_NOTICES.md"
-
-          node scripts/generate-third-party-licenses.cjs release/LICENSES.txt
-          if ($LASTEXITCODE -ne 0) { throw "Third-party license generation failed." }
-
           $exe = Get-Item "release/Tawreed-Windows-x64.exe"
           $expected = (Get-Content "package.json" | ConvertFrom-Json).version
           if ($exe.Length -lt 10MB) { throw "Portable executable is unexpectedly small." }
@@ -79,28 +117,98 @@ jobs:
           if ((Get-AuthenticodeSignature $exe.FullName).Status -ne "NotSigned") {
             throw "The unsigned-release policy changed unexpectedly; review signing and documentation."
           }
-          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content "release/SHA256SUMS.txt" "$hash  Tawreed-Windows-x64.exe`n" -NoNewline
-
-      - name: Smoke-test executable startup
-        shell: pwsh
-        run: |
-          $process = Start-Process "release/Tawreed-Windows-x64.exe" -PassThru
+          $process = Start-Process $exe.FullName -PassThru
           Start-Sleep -Seconds 8
           if ($process.HasExited) { throw "Tawreed exited during the startup smoke test." }
           Stop-Process -Id $process.Id -Force
 
-      - name: Upload verified release payload
+      - name: Prepare Linux release assets
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release
+          appimages=(src-tauri/target/release/bundle/appimage/*.AppImage)
+          debs=(src-tauri/target/release/bundle/deb/*.deb)
+          test "${#appimages[@]}" -eq 1
+          test "${#debs[@]}" -eq 1
+          test "$(stat -c '%s' "${appimages[0]}")" -gt 10000000
+          cp "${appimages[0]}" release/Tawreed-Linux-x64.AppImage
+          cp "${debs[0]}" release/Tawreed-Linux-x64.deb
+          xvfb-run -a bash -c '
+            set -euo pipefail
+            src-tauri/target/release/tawreed &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            sleep 8
+            kill -0 "$pid"
+          '
+
+      - name: Prepare macOS release asset
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          dmgs=("$bundle"/dmg/*.dmg)
+          test "${#dmgs[@]}" -eq 1
+          test "$(stat -f '%z' "${dmgs[0]}")" -gt 10000000
+          archs="$(lipo -archs "$bundle/macos/Tawreed.app/Contents/MacOS/tawreed")"
+          [[ "$archs" == *x86_64* && "$archs" == *arm64* ]]
+          codesign --verify --deep --strict "$bundle/macos/Tawreed.app"
+          mkdir release
+          cp "${dmgs[0]}" release/Tawreed-macOS-universal.dmg
+
+      - name: Upload verified platform payload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: tawreed-${{ github.ref_name }}-windows-x64
+          name: tawreed-${{ github.ref_name }}-${{ matrix.artifact }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 1
+
+  legal:
+    name: Generate legal payload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.0
+
+      - name: Generate notices and dependency licenses
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          mkdir release
+          cp THIRD_PARTY_NOTICES.md release/THIRD_PARTY_NOTICES.md
+          node scripts/generate-third-party-licenses.cjs release/LICENSES.txt
+
+      - name: Upload verified legal payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tawreed-${{ github.ref_name }}-legal
           path: release/*
           if-no-files-found: error
           retention-days: 1
 
   publish:
     name: Attest and publish
-    needs: build
+    needs: [build, legal]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -109,25 +217,31 @@ jobs:
       attestations: write
 
     steps:
-      - name: Download verified release payload
+      - name: Download verified release payloads
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: tawreed-${{ github.ref_name }}-windows-x64
+          pattern: tawreed-${{ github.ref_name }}-*
           path: release
+          merge-multiple: true
 
-      - name: Verify immutable payload
+      - name: Verify immutable payload and generate checksums
         shell: bash
         run: |
           set -euo pipefail
-          expected=$'LICENSES.txt\nSHA256SUMS.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Windows-x64.exe'
+          expected=$'LICENSES.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Linux-x64.AppImage\nTawreed-Linux-x64.deb\nTawreed-Windows-x64.exe\nTawreed-macOS-universal.dmg'
           actual="$(find release -maxdepth 1 -type f -printf '%f\n' | sort)"
           test "$actual" = "$expected"
+          (cd release && sha256sum Tawreed-Linux-x64.AppImage Tawreed-Linux-x64.deb Tawreed-Windows-x64.exe Tawreed-macOS-universal.dmg >SHA256SUMS.txt)
           (cd release && sha256sum --check SHA256SUMS.txt)
 
-      - name: Attest portable executable
+      - name: Attest platform packages
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
-          subject-path: release/Tawreed-Windows-x64.exe
+          subject-path: |
+            release/Tawreed-Linux-x64.AppImage
+            release/Tawreed-Linux-x64.deb
+            release/Tawreed-Windows-x64.exe
+            release/Tawreed-macOS-universal.dmg
 
       - name: Publish immutable GitHub release
         shell: bash
@@ -153,37 +267,41 @@ jobs:
             gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
           fi
 
-          cat >release/RELEASE_NOTES.md <<EOF
+          cat >RELEASE_NOTES.md <<EOF
           ## Tawreed $tag
 
-          Portable Windows x64 release for dynamic Excel and PDF BOQ processing,
-          local English/Arabic OCR, grounded AI-assisted work packaging, and
-          revision-controlled workbook delivery.
+          Cross-platform desktop release for Windows x64, Linux x64, and macOS
+          on Intel or Apple Silicon. Tawreed provides dynamic Excel and PDF BOQ
+          processing, local English/Arabic OCR, grounded AI-assisted work
+          packaging, and revision-controlled workbook delivery.
 
-          ### Installation
+          ### Packages
 
-          This executable is unsigned and may trigger Windows SmartScreen.
-          It requires Microsoft Edge WebView2 and the Microsoft Visual C++
-          2015-2022 x64 runtime. Verify \`SHA256SUMS.txt\` and GitHub provenance
-          before running it.
+          - Windows x64: \`Tawreed-Windows-x64.exe\`
+          - Linux x64: \`Tawreed-Linux-x64.AppImage\` or \`Tawreed-Linux-x64.deb\`
+          - macOS universal: \`Tawreed-macOS-universal.dmg\`
 
-          \`\`\`powershell
-          Get-FileHash .\\Tawreed-Windows-x64.exe -Algorithm SHA256
-          gh attestation verify .\\Tawreed-Windows-x64.exe --repo sfkareem/tawreed
-          \`\`\`
-
-          See the tagged source documentation for installation and privacy details.
+          These packages are not signed with commercial platform certificates.
+          Verify \`SHA256SUMS.txt\` and GitHub provenance before installation.
+          See the tagged installation guide for platform-specific requirements.
           EOF
 
-          gh release create "$tag" --verify-tag --draft --title "Tawreed $tag" --notes-file release/RELEASE_NOTES.md
+          gh release create "$tag" --verify-tag --draft --title "Tawreed $tag" --notes-file RELEASE_NOTES.md
           release_id="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\" and .draft == true) | .id")"
           if [[ -z "$release_id" || "$(printf '%s\n' "$release_id" | wc -l)" -ne 1 ]]; then
             echo "Could not resolve exactly one draft release ID for $tag." >&2
             exit 1
           fi
-          gh release upload "$tag" release/Tawreed-Windows-x64.exe release/SHA256SUMS.txt release/THIRD_PARTY_NOTICES.md release/LICENSES.txt
+          gh release upload "$tag" \
+            release/LICENSES.txt \
+            release/SHA256SUMS.txt \
+            release/THIRD_PARTY_NOTICES.md \
+            release/Tawreed-Linux-x64.AppImage \
+            release/Tawreed-Linux-x64.deb \
+            release/Tawreed-Windows-x64.exe \
+            release/Tawreed-macOS-universal.dmg
 
-          expected=$'LICENSES.txt\nSHA256SUMS.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Windows-x64.exe'
+          expected=$'LICENSES.txt\nSHA256SUMS.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Linux-x64.AppImage\nTawreed-Linux-x64.deb\nTawreed-Windows-x64.exe\nTawreed-macOS-universal.dmg'
           actual="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq '.assets[].name' | sort)"
           if [[ "$actual" != "$expected" ]]; then
             echo "Draft release asset set is not exact; leaving the release unpublished." >&2

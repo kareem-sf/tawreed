@@ -2,7 +2,8 @@
 
 ## Overview
 
-Tawreed is a local-first React application embedded in a Tauri 2 Windows host.
+Tawreed is a local-first React application embedded in a Tauri 2 desktop host
+for Windows, Linux, and macOS.
 The frontend performs document processing in Web Workers while Rust owns local
 storage, privileged filesystem operations, external processes, HTTPS provider
 calls, and update validation.
@@ -54,7 +55,7 @@ Runtime data is outside the installation directory:
   history.sqlite
   logs/app.log
   output/<project>/Rev XX/
-  bin/codex.exe
+  bin/codex[.exe]
 ```
 
 Revision publication uses a hidden temporary directory and a final atomic
@@ -68,13 +69,15 @@ rename so an interrupted generation is not exposed as a completed revision.
 - File-opening commands restrict targets to generated Tawreed output.
 - External URLs require HTTPS and an approved host.
 - Update tags must be canonical stable semantic versions and contain exactly
-  one expected Windows executable asset.
+  one expected package for the running platform.
 - AI output is reconciled against source identifiers rather than treated as a
   source of new BOQ facts.
 
 ## Platform Scope
 
-The current supported release is Windows x64. The Codex downloader and release
-artifact are Windows-specific. Linux and macOS should not be advertised until
-their native paths, OCR behavior, signing, packaging, and release tests are
-implemented.
+Supported packages are Windows x64, Linux x64, and universal macOS for Intel and
+Apple Silicon. CI compiles and packages every target. Windows receives a
+portable executable, Linux receives AppImage and Debian packages, and macOS
+receives an ad-hoc-signed universal DMG. Commercial Windows signing and Apple
+Developer ID notarization are not currently configured. Codex is discovered on
+`PATH` on every platform; managed Codex download remains Windows-only.

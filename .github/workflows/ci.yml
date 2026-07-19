@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, master]
+    branches: [main]
 
 permissions:
   contents: read
@@ -62,3 +62,91 @@ jobs:
           if ($exe.VersionInfo.ProductVersion -ne $expected) {
             throw "Executable version $($exe.VersionInfo.ProductVersion) does not match $expected."
           }
+
+  platform-builds:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+            rust-targets: x86_64-unknown-linux-gnu
+          - name: macOS universal
+            runner: macos-15-intel
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            xvfb
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.0
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        run: npm run tauri -- build --bundles appimage,deb --ci -- --locked
+
+      - name: Verify Linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
+          test "$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' | wc -l)" -eq 1
+          test "$(stat -c '%s' src-tauri/target/release/bundle/appimage/*.AppImage)" -gt 10000000
+          xvfb-run -a bash -c '
+            set -euo pipefail
+            src-tauri/target/release/tawreed &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true" EXIT
+            sleep 8
+            kill -0 "$pid"
+          '
+
+      - name: Build universal macOS package
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npm run tauri -- build --target universal-apple-darwin --bundles dmg --ci -- --locked
+
+      - name: Verify universal macOS package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          test "$(find "$bundle/dmg" -maxdepth 1 -name '*.dmg' | wc -l)" -eq 1
+          test "$(stat -f '%z' "$bundle"/dmg/*.dmg)" -gt 10000000
+          archs="$(lipo -archs "$bundle/macos/Tawreed.app/Contents/MacOS/tawreed")"
+          [[ "$archs" == *x86_64* && "$archs" == *arm64* ]]
+          codesign --verify --deep --strict "$bundle/macos/Tawreed.app"

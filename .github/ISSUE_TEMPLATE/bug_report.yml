@@ -10,14 +10,14 @@ body:
     id: version
     attributes:
       label: Tawreed version
-      placeholder: 0.1.0
+      placeholder: 0.2.0
     validations:
       required: true
   - type: input
-    id: windows
+    id: operating-system
     attributes:
-      label: Windows version
-      placeholder: Windows 11 24H2 x64
+      label: Operating system
+      placeholder: Windows 11 24H2 x64, Ubuntu 24.04 x64, or macOS 15 arm64
     validations:
       required: true
   - type: textarea

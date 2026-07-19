@@ -100,7 +100,7 @@ export default function AboutModal({ version, update, onCheckUpdate, onOpenUpdat
             </div>
             {update.status === 'available' && <div className="mt-0.5 text-[8px] text-zinc-500">{t('updateReadyDetail')}</div>}
             {update.status === 'available' && update.info.asset_sha256 && (
-              <div className="mt-0.5 break-all font-mono text-[7px] text-zinc-400">{t('updateChecksum', { hash: update.info.asset_sha256 })}</div>
+              <div className="mt-0.5 break-all font-mono text-[7px] text-zinc-400">{t('updateChecksum', { asset: update.info.asset_name, hash: update.info.asset_sha256 })}</div>
             )}
             {downloadFailed && <div className="mt-0.5 text-[8px] text-red-500">{t('updateDownloadFailed')}</div>}
           </div>
