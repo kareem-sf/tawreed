@@ -34,7 +34,7 @@
     "@tauri-apps/api": "^2.5.0",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
-    "i18next": "^24.2.0",
+    "i18next": "^26.3.6",
     "lucide-react": "^1.25.0",
     "motion": "^12.42.2",
     "pdfjs-dist": "^6.1.200",
