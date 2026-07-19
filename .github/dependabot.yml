@@ -2,51 +2,6 @@ version: 2
 
 updates:
   - package-ecosystem: npm
-    directory: /desktop
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: Africa/Cairo
-    groups:
-      desktop-minor:
-        applies-to: version-updates
-        update-types: [minor, patch]
-    commit-message:
-      prefix: deps(desktop)
-    labels: [dependencies, automated]
-
-  - package-ecosystem: npm
-    directory: /marketing-video
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: Africa/Cairo
-    groups:
-      remotion-minor:
-        applies-to: version-updates
-        update-types: [minor, patch]
-    commit-message:
-      prefix: deps(video)
-    labels: [dependencies, automated]
-
-  - package-ecosystem: cargo
-    directory: /desktop/src-tauri
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: Africa/Cairo
-    groups:
-      tauri-minor:
-        applies-to: version-updates
-        update-types: [minor, patch]
-    commit-message:
-      prefix: deps(tauri)
-    labels: [dependencies, automated]
-
-  - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
@@ -54,12 +9,26 @@ updates:
       time: "09:00"
       timezone: Africa/Cairo
     groups:
-      python-minor:
+      npm-minor:
         applies-to: version-updates
         update-types: [minor, patch]
-    open-pull-requests-limit: 5
     commit-message:
-      prefix: deps(python)
+      prefix: deps
+    labels: [dependencies, automated]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Africa/Cairo
+    groups:
+      cargo-minor:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps(rust)
     labels: [dependencies, automated]
 
   - package-ecosystem: github-actions

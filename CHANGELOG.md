@@ -1,22 +1,24 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+All notable changes to Tawreed are documented here. Versions follow Semantic
+Versioning.
 
-- Rebuilt the desktop application with React, TypeScript, Mantine, and Tauri 2.
-- Embedded the existing headless Python engine inside one portable host file.
-- Replaced the dense legacy interface with a staged, summary-first workflow.
-- Added explicit installer/archive rejection to release automation.
-- Added direct Windows, Linux AppImage, and raw macOS executable releases.
-- Rebuilt the product film as a maintainable Remotion project.
-- Removed the retired PySide application, packaging path, and Qt dependencies.
+## [0.1.0] - 2026-07-19
 
-## 0.0.1 — 2026-07-10
+### Added
 
-- Added BOQ `.xlsx` parsing with adaptive headers and merged-cell support.
-- Added bounded, schema-validated AI classification with exact item coverage.
-- Added Codex ChatGPT login integration and live account model discovery.
-- Added summary-only approval before workbook export.
-- Added package sheets, a Master sheet, and preserved formulas.
-- Added local run history and operating-system credential storage.
+- Dynamic Excel BOQ ingestion without a fixed workbook template.
+- Searchable PDF extraction and local English/Arabic OCR for scanned PDFs.
+- Grounded document analysis and optional Codex or Anthropic enhancement.
+- Revision-controlled master and standalone work-package workbook generation.
+- Local run history, direct workbook opening, and project output folders.
+- Bilingual English/Arabic interface with RTL support.
+- Secure GitHub release checks at startup and from the About view.
+- Reproducible Windows CI, release checksums, and build provenance.
 
-[0.0.1]: https://github.com/sfkareem/tawreed/releases/tag/v0.0.1
+### Changed
+
+- Replaced the previous Python/PySide and embedded-sidecar implementations with
+  a root-level React, TypeScript, Tauri 2, and Rust application.
+
+[0.1.0]: https://github.com/sfkareem/tawreed/releases/tag/v0.1.0

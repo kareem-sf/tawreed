@@ -1,39 +1,36 @@
-# Security
+# Security Policy
 
-Report vulnerabilities privately to **kareem@kareemsafwat.com**. Do not publish
-credentials or sensitive BOQ content in a GitHub issue.
+## Supported Versions
 
-## Local storage
+Only the latest stable release is supported with security fixes.
 
-Tawreed stores non-secret settings, run history, generated workbooks, and logs
-under `~/.tawreed/`. It does not collect telemetry.
+| Version | Supported |
+| --- | --- |
+| 0.1.x | Yes |
+| Earlier versions | No |
 
-API keys are stored through the operating-system credential service: Windows
-Credential Manager, macOS Keychain, or Linux libsecret. If Linux has no usable
-secret service, Tawreed can fall back to an owner-only obfuscated local file.
-That fallback is not encryption and must not be treated as a secure vault.
+## Reporting a Vulnerability
 
-## Desktop boundary
+Do not disclose vulnerabilities in a public issue. Use the repository's
+private security advisory form:
 
-The Tauri host accepts only an explicit engine-command allowlist and enforces a
-payload-size limit. Its content security policy blocks remote scripts, frames,
-objects, and arbitrary network connections from the webview. The embedded
-engine is materialized into a user-private temporary directory, executed with
-owner-only permissions on Unix, and removed on shutdown.
+https://github.com/sfkareem/tawreed/security/advisories/new
 
-## Provider and BOQ data
+Include affected versions, reproduction steps, impact, and any suggested
+mitigation. Do not include customer BOQs, API keys, Codex credentials, or
+generated workbooks.
 
-The Codex provider reuses the user's existing ChatGPT login. Tawreed requests
-model/account metadata through the official local protocol and never reads,
-copies, logs, or stores the Codex token.
+## Security Boundaries
 
-BOQ item text is sent only to the provider selected by the user. Inputs are
-bounded and treated as untrusted data. Provider results must cover exactly the
-requested item IDs before approval. BOQ rows, raw model output, secrets, and
-filesystem paths are not rendered in the desktop interface.
+- Tauri exposes only explicitly registered commands to the webview.
+- Input and generated-file commands canonicalize and constrain local paths.
+- Update downloads are fixed to the official repository and exact Windows
+  release asset; release responses cannot provide arbitrary executable URLs.
+- The webview CSP does not permit direct internet requests.
+- Anthropic keys are stored in plaintext under `~/.tawreed/.env`; protect the
+  operating-system account and do not include that directory in diagnostics.
+- Codex OAuth credentials remain managed by the official Codex CLI under
+  `~/.codex` and are not read by Tawreed.
 
-## Generated files
-
-Workbooks are written through a temporary file followed by an atomic replace.
-Previous outputs are preserved with non-conflicting filenames. Credentials can
-be explicitly replaced or removed through the storage API.
+Version `0.1.0` is not Authenticode-signed. Verify its published SHA-256 digest
+and GitHub provenance before execution.

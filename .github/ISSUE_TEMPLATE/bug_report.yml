@@ -1,0 +1,34 @@
+name: Bug report
+description: Report reproducible Tawreed behavior without sharing confidential BOQs.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach customer BOQs, API keys, logs, or generated workbooks without redaction.
+  - type: input
+    id: version
+    attributes:
+      label: Tawreed version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include exact steps, expected behavior, and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: safe-details
+    attributes:
+      label: Redacted diagnostics
+      description: Include only non-confidential error text or synthetic reproduction details.
