@@ -17,10 +17,16 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Spawn a process with NO console window — a GUI app must never flash terminals.
 pub fn quiet_command<P: AsRef<std::ffi::OsStr>>(program: P) -> Command {
-    let mut c = Command::new(program);
     #[cfg(windows)]
-    c.creation_flags(CREATE_NO_WINDOW);
-    c
+    {
+        let mut command = Command::new(program);
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(program)
+    }
 }
 
 // Detection is expensive (probing a 325MB exe) — cache it; explicit status checks bypass.

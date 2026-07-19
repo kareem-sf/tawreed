@@ -153,9 +153,13 @@ jobs:
           dmgs=("$bundle"/dmg/*.dmg)
           test "${#dmgs[@]}" -eq 1
           test "$(stat -f '%z' "${dmgs[0]}")" -gt 10000000
-          archs="$(lipo -archs "$bundle/macos/Tawreed.app/Contents/MacOS/tawreed")"
+          mount_dir="$(mktemp -d)"
+          trap 'hdiutil detach "$mount_dir" >/dev/null 2>&1 || true; rmdir "$mount_dir" 2>/dev/null || true' EXIT
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "${dmgs[0]}"
+          app="$mount_dir/Tawreed.app"
+          archs="$(lipo -archs "$app/Contents/MacOS/tawreed")"
           [[ "$archs" == *x86_64* && "$archs" == *arm64* ]]
-          codesign --verify --deep --strict "$bundle/macos/Tawreed.app"
+          codesign --verify --deep --strict "$app"
           mkdir release
           cp "${dmgs[0]}" release/Tawreed-macOS-universal.dmg
 
