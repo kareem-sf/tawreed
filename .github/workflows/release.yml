@@ -290,20 +290,33 @@ jobs:
           See the tagged installation guide for platform-specific requirements.
           EOF
 
-          gh release create "$tag" --verify-tag --draft --title "Tawreed $tag" --notes-file RELEASE_NOTES.md
-          release_id="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\" and .draft == true) | .id")"
-          if [[ -z "$release_id" || "$(printf '%s\n' "$release_id" | wc -l)" -ne 1 ]]; then
-            echo "Could not resolve exactly one draft release ID for $tag." >&2
-            exit 1
-          fi
-          gh release upload "$tag" \
-            release/LICENSES.txt \
-            release/SHA256SUMS.txt \
-            release/THIRD_PARTY_NOTICES.md \
-            release/Tawreed-Linux-x64.AppImage \
-            release/Tawreed-Linux-x64.deb \
-            release/Tawreed-Windows-x64.exe \
-            release/Tawreed-macOS-universal.dmg
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --silent
+          release_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="$tag" \
+            -f name="Tawreed $tag" \
+            -f body="$(cat RELEASE_NOTES.md)" \
+            -F draft=true \
+            -F prerelease=false \
+            --jq '.id')"
+          test -n "$release_id"
+
+          uploaded=false
+          for attempt in {1..6}; do
+            if gh release upload "$tag" \
+              release/LICENSES.txt \
+              release/SHA256SUMS.txt \
+              release/THIRD_PARTY_NOTICES.md \
+              release/Tawreed-Linux-x64.AppImage \
+              release/Tawreed-Linux-x64.deb \
+              release/Tawreed-Windows-x64.exe \
+              release/Tawreed-macOS-universal.dmg; then
+              uploaded=true
+              break
+            fi
+            echo "Draft release is not visible to gh yet; retrying upload ($attempt/6)."
+            sleep 5
+          done
+          test "$uploaded" = true
 
           expected=$'LICENSES.txt\nSHA256SUMS.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Linux-x64.AppImage\nTawreed-Linux-x64.deb\nTawreed-Windows-x64.exe\nTawreed-macOS-universal.dmg'
           actual="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq '.assets[].name' | sort)"
