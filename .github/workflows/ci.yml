@@ -58,7 +58,7 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --version 0.21.0 --locked
+        run: cargo install cargo-audit --locked
 
       - name: Audit Rust dependencies
         run: cargo audit -f src-tauri/Cargo.lock
