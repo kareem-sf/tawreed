@@ -309,6 +309,13 @@ jobs:
             --jq '.id')"
           test -n "$release_id"
 
+          # Wait for the draft to be resolvable by tag before uploading.
+          for wait in {1..12}; do
+            if gh release view "$tag" --json id --jq '.id' >/dev/null 2>&1; then break; fi
+            echo "Waiting for draft release to become resolvable by tag ($wait/12)."
+            sleep 5
+          done
+
           uploaded=false
           for attempt in {1..6}; do
             if gh release upload "$tag" --clobber \
