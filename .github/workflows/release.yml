@@ -1,0 +1,186 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Windows portable
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.0
+          targets: x86_64-pc-windows-msvc
+          components: clippy,rustfmt
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify tag version
+        run: npm run verify:version -- "${{ github.ref_name }}"
+
+      - name: Verify frontend, tests, build, assets, and version
+        run: npm run check
+
+      - name: Verify Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build fresh portable executable
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --locked
+
+      - name: Prepare and verify release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path "release" -Force | Out-Null
+          Copy-Item "src-tauri/target/release/tawreed.exe" "release/Tawreed-Windows-x64.exe"
+          Copy-Item "THIRD_PARTY_NOTICES.md" "release/THIRD_PARTY_NOTICES.md"
+
+          node scripts/generate-third-party-licenses.cjs release/LICENSES.txt
+          if ($LASTEXITCODE -ne 0) { throw "Third-party license generation failed." }
+
+          $exe = Get-Item "release/Tawreed-Windows-x64.exe"
+          $expected = (Get-Content "package.json" | ConvertFrom-Json).version
+          if ($exe.Length -lt 10MB) { throw "Portable executable is unexpectedly small." }
+          if ($exe.VersionInfo.ProductVersion -ne $expected) {
+            throw "Executable version $($exe.VersionInfo.ProductVersion) does not match $expected."
+          }
+          if ((Get-AuthenticodeSignature $exe.FullName).Status -ne "NotSigned") {
+            throw "The unsigned-release policy changed unexpectedly; review signing and documentation."
+          }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content "release/SHA256SUMS.txt" "$hash  Tawreed-Windows-x64.exe`n" -NoNewline
+
+      - name: Smoke-test executable startup
+        shell: pwsh
+        run: |
+          $process = Start-Process "release/Tawreed-Windows-x64.exe" -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) { throw "Tawreed exited during the startup smoke test." }
+          Stop-Process -Id $process.Id -Force
+
+      - name: Upload verified release payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tawreed-${{ github.ref_name }}-windows-x64
+          path: release/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Attest and publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download verified release payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: tawreed-${{ github.ref_name }}-windows-x64
+          path: release
+
+      - name: Verify immutable payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$'LICENSES.txt\nSHA256SUMS.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Windows-x64.exe'
+          actual="$(find release -maxdepth 1 -type f -printf '%f\n' | sort)"
+          test "$actual" = "$expected"
+          (cd release && sha256sum --check SHA256SUMS.txt)
+
+      - name: Attest portable executable
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: release/Tawreed-Windows-x64.exe
+
+      - name: Publish immutable GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft] | @tsv")"
+          if [[ -n "$existing" ]]; then
+            if [[ "$(printf '%s\n' "$existing" | wc -l)" -ne 1 ]]; then
+              echo "Multiple releases exist for $tag; refusing automated recovery." >&2
+              exit 1
+            fi
+            release_id="$(printf '%s' "$existing" | cut -f1)"
+            is_draft="$(printf '%s' "$existing" | cut -f2)"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "Published release $tag already exists; refusing to overwrite it." >&2
+              exit 1
+            fi
+            echo "Removing incomplete draft release $tag before a clean retry."
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
+          fi
+
+          cat >release/RELEASE_NOTES.md <<EOF
+          ## Tawreed $tag
+
+          Portable Windows x64 release for dynamic Excel and PDF BOQ processing,
+          local English/Arabic OCR, grounded AI-assisted work packaging, and
+          revision-controlled workbook delivery.
+
+          ### Installation
+
+          This executable is unsigned and may trigger Windows SmartScreen.
+          It requires Microsoft Edge WebView2 and the Microsoft Visual C++
+          2015-2022 x64 runtime. Verify \`SHA256SUMS.txt\` and GitHub provenance
+          before running it.
+
+          \`\`\`powershell
+          Get-FileHash .\\Tawreed-Windows-x64.exe -Algorithm SHA256
+          gh attestation verify .\\Tawreed-Windows-x64.exe --repo sfkareem/tawreed
+          \`\`\`
+
+          See the tagged source documentation for installation and privacy details.
+          EOF
+
+          gh release create "$tag" --verify-tag --draft --title "Tawreed $tag" --notes-file release/RELEASE_NOTES.md
+          gh release upload "$tag" release/Tawreed-Windows-x64.exe release/SHA256SUMS.txt release/THIRD_PARTY_NOTICES.md release/LICENSES.txt
+
+          expected=$'LICENSES.txt\nSHA256SUMS.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Windows-x64.exe'
+          actual="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Draft release asset set is not exact; leaving the release unpublished." >&2
+            exit 1
+          fi
+          gh release edit "$tag" --draft=false --latest

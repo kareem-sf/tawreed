@@ -1,96 +1,92 @@
 # Tawreed
 
-Tawreed is a cross-platform desktop application that turns a construction BOQ
-workbook into a validated work-package workbook. The interface is React and
-TypeScript inside a thin Tauri 2 host; the proven Excel and AI logic remains a
-headless Python engine embedded into the final executable.
+Tawreed is a Windows desktop application that converts construction BOQs into
+validated, revision-controlled procurement work packages. It reads dynamic
+Excel layouts and searchable or scanned PDF documents without requiring a
+fixed template.
 
-The release contract is strict: one portable executable per platform, with no
-installer and no ZIP, tarball, or disk image.
+## Capabilities
 
-## Workflow
+- Reads `.xlsx` workbooks and searchable or scanned PDFs.
+- Detects BOQ tables, project names, quantities, units, and relevant comments.
+- Runs English and Arabic OCR locally with bundled Tesseract assets.
+- Groups quantified scope into traceable procurement work packages.
+- Optionally refines ambiguous classification with Codex or Anthropic.
+- Produces a master workbook and standalone package workbooks under atomic
+  project revisions.
+- Keeps settings, history, logs, and generated output under `~/.tawreed`.
+- Checks the latest stable GitHub release at startup and from About.
 
-1. Select one `.xlsx` BOQ.
-2. Tawreed inspects, batches, classifies, and validates every item.
-3. Review package counts and warnings without exposing BOQ rows in the UI.
-4. Approve the summary once.
-5. Tawreed generates the workbook and records the run locally.
+Source quantities remain authoritative. AI may organize grounded source rows,
+but Tawreed does not allow it to invent item codes, quantities, project names,
+or comments.
 
-## Technology
+## Download
 
-- React 19, TypeScript, Mantine, XState, and i18next.
-- Tauri 2 with a small Rust process and security boundary.
-- Python, OpenPyXL, and provider adapters in an embedded PyInstaller sidecar.
-- Remotion for the product film.
+The supported release is a portable Windows x64 executable:
 
-The Rust host embeds the frozen Python engine as bytes, materializes it in a
-private temporary directory at runtime, and removes it when the app exits. End
-users still receive and manage only one file.
+`Tawreed-Windows-x64.exe`
 
-## Portable releases
+Download it from [GitHub Releases](https://github.com/sfkareem/tawreed/releases).
+Version `0.1.0` is unsigned, so Windows SmartScreen may display a warning. Each
+release includes SHA-256 checksums and GitHub build provenance. See
+[Installation](docs/INSTALL.md) before running the application.
 
-[GitHub Releases](https://github.com/sfkareem/tawreed/releases) publish direct
-executables under the `desktop-vX.Y.Z` version line:
+## Privacy
 
-| Platform | Release asset |
-| --- | --- |
-| Windows x64 | `Tawreed-Windows-x64.exe` |
-| Linux x64 | `Tawreed-Linux-x64.AppImage` |
-| macOS | `Tawreed-macOS-<architecture>` |
+Workbook parsing, PDF extraction, OCR, deterministic classification, workbook
+generation, and history storage run locally. BOQ content leaves the machine
+only when the user configures and uses Codex or Anthropic. Update checks make
+an unauthenticated request to the GitHub Releases API. See [Privacy](docs/PRIVACY.md).
 
-See [installation notes](docs/INSTALL.md) for unsigned-app warnings. Release
-automation rejects installer targets, archives, and indirect artifact uploads.
+## Development
 
-## Local development
+Requirements:
 
-Prerequisites: Python 3.12, Node.js 24, pnpm 11, the stable Rust toolchain, and
-the [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/) for
-your operating system.
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-pnpm --dir desktop install --frozen-lockfile
-pnpm --dir marketing-video install --frozen-lockfile
-```
-
-Run and verify the app:
+- Windows x64
+- Node.js 24
+- Rust 1.97.0 with the MSVC target
+- Visual Studio 2022 Build Tools with Desktop development with C++
+- Microsoft Edge WebView2 Runtime
 
 ```powershell
-pnpm --dir desktop tauri:dev
-python -m pytest --timeout=90
-python -m ruff check .
-python -m ruff format --check .
-pnpm --dir desktop check
-pnpm --dir marketing-video check
+npm ci
+npm run check
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+npm run tauri -- build --no-bundle --ci -- --locked
 ```
 
-Build the local portable executable:
+Run the desktop application during development with `npm run tauri -- dev`.
 
-```powershell
-pnpm --dir desktop tauri:build
-```
-
-The Python sidecar can be built independently with
-`python scripts/build_sidecar.py`.
-
-## Repository layout
+## Repository Layout
 
 ```text
-core/             Headless BOQ, provider, workbook, and persistence logic
-tawreed_engine/   Versioned JSON-lines command service
-desktop/          React frontend and Tauri Rust host
-marketing-video/  Remotion product film source
-scripts/          Sidecar builder and portable-release policy check
-tests/            Headless Python engine tests
+engine/       BOQ ingestion, document intelligence, classification, validation
+src/          React desktop interface and Web Worker integration
+shared/       Shared TypeScript contracts
+tests/        Vitest regression tests and synthetic fixtures
+public/       Pinned OCR and PDF.js runtime assets
+src-tauri/    Rust host, persistence, AI bridges, and update security boundary
+scripts/      Version and vendor-integrity checks
+docs/         Architecture, installation, privacy, and release guidance
 ```
 
-All user state lives under `~/.tawreed/`: non-secret settings, SQLite history,
-generated workbooks, and diagnostic logs. Provider API keys use the operating
-system credential manager. Read [Security](SECURITY.md) and
-[Architecture](docs/ARCHITECTURE.md) for the detailed boundaries.
+Marketing video projects and generated media are intentionally excluded from
+this repository.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Installation](docs/INSTALL.md)
+- [Privacy](docs/PRIVACY.md)
+- [Security](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Release process](docs/RELEASING.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License
 
-MIT © 2026 Kareem Safwat.
+Tawreed is licensed under the [MIT License](LICENSE). Copyright 2026 Kareem
+Safwat.

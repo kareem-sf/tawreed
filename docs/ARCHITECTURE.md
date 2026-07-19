@@ -1,61 +1,80 @@
 # Architecture
 
-Tawreed is one Tauri desktop application with three deliberate layers:
+## Overview
+
+Tawreed is a local-first React application embedded in a Tauri 2 Windows host.
+The frontend performs document processing in Web Workers while Rust owns local
+storage, privileged filesystem operations, external processes, HTTPS provider
+calls, and update validation.
 
 ```text
-React + TypeScript webview
-          │ versioned commands and events
-          ▼
-Thin Rust/Tauri host
-          │ JSON Lines over private stdin/stdout
-          ▼
-Embedded headless Python engine
-          │
-          ├─ provider APIs or the user's Codex session
-          ├─ local SQLite/settings/keyring
-          └─ input and generated .xlsx files
+React UI
+  -> BOQ Web Worker
+     -> ExcelJS ingestion or PDF.js extraction
+     -> local Tesseract OCR when required
+     -> deterministic document intelligence
+     -> grounded optional AI refinement
+     -> package validation and workbook generation
+  -> typed Tauri bridge
+     -> Rust commands
+        -> ~/.tawreed storage and SQLite history
+        -> Anthropic HTTPS or official Codex CLI
+        -> constrained file and URL opening
+        -> GitHub release validation
 ```
 
-## Desktop layer
+## Frontend
 
-`desktop/src` owns presentation only. Mantine supplies the design system,
-XState owns the workflow state machine, Zod validates engine payloads, and
-i18next handles English/Arabic direction and copy. The UI receives summaries,
-progress, and opaque approval tokens, never BOQ row data or raw model output.
+`src/App.tsx` owns the workflow and modal state. Heavy workbook and PDF work is
+routed through `src/workers/boq.worker.ts`. Engine modules are UI-independent
+and covered by Node-based Vitest tests.
 
-`desktop/src-tauri` is intentionally small. It embeds the frozen engine, writes
-it to a user-private temporary directory, starts it, validates command names and
-payload sizes, forwards versioned events, and removes the temporary process
-files on shutdown. Tauri's single-instance plugin owns desktop-instance
-coordination.
+`engine/ingest.ts` discovers spreadsheet structure and normalizes quantified
+rows. `engine/pdf-ingest.ts` reconstructs searchable PDF tables or runs local
+OCR. `engine/document-intelligence.ts` detects grounded project and comment
+metadata. Classification combines deterministic rules with optional AI, then
+`engine/generate.ts` creates the master and package workbooks.
 
-## Engine layer
+## Rust Host
 
-- `tawreed_engine/protocol.py` defines the versioned JSON-lines envelope.
-- `tawreed_engine/service.py` owns command dispatch and one active run.
-- `core/processing_pipeline.py` orchestrates parse, classification, validation,
-  approval, export, and history.
-- `core/packaging_agent.py` enforces legal workflow transitions and exact item
-  coverage.
-- `core/excel.py` parses and writes workbooks.
-- `core/ai.py`, `core/provider_registry.py`, `core/model_catalog.py`, and
-  `core/codex_connector.py` own bounded provider integration.
-- `core/db.py` owns non-secret settings, keyring-backed credentials, history,
-  and output paths.
-- `core/i18n.py` contains only engine/workbook translations and has no UI
-  framework dependency.
+The Rust host exposes only commands registered in `src-tauri/src/main.rs`.
+`commands.rs` validates local paths and controls workbook publication.
+`store.rs` manages `~/.tawreed`, SQLite history, settings, logs, and API-key
+resolution. `codex.rs` integrates the official Codex CLI. `update.rs` validates
+the latest stable release and constructs a fixed official download URL.
 
-## Approval boundary
+## Persistence
 
-The model classifies bounded JSON batches and must return exactly the requested
-item IDs. The complete draft stays inside `BOQProcessingPipeline`. The frontend
-receives an `ApprovalSummary` and an opaque token. Export is impossible until
-that current token is returned, and cancellation invalidates it.
+Runtime data is outside the installation directory:
 
-## Packaging boundary
+```text
+~/.tawreed/
+  .env
+  settings.json
+  history.sqlite
+  logs/app.log
+  output/<project>/Rev XX/
+  bin/codex.exe
+```
 
-`scripts/build_sidecar.py` freezes the Python engine for the current target
-triple. Tauri's Rust build embeds those bytes directly, so the published host
-is one file. Standard builds use `--no-bundle`; Linux releases explicitly build
-one AppImage. `scripts/check_portable_release.mjs` rejects installer targets,
-archives, stale package output, and workflow artifact indirection.
+Revision publication uses a hidden temporary directory and a final atomic
+rename so an interrupted generation is not exposed as a completed revision.
+
+## Security Model
+
+- The webview CSP permits local application assets and Tauri IPC, not direct
+  internet access.
+- Rust performs remote requests through rustls.
+- File-opening commands restrict targets to generated Tawreed output.
+- External URLs require HTTPS and an approved host.
+- Update tags must be canonical stable semantic versions and contain exactly
+  one expected Windows executable asset.
+- AI output is reconciled against source identifiers rather than treated as a
+  source of new BOQ facts.
+
+## Platform Scope
+
+The current supported release is Windows x64. The Codex downloader and release
+artifact are Windows-specific. Linux and macOS should not be advertised until
+their native paths, OCR behavior, signing, packaging, and release tests are
+implemented.

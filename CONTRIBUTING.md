@@ -1,39 +1,25 @@
 # Contributing
 
-## Setup
+## Before Opening a Change
 
-Install Python 3.12, Node.js 24, pnpm 11, Rust stable, and the official Tauri 2
-system prerequisites. Then run:
+Use an issue for substantial behavior or architecture changes. Never commit
+real customer BOQs, generated workbooks, credentials, logs, or files from
+`~/.tawreed`.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-pnpm --dir desktop install --frozen-lockfile
-pnpm --dir marketing-video install --frozen-lockfile
-pre-commit install
-```
+## Development Workflow
 
-## Required checks
+1. Create a focused branch from `main`.
+2. Install dependencies with `npm ci`.
+3. Add or update deterministic tests for behavior changes.
+4. Run `npm run check`.
+5. Run Rust formatting, Clippy, tests, and checks with `--locked`.
+6. Open a pull request using the repository template.
 
-```powershell
-python -m ruff check .
-python -m ruff format --check .
-python -m pytest --timeout=90
-pnpm --dir desktop check
-pnpm --dir marketing-video check
-cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check
-python scripts/build_sidecar.py
-pnpm --dir desktop tauri:build
-```
+Keep changes small, preserve the local-first security boundary, and do not
+allow AI output to create source facts. New bundled assets require pinned
+provenance, checksums, and license notices.
 
-Mock provider calls in automated tests. Add regression coverage for behavior
-changes. UI changes must verify keyboard focus, English/Arabic layout, and the
-rule that BOQ rows and raw model output are never rendered.
+## Commit and Pull Request Quality
 
-## Pull requests and releases
-
-Keep each change coherent and do not commit secrets, BOQ workbooks, generated
-media, binaries, or build output. A `desktop-vX.Y.Z` tag runs the portable
-release workflow. It may publish only one direct executable per platform; do
-not introduce installers or compressed release assets.
+Use concise imperative commit messages. Pull requests must explain behavior,
+testing, privacy impact, and release impact. CI must pass before merge.

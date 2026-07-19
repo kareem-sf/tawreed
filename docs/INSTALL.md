@@ -1,41 +1,53 @@
-# Install Tawreed
+# Installation
 
-Tawreed releases contain direct portable executables. There is no installer and
-no archive to unpack.
+## Requirements
 
-## Windows
+- 64-bit Windows 10 or Windows 11
+- Microsoft Edge WebView2 Evergreen Runtime
+- Microsoft Visual C++ 2015-2022 Redistributable, x64
+- An application capable of opening `.xlsx` files for the optional Open action
 
-Download `Tawreed-Windows-x64.exe` and run it. Until the project is code-signed,
-Microsoft Defender SmartScreen may show **Windows protected your PC**. Choose
-**More info**, verify the publisher/source, then choose **Run anyway**.
+Excel is not required to analyze documents or generate workbooks.
 
-## macOS
+## Install the Portable Release
 
-Download the file matching the published architecture, make it executable if
-needed, and launch it:
+1. Open the latest release at https://github.com/sfkareem/tawreed/releases.
+2. Download `Tawreed-Windows-x64.exe` and `SHA256SUMS.txt`.
+3. Verify the checksum:
 
-```bash
-chmod +x Tawreed-macOS-<architecture>
-./Tawreed-macOS-<architecture>
+```powershell
+Get-FileHash .\Tawreed-Windows-x64.exe -Algorithm SHA256
 ```
 
-For an unsigned build, macOS may require a right-click **Open** confirmation or
-removing quarantine after you have verified the release source.
+4. Compare the result with `SHA256SUMS.txt` and, when GitHub CLI is available,
+   verify provenance:
 
-## Linux
-
-Download `Tawreed-Linux-x64.AppImage`, then run:
-
-```bash
-chmod +x Tawreed-Linux-x64.AppImage
-./Tawreed-Linux-x64.AppImage
+```powershell
+gh attestation verify .\Tawreed-Windows-x64.exe --repo sfkareem/tawreed
 ```
 
-Some distributions require FUSE support for AppImage execution. The operating
-system must also provide a normal graphical desktop session.
+5. Move the executable to a user-writable folder and run it.
 
-## Codex connection
+Version `0.1.0` is not Authenticode-signed. Windows SmartScreen may require
+selecting More info and Run anyway after the checksum and provenance have been
+verified.
 
-Install the official Codex application or CLI, run `codex login`, and select
-ChatGPT. Tawreed discovers the account-visible model catalog without reading,
-copying, or storing the Codex token.
+## Updating
+
+Tawreed checks the latest stable GitHub release at every startup. About also
+provides a manual check. When an update is available:
+
+1. Download the new portable executable from the official release.
+2. Close the running Tawreed process.
+3. Replace the previous executable.
+4. Start Tawreed again and confirm the version in About.
+
+Tawreed never overwrites or executes a downloaded update automatically.
+Existing settings, history, and generated workbooks remain under `~/.tawreed`.
+
+## Troubleshooting
+
+If the application does not open, install or repair WebView2 and the Microsoft
+Visual C++ x64 runtime. Diagnostic logs are stored at
+`~/.tawreed/logs/app.log`; redact filenames, project names, and provider error
+details before sharing them.

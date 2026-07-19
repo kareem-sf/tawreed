@@ -1,0 +1,214 @@
+/* Tailwind v4 — default theme tokens + utilities, layered; preflight skipped (Mantine owns the reset). */
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Sync Tailwind's dark: variant with Mantine's color-scheme attribute. */
+@custom-variant dark (&:where([data-mantine-color-scheme=dark], [data-mantine-color-scheme=dark] *));
+
+:root {
+  --tw-gold: #e8b54a;
+  --tw-gold-light: #f5d58a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Frameless rounded window */
+body {
+  background: transparent;
+  border-radius: 14px;
+  user-select: none;
+}
+
+/* Scrollbars stay present for discoverability without becoming visual furniture. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(113, 113, 122, 0.34) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(113, 113, 122, 0.34);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(161, 121, 37, 0.58);
+}
+
+[data-mantine-scrollbar] {
+  --scrollarea-scrollbar-size: 4px !important;
+  padding: 0.5px !important;
+  background: transparent !important;
+}
+
+[data-mantine-scrollbar] > div {
+  background: rgba(113, 113, 122, 0.3) !important;
+}
+
+[data-mantine-scrollbar]:hover > div {
+  background: rgba(161, 121, 37, 0.55) !important;
+}
+
+.app-frame {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+[data-mantine-color-scheme='dark'] .app-frame {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  /* Static warm gradient — zero GPU cost, replaces the particle canvas */
+  background: radial-gradient(130% 90% at 50% -10%, #191307 0%, #0a0a10 60%);
+}
+
+[data-mantine-color-scheme='light'] .app-frame {
+  background: #fafafa;
+}
+
+/* Custom titlebar */
+.titlebar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 0 14px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+}
+
+.titlebar-btn {
+  width: 34px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.55;
+  transition: opacity 120ms, background 120ms;
+}
+
+.titlebar-btn:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.titlebar-btn.close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* Light-mode dot grid backdrop (kokonut style) */
+.dot-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.07) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+[data-mantine-color-scheme='dark'] .dot-grid {
+  display: none;
+}
+
+/* Gold accent text shimmer (AITextLoading) */
+@keyframes shimmer-slide {
+  from { background-position: 200% center; }
+  to { background-position: -200% center; }
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, #666 0%, #e8b54a 40%, #f5d58a 50%, #e8b54a 60%, #666 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-slide 2.2s linear infinite;
+}
+
+[data-mantine-color-scheme='dark'] .shimmer-text {
+  background: linear-gradient(90deg, #999 0%, #e8b54a 40%, #f5d58a 50%, #e8b54a 60%, #999 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* Package row hover */
+.pkg-row {
+  border-radius: 9px;
+  transition: background 120ms;
+}
+
+.pkg-row:hover {
+  background: rgba(232, 181, 74, 0.08);
+}
+
+/* Magic UI — ShimmerButton keyframes */
+@keyframes shimmer-slide {
+  to {
+    transform: translate(calc(100cqw - 100%), 0);
+  }
+}
+@keyframes spin-around {
+  0% { transform: translateZ(0) rotate(0); }
+  15%, 35% { transform: translateZ(0) rotate(90deg); }
+  65%, 85% { transform: translateZ(0) rotate(270deg); }
+  100% { transform: translateZ(0) rotate(360deg); }
+}
+.animate-shimmer-slide {
+  animation: shimmer-slide var(--speed) ease-in-out infinite alternate;
+}
+.animate-spin-around {
+  animation: spin-around calc(var(--speed) * 2) infinite linear;
+}
+
+/* Magic UI — AnimatedShinyText */
+.shiny-text {
+  background: linear-gradient(
+    120deg,
+    rgba(120, 113, 108, 0.9) 40%,
+    rgba(232, 181, 74, 1) 50%,
+    rgba(120, 113, 108, 0.9) 60%
+  );
+  background-size: var(--shiny-width, 120px) 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shiny-sweep 2.2s linear infinite;
+}
+@keyframes shiny-sweep {
+  from { background-position: 0 0; }
+  to { background-position: calc(-1 * var(--shiny-width, 120px)) 0; }
+}
+
+/* Magic Card theme vars */
+:root {
+  --mc-bg: #ffffff;
+  --mc-border: #e4e4e7;
+}
+[data-mantine-color-scheme='dark'] {
+  --mc-bg: #101014;
+  --mc-border: #2e2e36;
+}
