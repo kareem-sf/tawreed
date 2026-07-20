@@ -67,7 +67,7 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build portable Windows executable
-        run: cargo build --manifest-path src-tauri/Cargo.toml --release --locked
+        run: npm run tauri -- build --no-bundle --ci -- --locked
 
       - name: Verify portable executable
         shell: pwsh
