@@ -3,6 +3,26 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## [0.3.0] - 2026-07-20
+
+### Added
+
+- Fully dynamic work packaging: the AI now derives the procurement packages
+  from each BOQ (per project) instead of sorting items into a fixed list.
+
+### Changed
+
+- AI classification proposes a project-specific package structure first, then
+  assigns every item to it, so packages stay consistent within a project.
+- The offline keyword/grouping classifier is now the no-AI fallback only.
+- Renamed the provider-agnostic classifier module to reflect that it supports
+  any LLM provider, not a single vendor.
+
+### Fixed
+
+- AI enhancement on the API-key path now uses an approved model, so the
+  classifier actually runs instead of silently falling back.
+
 ## [0.2.0] - 2026-07-19
 
 ### Added
@@ -38,3 +58,4 @@ Versioning.
 
 [0.1.0]: https://github.com/kareem-sf/tawreed/releases/tag/v0.1.0
 [0.2.0]: https://github.com/kareem-sf/tawreed/releases/tag/v0.2.0
+[0.3.0]: https://github.com/kareem-sf/tawreed/releases/tag/v0.3.0

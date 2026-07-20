@@ -1,7 +1,7 @@
 // Bridge to the Rust host. In a plain browser (vite dev), commands degrade gracefully.
 import { invoke } from '@tauri-apps/api/core';
 import type { RunRecord } from '../shared/types';
-import type { AnthropicRequest } from '../engine/classify/anthropic';
+import type { LlmRequest } from '../engine/classify/llm';
 import type { GeneratedArtifact } from '../engine/generate';
 
 export interface BootstrapInfo {
@@ -54,9 +54,9 @@ export async function deleteApiKey(): Promise<void> {
   await invoke('delete_api_key');
 }
 
-/** Transport injected into the engine's Anthropic classifier — HTTP happens in Rust. */
+/** Transport injected into the engine's LLM classifier — HTTP happens in Rust. */
 export function makeLlmTransport() {
-  return async (request: AnthropicRequest): Promise<string> => {
+  return async (request: LlmRequest): Promise<string> => {
     if (!isDesktop()) throw new Error('LLM transport is only available in the desktop app');
     return invoke<string>('llm_complete', { request });
   };
@@ -64,9 +64,9 @@ export function makeLlmTransport() {
 
 /** Transport that routes classification through the Codex CLI (ChatGPT subscription quota). */
 export function makeCodexTransport(model?: string | null) {
-  return async (request: AnthropicRequest): Promise<string> => {
+  return async (request: LlmRequest): Promise<string> => {
     if (!isDesktop()) throw new Error('Codex transport is only available in the desktop app');
-    const { requestToPrompt } = await import('../engine/classify/anthropic');
+    const { requestToPrompt } = await import('../engine/classify/llm');
     return invoke<string>('codex_complete', { prompt: requestToPrompt(request), model: model ?? null });
   };
 }
