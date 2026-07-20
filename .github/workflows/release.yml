@@ -108,7 +108,20 @@ jobs:
         if: runner.os == 'macOS'
         env:
           APPLE_SIGNING_IDENTITY: "-"
-        run: npm run tauri -- build --target universal-apple-darwin --bundles dmg --ci -- --locked
+        # The DMG packaging step (bundle_dmg.sh / hdiutil / Finder) is flaky on
+        # GitHub's macOS runners and can fail transiently even after a clean build,
+        # so retry the whole build a few times before giving up.
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm run tauri -- build --target universal-apple-darwin --bundles dmg --ci -- --locked; then
+              exit 0
+            fi
+            echo "macOS DMG build attempt ${attempt} failed; retrying in 15s..." >&2
+            sleep 15
+          done
+          echo "macOS DMG build failed after 3 attempts" >&2
+          exit 1
 
       - name: Prepare Windows release asset
         if: runner.os == 'Windows'
