@@ -28,6 +28,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@e965/xlsx": "^0.20.3",
     "@mantine/core": "^7.17.0",
     "@mantine/hooks": "^7.17.0",
     "@tailwindcss/vite": "^4.3.3",

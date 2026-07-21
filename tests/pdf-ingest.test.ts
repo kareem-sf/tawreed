@@ -52,14 +52,14 @@ describe('PDF ingestion', () => {
     await expect(inspectPdf(bytes, 'huge.pdf', { enableOcr: false })).rejects.toThrow(/250/);
   }, 60_000);
 
-  it('rejects a ZIP-signed file carrying a .pdf extension', () => {
+  it('routes a ZIP-signed file by content even with a .pdf extension', () => {
     const zipMagic = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
-    expect(() => detectDocumentKind(zipMagic, 'sheet.pdf')).toThrow(/valid/i);
+    expect(detectDocumentKind(zipMagic, 'sheet.pdf')).toBe('xlsx');
   });
 
-  it('rejects a PDF-signed file carrying a .xlsx extension', () => {
+  it('routes a PDF-signed file by content even with an .xlsx extension', () => {
     const pdfMagic = new TextEncoder().encode('%PDF-1.4\n%trailing bytes');
-    expect(() => detectDocumentKind(pdfMagic, 'sheet.xlsx')).toThrow(/valid/i);
+    expect(detectDocumentKind(pdfMagic, 'sheet.xlsx')).toBe('pdf');
   });
 
   it('accepts .xlsm files as xlsx', () => {
