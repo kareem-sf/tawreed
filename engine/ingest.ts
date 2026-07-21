@@ -1,6 +1,6 @@
 // Dynamic XLSX ingestion: discovers a BOQ table from workbook structure, not a fixed template.
 import ExcelJS from 'exceljs';
-import type { BoqItem, ColumnMapping, InspectionResult, Unit } from '../shared/types';
+import type { BoqItem, ColumnMapping, InspectionResult, SourceKind, Unit } from '../shared/types';
 import { canonicalUnit, normalizeText, parseNumber } from './normalize';
 import {
   detectDocumentLanguage, detectProjectName, filterMeaningfulComments,
@@ -546,10 +546,22 @@ function analyzeSheet(sheet: ExcelJS.Worksheet): SheetCandidate | null {
   return best;
 }
 
-export async function inspectWorkbook(bytes: ArrayBuffer | Uint8Array, fileName: string): Promise<InspectionResult> {
+export async function inspectWorkbook(
+  bytes: ArrayBuffer | Uint8Array,
+  fileName: string,
+  sourceKind: SourceKind = 'xlsx',
+): Promise<InspectionResult> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes);
+  try {
+    await wb.xlsx.load(bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes);
+  } catch {
+    // ExcelJS throws a cryptic "reading 'sheets'" on malformed xl/workbook.xml; surface a clear, actionable error.
+    throw new Error('The standard Excel reader could not open this workbook. It may be corrupt or saved in an unsupported format.');
+  }
+  return analyzeLoadedWorkbook(wb, fileName, sourceKind);
+}
 
+export function analyzeLoadedWorkbook(wb: ExcelJS.Workbook, fileName: string, sourceKind: SourceKind): InspectionResult {
   const candidates: SheetCandidate[] = [];
   wb.eachSheet((sheet) => {
     if (sheet.state === 'veryHidden') return;
@@ -606,7 +618,7 @@ export async function inspectWorkbook(bytes: ArrayBuffer | Uint8Array, fileName:
 
   return {
     fileName,
-    sourceKind: 'xlsx',
+    sourceKind,
     projectName: project.value,
     projectNameConfidence: project.confidence,
     projectNameCandidates: [...new Set(projectCandidates.map((candidate) => candidate.text.trim()).filter(Boolean))].slice(0, 40),

@@ -3,7 +3,7 @@
 export type Unit =
   | 'm' | 'm2' | 'm3' | 'kg' | 'ton' | 'nr' | 'ls' | 'pt' | 'TR' | 'hr' | 'day' | 'other';
 
-export type SourceKind = 'xlsx' | 'pdf';
+export type SourceKind = 'xlsx' | 'xls' | 'csv' | 'ods' | 'pdf';
 export type DocumentLanguage = 'en' | 'ar' | 'mixed' | 'unknown';
 
 export interface BoqItem {
