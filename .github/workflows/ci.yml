@@ -185,24 +185,23 @@ jobs:
             kill -0 "$pid"
           '
 
-      - name: Build universal macOS package
+      # PR CI validates the native app bundle. DMG generation drives Finder/
+      # hdiutil UI and is retried separately by the tagged release workflow.
+      - name: Build universal macOS app
         if: runner.os == 'macOS'
         env:
           APPLE_SIGNING_IDENTITY: "-"
-        run: npm run tauri -- build --target universal-apple-darwin --bundles dmg --ci -- --locked
+        run: npm run tauri -- build --target universal-apple-darwin --bundles app --ci -- --locked
 
-      - name: Verify universal macOS package
+      - name: Verify universal macOS app
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
-          bundle=src-tauri/target/universal-apple-darwin/release/bundle
-          test "$(find "$bundle/dmg" -maxdepth 1 -name '*.dmg' | wc -l)" -eq 1
-          test "$(stat -f '%z' "$bundle"/dmg/*.dmg)" -gt 10000000
-          mount_dir="$(mktemp -d)"
-          trap 'hdiutil detach "$mount_dir" >/dev/null 2>&1 || true; rmdir "$mount_dir" 2>/dev/null || true' EXIT
-          hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$bundle"/dmg/*.dmg
-          app="$mount_dir/Tawreed.app"
-          archs="$(lipo -archs "$app/Contents/MacOS/tawreed")"
+          app=src-tauri/target/universal-apple-darwin/release/bundle/macos/Tawreed.app
+          executable="$app/Contents/MacOS/tawreed"
+          test -d "$app"
+          test "$(stat -f '%z' "$executable")" -gt 10000000
+          archs="$(lipo -archs "$executable")"
           [[ "$archs" == *x86_64* && "$archs" == *arm64* ]]
           codesign --verify --deep --strict "$app"
