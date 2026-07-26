@@ -6,7 +6,7 @@ import { listRuns, openGeneratedFolder, openWorkbook } from '../bridge';
 import type { RunRecord } from '../../shared/types';
 
 export default function HistoryDrawer({ opened }: { opened: boolean }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,15 +41,15 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
             return (
               <Table.Tr key={run.id}>
                 <Table.Td>
-                  <Tooltip label={date.toLocaleString()} openDelay={220}>
+                  <Tooltip label={date.toLocaleString(i18n.language)} openDelay={220}>
                     <div className="whitespace-nowrap text-[10px] leading-4 text-zinc-500">
-                      <div>{date.toLocaleDateString()}</div>
-                      <div>{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div>{date.toLocaleDateString(i18n.language)}</div>
+                      <div>{date.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                   </Tooltip>
                 </Table.Td>
                 <Table.Td>
-                  <Tooltip label={`${run.fileName}${run.revision ? ` · Rev ${String(run.revision).padStart(2, '0')}` : ''}`} openDelay={220}>
+                  <Tooltip label={`${run.fileName}${run.revision ? ` · ${t('revisionShort')} ${String(run.revision).padStart(2, '0')}` : ''}`} openDelay={220}>
                     <Text size="xs" maw={175} truncate fw={500}>{run.projectName || run.fileName}</Text>
                   </Tooltip>
                 </Table.Td>
@@ -62,13 +62,31 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
                 </Table.Td>
                 <Table.Td>
                   {run.llmUsed ? (
-                    <Tooltip label={t('aiRunDetail')} openDelay={180}>
+                    <Tooltip
+                      label={`${t('aiRunDetail')} · ${t('historyAgentDetail', {
+                        provider: run.provider ?? 'AI',
+                        model: run.model || t('modelPlaceholder'),
+                        events: run.trace?.length ?? 0,
+                        memory: run.memoryApplied ?? 0,
+                      })}`}
+                      openDelay={180}
+                      multiline
+                    >
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-violet-600 dark:text-violet-400">
                         <Sparkles className="h-3 w-3" /> AI
                       </span>
                     </Tooltip>
                   ) : (
-                    <Tooltip label={t('rulesRunDetail')} openDelay={180}>
+                    <Tooltip
+                      label={`${t('rulesRunDetail')} · ${t('historyAgentDetail', {
+                        provider: run.provider ?? 'offline',
+                        model: run.model || t('rules'),
+                        events: run.trace?.length ?? 0,
+                        memory: run.memoryApplied ?? 0,
+                      })}`}
+                      openDelay={180}
+                      multiline
+                    >
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-zinc-400">
                         <Workflow className="h-3 w-3" /> {t('rules')}
                       </span>

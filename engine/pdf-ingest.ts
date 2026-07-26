@@ -1,5 +1,7 @@
 import ExcelJS from 'exceljs';
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import type { PDFDocumentProxy, PDFPageProxy, TextItem } from 'pdfjs-dist/types/src/display/api';
+import type Tesseract from 'tesseract.js';
 import type { InspectionResult } from '../shared/types';
 import {
   detectDocumentLanguage,
@@ -162,30 +164,81 @@ function annotationText(annotation: Record<string, unknown>): string {
   return clean(contents?.str || annotation.contents || annotation.richText || title?.str || '');
 }
 
-async function nativePageTokens(page: any, pageNumber: number): Promise<PositionedToken[]> {
+async function nativePageTokens(page: PDFPageProxy, pageNumber: number): Promise<PositionedToken[]> {
   const content = await page.getTextContent({ includeMarkedContent: false });
-  const pageHeight = page.view[3] - page.view[1];
-  return content.items.flatMap((item: any) => {
-    if (!item || typeof item.str !== 'string' || !item.str.trim() || !Array.isArray(item.transform)) return [];
-    const fontSize = Math.max(1, Math.hypot(item.transform[2] ?? 0, item.transform[3] ?? 0));
+  // PDF text coordinates are bottom-up from the CropBox origin; anchor on view[3] so
+  // pages with a non-zero CropBox origin (view[1] !== 0) land on the same top-down axis.
+  const pageTop = page.view[3] ?? 0;
+  return content.items.flatMap((item): PositionedToken[] => {
+    if (!('str' in item) || !item.str.trim() || !Array.isArray(item.transform)) return [];
+    const textItem = item as TextItem;
+    const fontSize = Math.max(1, Math.hypot(textItem.transform[2] ?? 0, textItem.transform[3] ?? 0));
     return [{
-      text: clean(item.str),
-      x: Number(item.transform[4] ?? 0),
-      y: pageHeight - Number(item.transform[5] ?? 0),
-      width: Math.max(Number(item.width ?? 0), item.str.length * fontSize * 0.35),
-      height: Math.max(Number(item.height ?? 0), fontSize),
+      text: clean(textItem.str),
+      x: Number(textItem.transform[4] ?? 0),
+      y: pageTop - Number(textItem.transform[5] ?? 0),
+      width: Math.max(Number(textItem.width ?? 0), textItem.str.length * fontSize * 0.35),
+      height: Math.max(Number(textItem.height ?? 0), fontSize),
       page: pageNumber,
       fontSize,
     }];
   });
 }
 
+/** Minimal shape of a Tesseract worker — the injectable OCR seam (cf. LlmTransport in classify/llm.ts). */
+export interface OcrWorkerLike {
+  recognize: (
+    image: Tesseract.ImageLike,
+    options?: Partial<Tesseract.RecognizeOptions>,
+    output?: Partial<Tesseract.OutputFormats>,
+  ) => Promise<{ data: { blocks?: OcrBlockLike[] | null } }>;
+  setParameters?: (params: Partial<Tesseract.WorkerParams>) => Promise<unknown>;
+  terminate?: () => Promise<unknown>;
+}
+
+interface OcrWordLike {
+  text: string;
+  bbox: Tesseract.Bbox;
+}
+
+interface OcrLineLike {
+  words: OcrWordLike[];
+}
+
+interface OcrParagraphLike {
+  lines: OcrLineLike[];
+}
+
+interface OcrBlockLike {
+  paragraphs: OcrParagraphLike[];
+}
+
+/** Map Tesseract word boxes onto positioned tokens (top-down coordinates). Exported for tests. */
+export function ocrWordsToTokens(words: OcrWordLike[], pageNumber: number): PositionedToken[] {
+  return words.filter((word) => clean(word.text)).map((word) => ({
+    text: clean(word.text),
+    x: word.bbox.x0,
+    y: word.bbox.y0,
+    width: Math.max(1, word.bbox.x1 - word.bbox.x0),
+    height: Math.max(1, word.bbox.y1 - word.bbox.y0),
+    page: pageNumber,
+    fontSize: Math.max(8, word.bbox.y1 - word.bbox.y0),
+  }));
+}
+
+/** Run one OCR recognize pass and map the result blocks to tokens. Exported so a stub worker can drive it. */
+export async function ocrRecognizeTokens(worker: OcrWorkerLike, image: Tesseract.ImageLike, pageNumber: number): Promise<PositionedToken[]> {
+  const result = await worker.recognize(image, {}, { blocks: true, text: true });
+  const words = (result.data.blocks ?? []).flatMap((block) =>
+    block.paragraphs.flatMap((paragraph) => paragraph.lines.flatMap((line) => line.words)),
+  );
+  return ocrWordsToTokens(words, pageNumber);
+}
+
 async function ocrPageTokens(
-  page: any,
+  page: PDFPageProxy,
   pageNumber: number,
-  total: number,
-  worker: any,
-  onProgress?: (progress: PdfProgress) => void,
+  worker: OcrWorkerLike,
 ): Promise<PositionedToken[]> {
   if (typeof OffscreenCanvas === 'undefined') {
     throw new Error('Scanned PDF OCR requires a WebView with OffscreenCanvas support.');
@@ -197,25 +250,24 @@ async function ocrPageTokens(
   const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Could not create an OCR canvas.');
-  await page.render({ canvasContext: context as any, viewport }).promise;
+  await page.render({
+    canvas: null,
+    canvasContext: context as unknown as CanvasRenderingContext2D,
+    viewport,
+  }).promise;
 
-  const result = await worker.recognize(canvas, {}, { blocks: true, text: true });
-  const words = (result.data.blocks ?? []).flatMap((block: any) =>
-    block.paragraphs.flatMap((paragraph: any) => paragraph.lines.flatMap((line: any) => line.words)),
-  );
+  const tokens = await ocrRecognizeTokens(worker, canvas, pageNumber);
   // Release the canvas bitmap to free memory in long OCR runs
   canvas.width = 0;
   canvas.height = 0;
+  return tokens;
+}
 
-  return words.filter((word: any) => clean(word.text)).map((word: any) => ({
-    text: clean(word.text),
-    x: word.bbox.x0,
-    y: word.bbox.y0,
-    width: Math.max(1, word.bbox.x1 - word.bbox.x0),
-    height: Math.max(1, word.bbox.y1 - word.bbox.y0),
-    page: pageNumber,
-    fontSize: Math.max(8, word.bbox.y1 - word.bbox.y0),
-  }));
+/** Convert a file: URL to a plain filesystem path — in Node, pdfjs reads vendored font/cMap assets with fs. */
+function fileUrlToPlainPath(url: URL): string {
+  const pathname = decodeURIComponent(url.pathname);
+  // Windows drive paths arrive as "/A:/..." — drop the leading slash.
+  return /^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1) : pathname;
 }
 
 export async function inspectPdf(
@@ -224,34 +276,46 @@ export async function inspectPdf(
   options: PdfInspectOptions = {},
 ): Promise<InspectionResult> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const nodeWorkerUrl = new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).href;
   const nodeRuntime = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node;
-  pdfjs.GlobalWorkerOptions.workerSrc = nodeRuntime ? nodeWorkerUrl : pdfWorkerUrl;
+  // Node: resolve the bundled worker through the package export map instead of a hardcoded repo path.
+  pdfjs.GlobalWorkerOptions.workerSrc = nodeRuntime
+    ? new URL('../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).href
+    : pdfWorkerUrl;
   const origin = typeof self !== 'undefined' && self.location?.origin
     ? (self.location.origin.endsWith('/') ? self.location.origin : `${self.location.origin}/`)
     : import.meta.url;
+  // Vendored pdfjs assets: served over HTTP in the WebView, read from disk (plain paths) in Node.
+  const vendoredAsset = (dir: string) => nodeRuntime
+    ? fileUrlToPlainPath(new URL(`../public/pdfjs/${dir}/`, import.meta.url))
+    : new URL(`pdfjs/${dir}/`, origin).href;
   const loadingTask = pdfjs.getDocument({
     data: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
-    standardFontDataUrl: nodeRuntime ? undefined : new URL('pdfjs/standard_fonts/', origin).href,
-    cMapUrl: nodeRuntime ? undefined : new URL('pdfjs/cmaps/', origin).href,
+    standardFontDataUrl: vendoredAsset('standard_fonts'),
+    cMapUrl: vendoredAsset('cmaps'),
     cMapPacked: true,
-    wasmUrl: nodeRuntime ? undefined : new URL('pdfjs/wasm/', origin).href,
+    wasmUrl: vendoredAsset('wasm'),
   });
-  let pdf: any;
+  let pdf: PDFDocumentProxy;
   const tokens: PositionedToken[] = [];
   const annotations: PdfAnnotation[] = [];
   const projectCandidates: ProjectNameCandidate[] = [];
   let ocrPages = 0;
-  let ocrWorker: any = null;
+  let ocrWorker: OcrWorkerLike | null = null;
   let ocrCurrentPage = 0;
+  const ocrFailedPages: number[] = [];
 
   try {
     try {
       pdf = await loadingTask.promise;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (/password/i.test(message)) throw new Error('Password-protected PDFs are not supported. Remove the password and try again.');
-      throw new Error(`Could not open PDF: ${message}`);
+      if (/password/i.test(message)) {
+        throw new Error(
+          'Password-protected PDFs are not supported. Remove the password and try again.',
+          { cause: error },
+        );
+      }
+      throw new Error(`Could not open PDF: ${message}`, { cause: error });
     }
     if (pdf.numPages > 250) throw new Error('PDF exceeds the 250-page processing limit.');
 
@@ -268,45 +332,50 @@ export async function inspectPdf(
         const nativeText = pageTokens.map((token) => token.text).join(' ');
         let usedOcr = false;
         if (options.enableOcr !== false && !nodeRuntime && (pageTokens.length < 8 || nativeText.length < 80)) {
-          if (!ocrWorker) {
-            const Tesseract = await import('tesseract.js');
-            const ocrOrigin = self.location.origin.endsWith('/') ? self.location.origin : `${self.location.origin}/`;
-            ocrWorker = await Tesseract.createWorker(['eng', 'ara'], Tesseract.OEM.LSTM_ONLY, {
-              workerPath: new URL('ocr/worker.min.js', ocrOrigin).href,
-              langPath: new URL('ocr/lang', ocrOrigin).href,
-              corePath: new URL('ocr/core', ocrOrigin).href,
-              workerBlobURL: false,
-              logger: (message) => options.onProgress?.({
-                phase: 'ocr',
-                page: ocrCurrentPage,
-                total: pdf.numPages,
-                progress: message.progress,
-              }),
-            });
-            await ocrWorker.setParameters({
-              tessedit_pageseg_mode: Tesseract.PSM.AUTO,
-              preserve_interword_spaces: '1',
-            });
-          }
           try {
             ocrCurrentPage = pageNumber;
-            pageTokens = await ocrPageTokens(page, pageNumber, pdf.numPages, ocrWorker, options.onProgress);
+            // Worker setup lives inside the guard: if the bundled OCR assets fail to load,
+            // the page degrades to its sparse native tokens instead of sinking the document.
+            if (!ocrWorker) {
+              const Tesseract = await import('tesseract.js');
+              const ocrOrigin = self.location.origin.endsWith('/') ? self.location.origin : `${self.location.origin}/`;
+              ocrWorker = await Tesseract.createWorker(['eng', 'ara'], Tesseract.OEM.LSTM_ONLY, {
+                workerPath: new URL('ocr/worker.min.js', ocrOrigin).href,
+                langPath: new URL('ocr/lang', ocrOrigin).href,
+                corePath: new URL('ocr/core', ocrOrigin).href,
+                workerBlobURL: false,
+                logger: (message) => options.onProgress?.({
+                  phase: 'ocr',
+                  page: ocrCurrentPage,
+                  total: pdf.numPages,
+                  progress: message.progress,
+                }),
+              });
+              await ocrWorker.setParameters?.({
+                tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+                preserve_interword_spaces: '1',
+              });
+            }
+            pageTokens = await ocrPageTokens(page, pageNumber, ocrWorker);
             ocrPages++;
             usedOcr = true;
           } catch {
             // OCR failed for this page — keep the sparse native tokens
+            ocrFailedPages.push(pageNumber);
           }
         }
         tokens.push(...pageTokens);
 
-        const pageHeight = page.view[3] - page.view[1];
+        const pageTop = page.view[3] ?? 0;
+        const pageHeight = pageTop - (page.view[1] ?? 0);
         const pageAnnotations = await page.getAnnotations({ intent: 'display' }).catch(() => []);
         for (const annotation of pageAnnotations as Array<Record<string, unknown>>) {
           const text = annotationText(annotation);
           const filtered = filterMeaningfulComments([text]);
           if (!filtered.length) continue;
           const rect = Array.isArray(annotation.rect) ? annotation.rect as number[] : [];
-          annotations.push({ text: filtered[0]!, page: pageNumber, y: rect.length >= 4 ? pageHeight - rect[3]! : pageHeight / 2 });
+          // Same top-down convention as nativePageTokens: anchor on view[3], not page height.
+          annotations.push({ text: filtered[0]!, page: pageNumber, y: rect.length >= 4 ? pageTop - rect[3]! : pageHeight / 2 });
         }
 
         if (pageNumber <= 3) {
@@ -370,9 +439,12 @@ export async function inspectPdf(
       ocrPages,
       annotationCount: annotations.length,
       sheetName: 'PDF BOQ',
+      warnings: ocrFailedPages.length
+        ? [...result.warnings, `OCR failed for page(s) ${ocrFailedPages.join(', ')} — kept sparse native tokens`]
+        : result.warnings,
     };
   } finally {
-    if (ocrWorker) await ocrWorker.terminate().catch(() => {});
+    if (ocrWorker?.terminate) await ocrWorker.terminate().catch(() => {});
     await loadingTask.destroy().catch(() => {});
   }
 }

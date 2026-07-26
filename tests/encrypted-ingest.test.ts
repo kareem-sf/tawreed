@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Isolated suite: stub the spreadsheet engine so it reports an encrypted file, and verify the
 // tolerant reader turns that into a clear, actionable "password-protected" error.
 vi.mock('@e965/xlsx', () => ({
+  set_cptable: vi.fn(),
   read: vi.fn(() => {
     throw new Error('Unsupported Encryption Method');
   }),

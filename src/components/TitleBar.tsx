@@ -1,6 +1,6 @@
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import { ActionIcon, Tooltip, useMantineColorScheme } from '@mantine/core';
-import { Clock, Info, Minus, Monitor, Moon, Settings2, Sun, X } from 'lucide-react';
+import { Clock, Info, Maximize2, Minus, Monitor, Moon, Settings2, Sun, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTranslation } from 'react-i18next';
 import { isDesktop, setSetting } from '../bridge';
@@ -11,6 +11,7 @@ interface Props {
   onHistory: () => void;
   onAbout: () => void;
   updateAvailable: boolean;
+  modalOpen: boolean;
 }
 
 function Hint({ label, shortcut, detail }: { label: string; shortcut?: string; detail?: string }) {
@@ -29,33 +30,35 @@ function Tip({ label, shortcut, detail, children }: { label: string; shortcut?: 
   return <Tooltip label={<Hint label={label} shortcut={shortcut} detail={detail} />} openDelay={220}>{children}</Tooltip>;
 }
 
-export default function TitleBar({ onSettings, onHistory, onAbout, updateAvailable }: Props) {
+export default function TitleBar({ onSettings, onHistory, onAbout, updateAvailable, modalOpen }: Props) {
   const { t, i18n } = useTranslation();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const appWindow = isDesktop() ? getCurrentWindow() : null;
+  // Stable wrapper — getCurrentWindow() returns a new object each call, which would re-run effects every render.
+  const appWindow = useMemo(() => (isDesktop() ? getCurrentWindow() : null), []);
 
-  const cycleTheme = () => {
+  const cycleTheme = useCallback(() => {
     setColorScheme(colorScheme === 'auto' ? 'light' : colorScheme === 'light' ? 'dark' : 'auto');
-  };
-  const switchLanguage = () => {
+  }, [colorScheme, setColorScheme]);
+  const switchLanguage = useCallback(() => {
     const newLang = i18n.language === 'ar' ? 'en' : 'ar';
     void i18n.changeLanguage(newLang);
     void setSetting('language', newLang).catch(() => undefined);
-  };
+  }, [i18n]);
   const ThemeIcon = colorScheme === 'light' ? Sun : colorScheme === 'dark' ? Moon : Monitor;
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (!event.altKey) return;
+      if (!event.altKey || modalOpen) return;
+      // Match physical keys (event.code) so shortcuts work on Arabic keyboard layouts too.
       const action: Record<string, () => void> = {
-        t: cycleTheme,
-        l: switchLanguage,
-        h: onHistory,
-        a: onAbout,
-        s: onSettings,
-        m: () => { void appWindow?.minimize(); },
+        KeyT: cycleTheme,
+        KeyL: switchLanguage,
+        KeyH: onHistory,
+        KeyA: onAbout,
+        KeyS: onSettings,
+        KeyM: () => { void appWindow?.minimize(); },
       };
-      const run = action[event.key.toLowerCase()];
+      const run = action[event.code];
       if (run) {
         event.preventDefault();
         run();
@@ -63,7 +66,7 @@ export default function TitleBar({ onSettings, onHistory, onAbout, updateAvailab
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  }, [colorScheme, setColorScheme, i18n, onHistory, onAbout, onSettings, appWindow]);
+  }, [cycleTheme, switchLanguage, onHistory, onAbout, onSettings, appWindow, modalOpen]);
 
   return (
     <div className="titlebar" data-tauri-drag-region>
@@ -107,6 +110,15 @@ export default function TitleBar({ onSettings, onHistory, onAbout, updateAvailab
         <Tip label={t('minimize')} shortcut="Alt+M">
           <button className="titlebar-btn" onClick={() => appWindow?.minimize()} aria-label={t('minimize')}>
             <Minus size={14} />
+          </button>
+        </Tip>
+        <Tip label={t('maximize')}>
+          <button
+            className="titlebar-btn"
+            onClick={() => appWindow?.toggleMaximize()}
+            aria-label={t('maximize')}
+          >
+            <Maximize2 size={12} />
           </button>
         </Tip>
         <Tip label={t('close')} shortcut="Alt+F4">

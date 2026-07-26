@@ -15,12 +15,33 @@ export interface BoqItem {
   qty: number;
   rate: number | null;
   total: number | null;
+  rateDerived?: boolean; // rate was computed as total/qty by ingest, not read from the source
+  totalDerived?: boolean; // total was computed as qty*rate by ingest, not read from the source
   row: number; // source row in the original sheet (for traceability, never displayed)
   page?: number;
   comments?: string[];
 }
 
-export type ClassifySource = 'heuristic' | 'llm' | 'fallback';
+export type ClassifySource = 'heuristic' | 'llm' | 'fallback' | 'memory' | 'user';
+export type AiProvider = 'offline' | 'codex' | 'anthropic';
+
+export type AgentStage =
+  | 'inspect'
+  | 'consent'
+  | 'document-analysis'
+  | 'classify'
+  | 'memory'
+  | 'validate'
+  | 'human-review'
+  | 'generate'
+  | 'publish';
+
+export interface AgentEvent {
+  at: string;
+  stage: AgentStage;
+  status: 'started' | 'completed' | 'fallback' | 'cancelled' | 'failed';
+  detail: string;
+}
 
 export interface Classification {
   itemId: number;
@@ -111,4 +132,8 @@ export interface RunRecord {
   packageFolder?: string;
   sourceKind?: SourceKind;
   ocrUsed?: boolean;
+  provider?: AiProvider;
+  model?: string;
+  trace?: AgentEvent[];
+  memoryApplied?: number;
 }

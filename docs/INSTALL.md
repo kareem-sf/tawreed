@@ -69,7 +69,7 @@ is ad-hoc signed rather than Developer ID signed or notarized. On first launch,
 macOS may require Control-clicking Tawreed, choosing Open, and confirming Open,
 or allowing it under Privacy & Security.
 
-Version `0.2.0` does not use commercial Windows or Apple signing certificates.
+Release packages do not use commercial Windows or Apple signing certificates.
 
 ## Updating
 

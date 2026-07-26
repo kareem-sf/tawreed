@@ -1,10 +1,11 @@
 // Validation rule engine — errors block generation, warnings don't.
 import type { BoqItem, Classification, ValidationIssue, WorkPackage } from '../shared/types';
 import { TAXONOMY, UNCLASSIFIED } from './classify/taxonomy';
+import { itemTotal } from './item-total';
 import { normalizeText } from './normalize';
 
 const TOTAL_TOLERANCE_PCT = 0.015; // 1.5%
-const TOTAL_TOLERANCE_ABS = 100; // EGP
+const TOTAL_TOLERANCE_ABS = 1; // EGP — small floor so near-zero totals don't flap on rounding
 const OUTLIER_Z = 2.5;
 
 export function buildPackages(items: BoqItem[], classifications: Classification[]): WorkPackage[] {
@@ -23,7 +24,10 @@ export function buildPackages(items: BoqItem[], classifications: Classification[
       nameEn: dynamic?.packageNameEn || (code === 'WP-99' ? UNCLASSIFIED.nameEn : code),
       nameAr: dynamic?.packageNameAr || dynamic?.packageNameEn || (code === 'WP-99' ? UNCLASSIFIED.nameAr : code),
     };
-    const totalCost = itemIds.reduce((s, id) => s + (byItem.get(id)?.total ?? 0), 0);
+    const totalCost = itemIds.reduce((s, id) => {
+      const item = byItem.get(id);
+      return s + (item ? itemTotal(item) : 0);
+    }, 0);
     packages.push({
       code, nameEn: def.nameEn, nameAr: def.nameAr,
       itemIds: [...itemIds].sort((a, b) => a - b),
@@ -48,8 +52,8 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
     });
   }
 
-  // 2. Low-confidence classifications
-  const lowConf = classifications.filter((c) => c.source !== 'heuristic' && c.confidence < 0.5).map((c) => c.itemId);
+  // 2. Low-confidence classifications (WP-99 fallbacks are already covered by UNCLASSIFIED)
+  const lowConf = classifications.filter((c) => c.source !== 'heuristic' && c.confidence < 0.5 && c.packageCode !== UNCLASSIFIED.code).map((c) => c.itemId);
   if (lowConf.length > 0) {
     issues.push({
       severity: 'warning', code: 'LOW_CONFIDENCE',
@@ -117,7 +121,9 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
   // 6. Rate outliers within each package (z-score)
   const outliers: number[] = [];
   for (const pkg of packages) {
-    const priced = pkg.itemIds.map((id) => byItem.get(id)!).filter((i) => i.rate !== null && i.rate > 0);
+    const priced = pkg.itemIds
+      .map((id) => byItem.get(id))
+      .filter((i): i is BoqItem => !!i && i.rate !== null && i.rate > 0); // skip ids not present in items
     if (priced.length < 8) continue;
     const rates = priced.map((i) => i.rate!);
     const mean = rates.reduce((s, r) => s + r, 0) / rates.length;
@@ -131,6 +137,18 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
       messageEn: `${outliers.length} item(s) with rates >${OUTLIER_Z}σ above their package mean.`,
       messageAr: `${outliers.length} بند بأسعار أعلى من متوسط الحزمة بأكثر من ${OUTLIER_Z} انحراف معياري.`,
       itemIds: outliers,
+    });
+  }
+
+  // 7. Items missing from classification — a partial list silently drops them from every package.
+  const classifiedIds = new Set(classifications.map((c) => c.itemId));
+  const missing = items.filter((i) => !classifiedIds.has(i.id)).map((i) => i.id);
+  if (missing.length > 0) {
+    issues.push({
+      severity: 'error', code: 'UNCLASSIFIED_ITEMS',
+      messageEn: `${missing.length} item(s) are missing from the classification — they would drop out of every package.`,
+      messageAr: `${missing.length} بند غير موجود في التصنيف — ستسقط من جميع الحزم.`,
+      itemIds: missing,
     });
   }
 

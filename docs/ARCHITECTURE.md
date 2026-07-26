@@ -14,7 +14,9 @@ React UI
      -> ExcelJS ingestion or PDF.js extraction
      -> local Tesseract OCR when required
      -> deterministic document intelligence
-     -> grounded optional AI refinement
+     -> explicit external-provider consent gate
+     -> grounded optional AI refinement or offline policy route
+     -> local project memory + human item review
      -> package validation and workbook generation
   -> typed Tauri bridge
      -> Rust commands
@@ -26,8 +28,10 @@ React UI
 
 ## Frontend
 
-`src/App.tsx` owns the workflow and modal state. Heavy workbook and PDF work is
-routed through `src/workers/boq.worker.ts`. Engine modules are UI-independent
+`src/App.tsx` owns the staged workflow, cancellation, consent, review, and modal
+state. Heavy workbook and PDF work is routed through `src/boq-worker.ts`.
+`engine/agent-workflow.ts` defines typed audit events, approved-memory
+application, and revision-safe human edits. Engine modules are UI-independent
 and covered by Node-based Vitest tests.
 
 `engine/ingest.ts` discovers spreadsheet structure and normalizes quantified
@@ -41,8 +45,13 @@ metadata. Classification combines deterministic rules with optional AI, then
 The Rust host exposes only commands registered in `src-tauri/src/main.rs`.
 `commands.rs` validates local paths and controls workbook publication.
 `store.rs` manages `~/.tawreed`, SQLite history, settings, logs, and API-key
-resolution. `codex.rs` integrates the official Codex CLI. `update.rs` validates
-the latest stable release and constructs a fixed official download URL.
+resolution and native credential storage. `codex.rs` uses the official Codex
+app-server `model/list` method for discovery and `codex exec` for bounded
+one-shot jobs. Jobs use ephemeral sessions, an empty temporary working
+directory, ignored user configuration and repository rules, read-only
+sandboxing, response schemas, cancellation, timeouts, and bounded output.
+`update.rs` validates the latest stable release and constructs a fixed official
+download URL.
 
 ## Persistence
 
@@ -50,7 +59,7 @@ Runtime data is outside the installation directory:
 
 ```text
 ~/.tawreed/
-  .env
+  .env                    # credential fallback only
   settings.json
   history.sqlite
   logs/app.log
@@ -58,8 +67,12 @@ Runtime data is outside the installation directory:
   bin/codex[.exe]
 ```
 
-Revision publication uses a hidden temporary directory and a final atomic
-rename so an interrupted generation is not exposed as a completed revision.
+Anthropic credentials normally live in the platform credential manager. The
+SQLite database contains immutable run audit metadata and approved,
+project-scoped package mappings. Revision publication uses a hidden temporary
+directory and a final atomic rename so an interrupted generation is not
+exposed as a completed revision; a failed final rename remains retryable
+without rebuilding the workbooks.
 
 ## Security Model
 
@@ -72,6 +85,12 @@ rename so an interrupted generation is not exposed as a completed revision.
   one expected package for the running platform.
 - AI output is reconciled against source identifiers rather than treated as a
   source of new BOQ facts.
+- Quantities, units, item identifiers, and citations remain authoritative
+  deterministic data; AI can only propose grounded package assignments.
+- External AI requires a visible per-file consent step, and offline operation
+  remains a first-class route.
+- Every stage emits an audit event saved with provider, model, and memory use in
+  the run history.
 
 ## Platform Scope
 

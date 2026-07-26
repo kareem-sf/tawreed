@@ -1,0 +1,5 @@
+Project,Terminal Expansion,,,,
+Item,Description,Unit,Quantity,Rate,Amount
+1,Excavation for foundations,m3,100,10,1000
+2,Reinforced concrete foundations,m3,25,500,12500
+3,Electrical distribution board,no,2,2500,5000

@@ -23,6 +23,11 @@ for (const [source, version] of Object.entries(versions)) {
   if (version !== expected) throw new Error(`${source} version ${version ?? '(missing)'} does not match ${expected}`);
 }
 
+const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
+if (!changelog.includes(`## [${expected}]`)) {
+  throw new Error(`CHANGELOG.md has no "## [${expected}]" heading for the current version`);
+}
+
 const tag = process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : process.argv[2];
 if (tag && tag !== `v${expected}`) throw new Error(`Tag ${tag} does not match v${expected}`);
 console.log(`Verified Tawreed version ${expected}${tag ? ` against ${tag}` : ''}.`);

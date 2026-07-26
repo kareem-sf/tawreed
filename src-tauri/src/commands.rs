@@ -4,7 +4,68 @@ use crate::store;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
+
+static ACTIVE_AI_JOBS: Mutex<Option<HashMap<String, Arc<AtomicBool>>>> = Mutex::new(None);
+
+fn valid_job_id(job_id: &str) -> bool {
+    !job_id.is_empty()
+        && job_id.len() <= 80
+        && job_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+fn begin_ai_job(job_id: &str) -> Result<Arc<AtomicBool>, String> {
+    if !valid_job_id(job_id) {
+        return Err("Invalid AI job identifier".into());
+    }
+    let mut guard = ACTIVE_AI_JOBS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let jobs = guard.get_or_insert_with(HashMap::new);
+    if jobs.contains_key(job_id) {
+        return Err("AI job identifier is already active".into());
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    jobs.insert(job_id.to_string(), cancelled.clone());
+    Ok(cancelled)
+}
+
+fn finish_ai_job(job_id: &str) {
+    let mut guard = ACTIVE_AI_JOBS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(jobs) = guard.as_mut() {
+        jobs.remove(job_id);
+    }
+}
+
+async fn wait_for_cancellation(cancelled: Arc<AtomicBool>) {
+    while !cancelled.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(75)).await;
+    }
+}
+
+#[tauri::command]
+pub fn cancel_ai_job(job_id: String) -> Result<bool, String> {
+    if !valid_job_id(&job_id) {
+        return Err("Invalid AI job identifier".into());
+    }
+    let guard = ACTIVE_AI_JOBS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let Some(cancelled) = guard.as_ref().and_then(|jobs| jobs.get(&job_id)) else {
+        return Ok(false);
+    };
+    cancelled.store(true, Ordering::Relaxed);
+    Ok(true)
+}
 
 #[tauri::command]
 pub fn bootstrap() -> Result<store::BootstrapInfo, String> {
@@ -30,7 +91,14 @@ pub fn delete_api_key() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn llm_complete(request: Value) -> Result<String, String> {
+pub async fn llm_complete(request: Value, job_id: String) -> Result<String, String> {
+    let cancelled = begin_ai_job(&job_id)?;
+    let result = llm_complete_inner(request, cancelled).await;
+    finish_ai_job(&job_id);
+    result
+}
+
+async fn llm_complete_inner(request: Value, cancelled: Arc<AtomicBool>) -> Result<String, String> {
     let key = store::api_key()
         .ok_or("No Anthropic API key configured. Open Settings in Tawreed to add one.")?;
     let client = reqwest::Client::builder()
@@ -42,10 +110,10 @@ pub async fn llm_complete(request: Value) -> Result<String, String> {
     // Validate and sanitize the webview request before it ever reaches the API.
     // Only a known-good, minimal shape is forwarded; every other field is dropped.
     const ALLOWED_MODELS: &[&str] = &[
-        "claude-sonnet-4-20250514",
-        "claude-haiku-4-20250414",
-        "claude-3-5-haiku-20241022",
-        "claude-3-5-sonnet-20241022",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
     ];
     let model = request
         .get("model")
@@ -61,6 +129,7 @@ pub async fn llm_complete(request: Value) -> Result<String, String> {
     if messages.is_empty() {
         return Err("request.messages must not be empty".into());
     }
+    let messages = sanitize_messages(messages)?;
     let max_tokens = match request.get("max_tokens").and_then(Value::as_u64) {
         Some(n) => n.min(8192),
         None => 4096,
@@ -78,20 +147,34 @@ pub async fn llm_complete(request: Value) -> Result<String, String> {
             sanitized["temperature"] = json!(temperature);
         }
     }
+    let body = serialize_capped(&sanitized)?;
 
     let mut last_err = String::new();
     for attempt in 0..2 {
-        if attempt > 0 {
-            tokio_sleep(2_000).await;
+        if cancelled.load(Ordering::Relaxed) {
+            return Err("AI job cancelled".into());
         }
-        let result = client
+        if attempt > 0 {
+            tokio::select! {
+                _ = tokio_sleep(2_000) => {}
+                _ = wait_for_cancellation(cancelled.clone()) => {
+                    return Err("AI job cancelled".into());
+                }
+            }
+        }
+        let request = client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&sanitized)
-            .send()
-            .await;
+            .body(body.clone())
+            .send();
+        let result = tokio::select! {
+            response = request => response,
+            _ = wait_for_cancellation(cancelled.clone()) => {
+                return Err("AI job cancelled".into());
+            }
+        };
         match result {
             Ok(res) if res.status().is_success() => {
                 let body: Value = res
@@ -140,67 +223,62 @@ pub async fn llm_complete(request: Value) -> Result<String, String> {
     Err(last_err)
 }
 
-async fn tokio_sleep(ms: u64) {
-    tokio::time::sleep(Duration::from_millis(ms)).await;
+/// Re-serialize webview-supplied chat messages into the only shape forwarded to Anthropic:
+/// role is exactly `user` or `assistant`, content is text blocks only. Anything else
+/// (other roles, tool blocks, images, extra fields) is rejected, not passed through.
+fn sanitize_messages(messages: &[Value]) -> Result<Vec<Value>, String> {
+    let mut out = Vec::with_capacity(messages.len());
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .ok_or("message.role must be a string")?;
+        if role != "user" && role != "assistant" {
+            return Err(format!("message.role '{role}' is not allowed"));
+        }
+        let content = message
+            .get("content")
+            .ok_or("message.content is required")?;
+        let blocks = match content {
+            Value::String(text) => vec![json!({ "type": "text", "text": text })],
+            Value::Array(items) => {
+                if items.is_empty() {
+                    return Err("message.content must not be an empty array".into());
+                }
+                let mut blocks = Vec::with_capacity(items.len());
+                for item in items {
+                    if item.get("type").and_then(Value::as_str) != Some("text") {
+                        return Err("only text content blocks are allowed".into());
+                    }
+                    let text = item
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .ok_or("a text content block requires a string text")?;
+                    blocks.push(json!({ "type": "text", "text": text }));
+                }
+                blocks
+            }
+            _ => return Err("message.content must be a string or an array of text blocks".into()),
+        };
+        out.push(json!({ "role": role, "content": blocks }));
+    }
+    Ok(out)
 }
 
-#[tauri::command]
-pub fn write_workbook(bytes_b64: String, filename: String) -> Result<String, String> {
-    // Reject oversized payloads before decoding (~268M base64 chars ≈ 200 MB decoded).
-    if bytes_b64.len() > 268_435_456 {
-        return Err("Workbook payload exceeds the 200 MB limit".into());
-    }
-    // Sanitize: file name only, must be .xlsx
-    let name = std::path::Path::new(&filename)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("Invalid file name")?
-        .to_string();
-    if !name.to_lowercase().ends_with(".xlsx") {
-        return Err("Output file must be an .xlsx workbook".into());
-    }
-    let stem = std::path::Path::new(&name)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("workbook");
-    let safe_stem = safe_component(stem, 200);
-    let name = format!("{}.xlsx", safe_stem);
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(bytes_b64)
-        .map_err(|e| format!("decode workbook bytes: {e}"))?;
+/// Ceiling on the serialized request body. Classification batches are KiB-scale and every
+/// byte goes out under the user's API key, so an oversized payload is a bug, not a prompt.
+const MAX_LLM_REQUEST_BYTES: usize = 256 * 1024;
 
-    let dir = store::output_dir()?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create output dir: {e}"))?;
-    let requested = std::path::Path::new(&name);
-    let stem = requested
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("Tawreed-output");
-    let extension = requested
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("xlsx");
-    let mut final_path = dir.join(&name);
-    for suffix in 1.. {
-        if !final_path.exists() {
-            break;
-        }
-        final_path = dir.join(format!("{stem}-{suffix}.{extension}"));
+fn serialize_capped(payload: &Value) -> Result<Vec<u8>, String> {
+    let body = serde_json::to_vec(payload).map_err(|e| format!("serialize request: {e}"))?;
+    if body.len() > MAX_LLM_REQUEST_BYTES {
+        return Err("The request exceeds the 256 KB limit — split the batch and retry".into());
     }
-    let final_name = final_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(&name);
-    let tmp_path = dir.join(format!(".{final_name}.tmp"));
+    Ok(body)
+}
 
-    // Atomic-ish write: complete file to temp, then rename into place.
-    std::fs::write(&tmp_path, &bytes).map_err(|e| format!("write tmp: {e}"))?;
-    std::fs::rename(&tmp_path, &final_path).map_err(|e| format!("rename into place: {e}"))?;
-    store::log_line(&format!(
-        "workbook written: {final_name} ({} bytes)",
-        bytes.len()
-    ));
-    Ok(final_path.to_string_lossy().to_string())
+async fn tokio_sleep(ms: u64) {
+    tokio::time::sleep(Duration::from_millis(ms)).await;
 }
 
 fn safe_component(raw: &str, max_chars: usize) -> String {
@@ -271,10 +349,45 @@ pub struct RevisionOutput {
     files: Vec<String>,
 }
 
+/// Process-wide guard against two generations of the same project running at once — both
+/// could otherwise reserve the same `Rev NN` and the loser would fail only after doing all
+/// the work. Acquired by reserve_revision, released by write_revision_bundle and
+/// discard_revision on every exit path. These commands are synchronous, so the lock is
+/// only held for a map insert/remove at a time — never across an .await.
+static ACTIVE_GENERATIONS: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+    std::sync::Mutex::new(None);
+
+fn acquire_generation(project: &str) -> bool {
+    let mut guard = ACTIVE_GENERATIONS.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .get_or_insert_with(std::collections::HashSet::new)
+        .insert(project.to_string())
+}
+
+fn release_generation(project: &str) {
+    let mut guard = ACTIVE_GENERATIONS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(active) = guard.as_mut() {
+        active.remove(project);
+    }
+}
+
 #[tauri::command]
 pub fn reserve_revision(project_name: String) -> Result<RevisionReservation, String> {
     let project_name = safe_component(&project_name, 100);
-    let project_dir = store::output_dir()?.join(&project_name);
+    if !acquire_generation(&project_name) {
+        return Err(format!(
+            "A generation is already running for {project_name} — wait for it to finish or discard it"
+        ));
+    }
+    let reservation = reserve_revision_inner(&project_name);
+    if reservation.is_err() {
+        release_generation(&project_name);
+    }
+    reservation
+}
+
+fn reserve_revision_inner(project_name: &str) -> Result<RevisionReservation, String> {
+    let project_dir = store::output_dir()?.join(project_name);
     std::fs::create_dir_all(&project_dir)
         .map_err(|e| format!("create project output directory: {e}"))?;
     let revision = (1..10_000u32)
@@ -292,7 +405,7 @@ pub fn reserve_revision(project_name: String) -> Result<RevisionReservation, Str
     std::fs::create_dir_all(temp.join("Packages"))
         .map_err(|e| format!("reserve revision directory: {e}"))?;
     Ok(RevisionReservation {
-        project_name,
+        project_name: project_name.to_string(),
         revision,
         revision_label: format!("Rev {revision:02}"),
         session,
@@ -326,6 +439,19 @@ pub fn write_revision_bundle(
     revision: u32,
     artifacts: Vec<RevisionArtifact>,
 ) -> Result<RevisionOutput, String> {
+    // Release the per-project generation guard on every exit path, success or failure.
+    let project_name = safe_component(&project_name, 100);
+    let result = write_revision_bundle_inner(&project_name, session, revision, artifacts);
+    release_generation(&project_name);
+    result
+}
+
+fn write_revision_bundle_inner(
+    project_name: &str,
+    session: String,
+    revision: u32,
+    artifacts: Vec<RevisionArtifact>,
+) -> Result<RevisionOutput, String> {
     if artifacts.is_empty()
         || session.contains(['/', '\\'])
         || !session.starts_with(".tawreed-rev-")
@@ -333,8 +459,7 @@ pub fn write_revision_bundle(
     {
         return Err("Invalid revision session".into());
     }
-    let project_name = safe_component(&project_name, 100);
-    let project_dir = store::output_dir()?.join(&project_name);
+    let project_dir = store::output_dir()?.join(project_name);
     let temp = project_dir.join(&session);
     if !temp.is_dir() {
         return Err("Revision reservation no longer exists".into());
@@ -342,6 +467,19 @@ pub fn write_revision_bundle(
     let final_dir = project_dir.join(format!("Rev {revision:02}"));
     if final_dir.exists() {
         return Err(format!("Rev {revision:02} already exists"));
+    }
+
+    // Fail fast before any file of the bundle is written: the full target path
+    // (<output>/<project>/Rev NN/Packages/<name>.xlsx) must fit under Windows' 260-char
+    // MAX_PATH with margin, otherwise the write would die halfway through the bundle.
+    for artifact in &artifacts {
+        let target = safe_artifact_path(&final_dir, &artifact.relative_path)?;
+        if target.to_string_lossy().chars().count() > 240 {
+            return Err(format!(
+                "'{}' would exceed the maximum Windows path length — use a shorter project name",
+                artifact.relative_path
+            ));
+        }
     }
 
     let mut files = Vec::new();
@@ -363,7 +501,7 @@ pub fn write_revision_bundle(
             let tmp_file = path.with_extension("xlsx.tmp");
             std::fs::write(&tmp_file, &bytes)
                 .map_err(|e| format!("write generated workbook: {e}"))?;
-            std::fs::rename(&tmp_file, &path)
+            store::replace_file(&tmp_file, &path)
                 .map_err(|e| format!("publish generated workbook: {e}"))?;
             if artifact.kind == "master" {
                 master_relative = Some(artifact.relative_path.clone());
@@ -373,12 +511,21 @@ pub fn write_revision_bundle(
         if master_relative.is_none() {
             return Err("Generated bundle has no master workbook".into());
         }
-        std::fs::rename(&temp, &final_dir).map_err(|e| format!("publish revision: {e}"))?;
         Ok(())
     })();
     if let Err(error) = write_result {
         let _ = std::fs::remove_dir_all(&temp);
         return Err(error);
+    }
+
+    // Publish. On Windows this rename fails while anything holds a handle inside the
+    // folder (Explorer, antivirus, an open workbook) — keep the temp dir so the completed
+    // generation survives and the user can retry instead of losing the work.
+    if let Err(e) = std::fs::rename(&temp, &final_dir) {
+        return Err(format!(
+            "Could not publish the revision ({e}). The generated files are preserved at {} — close whatever is using them and try again.",
+            temp.to_string_lossy()
+        ));
     }
 
     let master = final_dir.join(master_relative.unwrap());
@@ -391,7 +538,7 @@ pub fn write_revision_bundle(
         files.len()
     ));
     Ok(RevisionOutput {
-        project_name,
+        project_name: project_name.to_string(),
         revision,
         revision_label: format!("Rev {revision:02}"),
         master_path: master.to_string_lossy().to_string(),
@@ -403,19 +550,24 @@ pub fn write_revision_bundle(
 
 #[tauri::command]
 pub fn discard_revision(project_name: String, session: String) -> Result<(), String> {
-    if session.contains(['/', '\\']) || !session.starts_with(".tawreed-rev-") {
-        return Err("Invalid revision session".into());
-    }
-    if !session.ends_with(".tmp") {
-        return Err("Invalid session directory name".into());
-    }
-    let temp = store::output_dir()?
-        .join(safe_component(&project_name, 100))
-        .join(session);
-    if temp.exists() {
-        std::fs::remove_dir_all(temp).map_err(|e| format!("discard revision: {e}"))?;
-    }
-    Ok(())
+    let project_name = safe_component(&project_name, 100);
+    let result = (|| -> Result<(), String> {
+        if session.contains(['/', '\\']) || !session.starts_with(".tawreed-rev-") {
+            return Err("Invalid revision session".into());
+        }
+        if !session.ends_with(".tmp") {
+            return Err("Invalid session directory name".into());
+        }
+        let temp = store::output_dir()?.join(&project_name).join(session);
+        if temp.exists() {
+            std::fs::remove_dir_all(temp).map_err(|e| format!("discard revision: {e}"))?;
+        }
+        Ok(())
+    })();
+    // A malformed or already-missing reservation must not permanently strand the
+    // process-wide project guard.
+    release_generation(&project_name);
+    result
 }
 
 #[tauri::command]
@@ -426,8 +578,8 @@ pub fn read_input_file(path: String) -> Result<Value, String> {
         .and_then(|ext| ext.to_str())
         .map(str::to_lowercase)
         .ok_or("The input file has no extension")?;
-    if extension != "xlsx" && extension != "pdf" {
-        return Err("Only .xlsx workbooks and PDF documents are supported".into());
+    if !matches!(extension.as_str(), "xlsx" | "xls" | "csv" | "ods" | "pdf") {
+        return Err("Only .xlsx, .xls, .csv, .ods, and .pdf inputs are supported".into());
     }
     let metadata = std::fs::metadata(path).map_err(|e| format!("read workbook metadata: {e}"))?;
     if !metadata.is_file() {
@@ -437,13 +589,19 @@ pub fn read_input_file(path: String) -> Result<Value, String> {
         return Err("The input file is larger than the 100 MB limit".into());
     }
     let bytes = std::fs::read(path).map_err(|e| format!("read input file: {e}"))?;
-    let valid = if extension == "pdf" {
-        bytes.starts_with(b"%PDF-")
-    } else {
-        bytes.len() >= 4
-            && bytes[0] == 0x50
-            && bytes[1] == 0x4b
-            && matches!(bytes[2], 0x03 | 0x05 | 0x07)
+    let valid = match extension.as_str() {
+        "pdf" => bytes.starts_with(b"%PDF-"),
+        "xlsx" | "ods" => {
+            bytes.len() >= 4
+                && bytes[0] == 0x50
+                && bytes[1] == 0x4b
+                && matches!(bytes[2], 0x03 | 0x05 | 0x07)
+        }
+        "xls" => bytes.starts_with(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+        // Text files have no reliable magic number. Reject empty and obviously
+        // binary payloads while retaining UTF-8 and legacy Windows/Arabic encodings.
+        "csv" => !bytes.is_empty() && bytes.iter().filter(|byte| **byte == 0).count() < 4,
+        _ => false,
     };
     if !valid {
         return Err(format!(
@@ -453,18 +611,48 @@ pub fn read_input_file(path: String) -> Result<Value, String> {
     Ok(json!({
         "bytes": base64::engine::general_purpose::STANDARD.encode(bytes),
         "name": path.file_name().and_then(|name| name.to_str()).unwrap_or("input").to_string(),
-        "mime": if extension == "pdf" { "application/pdf" } else { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+        "mime": match extension.as_str() {
+            "pdf" => "application/pdf",
+            "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xls" => "application/vnd.ms-excel",
+            "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+            "csv" => "text/csv",
+            _ => "application/octet-stream",
+        },
     }))
 }
 
 #[tauri::command]
 pub fn record_run(entry: Value) -> Result<i64, String> {
+    let provider = entry
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("offline");
+    if !matches!(provider, "offline" | "codex" | "anthropic") {
+        return Err("Invalid run provider".into());
+    }
+    let model = entry.get("model").and_then(Value::as_str).unwrap_or("");
+    if model.chars().count() > 160 {
+        return Err("Run model identifier is too long".into());
+    }
+    let empty_trace = json!([]);
+    let trace_json = serde_json::to_string(
+        entry
+            .get("trace")
+            .filter(|trace| trace.is_array())
+            .unwrap_or(&empty_trace),
+    )
+    .map_err(|e| format!("serialize run trace: {e}"))?;
+    if trace_json.len() > 256 * 1024 {
+        return Err("Run trace exceeds the 256 KB limit".into());
+    }
     let conn = store::open_db()?;
     conn.execute(
         "INSERT INTO runs (started_at, file_name, file_hash, item_count, package_count,
                            error_count, warning_count, output_file, duration_ms, llm_used,
-                           project_name, revision, package_folder, source_kind, ocr_used)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                           project_name, revision, package_folder, source_kind, ocr_used,
+                           provider, model, trace_json, memory_applied)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
         rusqlite::params![
             entry.get("startedAt").and_then(Value::as_str).unwrap_or(""),
             entry.get("fileName").and_then(Value::as_str).unwrap_or(""),
@@ -505,6 +693,13 @@ pub fn record_run(entry: Value) -> Result<i64, String> {
                 .get("ocrUsed")
                 .and_then(Value::as_bool)
                 .unwrap_or(false) as i64,
+            provider,
+            model,
+            trace_json,
+            entry
+                .get("memoryApplied")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
         ],
     )
     .map_err(|e| format!("insert run: {e}"))?;
@@ -518,7 +713,8 @@ pub fn list_runs() -> Result<Vec<Value>, String> {
         .prepare(
             "SELECT id, started_at, file_name, file_hash, item_count, package_count,
                     error_count, warning_count, output_file, duration_ms, llm_used,
-                    project_name, revision, package_folder, source_kind, ocr_used
+                    project_name, revision, package_folder, source_kind, ocr_used,
+                    provider, model, trace_json, memory_applied
              FROM runs ORDER BY id DESC LIMIT 100",
         )
         .map_err(|e| format!("prepare: {e}"))?;
@@ -541,6 +737,11 @@ pub fn list_runs() -> Result<Vec<Value>, String> {
                 "packageFolder": r.get::<_, String>(13)?,
                 "sourceKind": r.get::<_, String>(14)?,
                 "ocrUsed": r.get::<_, i64>(15)? == 1,
+                "provider": r.get::<_, String>(16)?,
+                "model": r.get::<_, String>(17)?,
+                "trace": serde_json::from_str::<Value>(&r.get::<_, String>(18)?)
+                    .unwrap_or_else(|_| json!([])),
+                "memoryApplied": r.get::<_, i64>(19)?,
             }))
         })
         .map_err(|e| format!("query runs: {e}"))?;
@@ -549,6 +750,111 @@ pub fn list_runs() -> Result<Vec<Value>, String> {
         out.push(row.map_err(|e| format!("row: {e}"))?);
     }
     Ok(out)
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationMemoryEntry {
+    description_key: String,
+    package_code: String,
+    package_name_en: String,
+    package_name_ar: String,
+    updated_at: String,
+}
+
+fn valid_package_code(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 32
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+#[tauri::command]
+pub fn save_classification_memory(
+    project_name: String,
+    entries: Vec<ClassificationMemoryEntry>,
+) -> Result<usize, String> {
+    let project_name = safe_component(&project_name, 100);
+    if entries.len() > 20_000 {
+        return Err("Too many classification memory entries".into());
+    }
+    let mut conn = store::open_db()?;
+    let transaction = conn
+        .transaction()
+        .map_err(|e| format!("start memory transaction: {e}"))?;
+    let mut saved = 0usize;
+    for entry in entries {
+        let description_key = entry.description_key.trim();
+        if description_key.is_empty()
+            || description_key.chars().count() > 1_000
+            || !valid_package_code(entry.package_code.trim())
+            || entry.package_name_en.trim().is_empty()
+            || entry.package_name_en.chars().count() > 240
+            || entry.package_name_ar.chars().count() > 240
+            || entry.updated_at.trim().is_empty()
+            || entry.updated_at.chars().count() > 64
+        {
+            return Err("Invalid classification memory entry".into());
+        }
+        transaction
+            .execute(
+                "INSERT INTO classification_memory (
+                    project_name, description_key, package_code, package_name_en,
+                    package_name_ar, updated_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6)
+                 ON CONFLICT(project_name, description_key) DO UPDATE SET
+                    package_code=excluded.package_code,
+                    package_name_en=excluded.package_name_en,
+                    package_name_ar=excluded.package_name_ar,
+                    updated_at=excluded.updated_at",
+                rusqlite::params![
+                    &project_name,
+                    description_key,
+                    entry.package_code.trim(),
+                    entry.package_name_en.trim(),
+                    entry.package_name_ar.trim(),
+                    entry.updated_at,
+                ],
+            )
+            .map_err(|e| format!("save classification memory: {e}"))?;
+        saved += 1;
+    }
+    transaction
+        .commit()
+        .map_err(|e| format!("commit classification memory: {e}"))?;
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn list_classification_memory(
+    project_name: String,
+) -> Result<Vec<ClassificationMemoryEntry>, String> {
+    let project_name = safe_component(&project_name, 100);
+    let conn = store::open_db()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT description_key, package_code, package_name_en, package_name_ar, updated_at
+             FROM classification_memory
+             WHERE project_name = ?1
+             ORDER BY updated_at DESC
+             LIMIT 20000",
+        )
+        .map_err(|e| format!("prepare classification memory: {e}"))?;
+    let entries = stmt
+        .query_map([project_name], |row| {
+            Ok(ClassificationMemoryEntry {
+                description_key: row.get(0)?,
+                package_code: row.get(1)?,
+                package_name_en: row.get(2)?,
+                package_name_ar: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| format!("read classification memory: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("read classification memory: {e}"))?;
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -718,11 +1024,23 @@ pub fn codex_login() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn codex_complete(prompt: String, model: Option<String>) -> Result<String, String> {
+pub async fn codex_complete(
+    prompt: String,
+    model: Option<String>,
+    output_schema: Option<Value>,
+    job_id: String,
+) -> Result<String, String> {
+    let cancelled = begin_ai_job(&job_id)?;
     // Codex is a long-running subprocess. Never block Tauri's UI thread while waiting for it.
-    tauri::async_runtime::spawn_blocking(move || crate::codex::complete(&prompt, model.as_deref()))
-        .await
-        .map_err(|e| format!("codex worker failed: {e}"))?
+    let worker = tauri::async_runtime::spawn_blocking(move || {
+        crate::codex::complete(&prompt, model.as_deref(), output_schema.as_ref(), cancelled)
+    })
+    .await;
+    finish_ai_job(&job_id);
+    match worker {
+        Ok(result) => result,
+        Err(error) => Err(format!("codex worker failed: {error}")),
+    }
 }
 
 #[tauri::command]

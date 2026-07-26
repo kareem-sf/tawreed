@@ -7,9 +7,10 @@ interface NumberTickerProps {
   duration?: number;
   className?: string;
   formatter?: (n: number) => string;
+  locale?: string;
 }
 
-export function NumberTicker({ value, duration = 900, className, formatter }: NumberTickerProps) {
+export function NumberTicker({ value, duration = 900, className, formatter, locale = 'en' }: NumberTickerProps) {
   const [display, setDisplay] = useState(0);
   const fromRef = useRef(0);
 
@@ -29,6 +30,6 @@ export function NumberTicker({ value, duration = 900, className, formatter }: Nu
     return () => cancelAnimationFrame(raf);
   }, [value, duration]);
 
-  const fmt = formatter ?? ((n: number) => new Intl.NumberFormat('en', { maximumFractionDigits: 0 }).format(n));
+  const fmt = formatter ?? ((n: number) => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n));
   return <span className={cn('tabular-nums', className)}>{fmt(display)}</span>;
 }

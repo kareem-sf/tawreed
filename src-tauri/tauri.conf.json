@@ -14,10 +14,12 @@
     "windows": [
       {
         "title": "Tawreed",
-        "width": 760,
-        "height": 560,
-        "resizable": false,
-        "maximizable": false,
+        "width": 920,
+        "height": 680,
+        "minWidth": 760,
+        "minHeight": 560,
+        "resizable": true,
+        "maximizable": true,
         "decorations": false,
         "transparent": true,
         "center": true

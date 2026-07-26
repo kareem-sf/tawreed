@@ -58,7 +58,9 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-audit
 
       - name: Audit Rust dependencies
         run: cargo audit -f src-tauri/Cargo.lock
@@ -79,15 +81,39 @@ jobs:
             throw "Executable version $($exe.VersionInfo.ProductVersion) does not match $expected."
           }
 
+  frontend-tests:
+    name: Frontend tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
   platform-builds:
     name: Build ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Windows x64
-            runner: windows-2022
-            rust-targets: x86_64-pc-windows-msvc
           - name: Linux x64
             runner: ubuntu-24.04
             rust-targets: x86_64-unknown-linux-gnu
@@ -137,22 +163,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
-
-      - name: Build Windows portable executable
-        if: runner.os == 'Windows'
-        run: npm run tauri -- build --no-bundle --ci -- --locked
-
-      - name: Verify Windows portable executable
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $exe = Get-Item "src-tauri/target/release/tawreed.exe"
-          $expected = (Get-Content "package.json" | ConvertFrom-Json).version
-          if ($exe.Length -lt 10MB) { throw "Portable executable is unexpectedly small." }
-          if ($exe.VersionInfo.ProductVersion -ne $expected) {
-            throw "Executable version $($exe.VersionInfo.ProductVersion) does not match $expected."
-          }
 
       - name: Build Linux packages
         if: runner.os == 'Linux'

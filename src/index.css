@@ -21,6 +21,11 @@ body {
   user-select: none;
 }
 
+/* Opt back into selection for copyable text (output paths, error messages). */
+.allow-select {
+  user-select: text;
+}
+
 /* Scrollbars stay present for discoverability without becoming visual furniture. */
 * {
   scrollbar-width: thin;

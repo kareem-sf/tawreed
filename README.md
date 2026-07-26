@@ -7,11 +7,17 @@ fixed template.
 
 ## Capabilities
 
-- Reads `.xlsx` workbooks and searchable or scanned PDFs.
+- Reads `.xlsx`, `.xls`, `.csv`, and `.ods` workbooks plus searchable or scanned
+  PDFs.
 - Detects BOQ tables, project names, quantities, units, and relevant comments.
 - Runs English and Arabic OCR locally with bundled Tesseract assets.
 - Groups quantified scope into traceable procurement work packages.
-- Optionally refines ambiguous classification with Codex or Anthropic.
+- Runs a visible, cancellable agent workflow with explicit approval before any
+  BOQ content is sent to Codex or Anthropic.
+- Learns approved project-specific package mappings locally while preserving
+  deterministic quantities and source citations.
+- Supports item-level human review, edits, audit traces, offline routing, and
+  retry-safe revision publication.
 - Produces a master workbook and standalone package workbooks under atomic
   project revisions.
 - Keeps settings, history, logs, and generated output under `~/.tawreed`.
@@ -30,7 +36,7 @@ The supported release packages are:
 - macOS Intel and Apple Silicon: `Tawreed-macOS-universal.dmg`
 
 Download them from [GitHub Releases](https://github.com/kareem-sf/tawreed/releases).
-Version `0.2.0` does not use commercial platform signing, so Windows SmartScreen
+Release packages do not use commercial platform signing, so Windows SmartScreen
 or macOS Gatekeeper may display a warning. Each release includes SHA-256
 checksums and GitHub build provenance. See
 [Installation](docs/INSTALL.md) before running the application.
@@ -39,8 +45,10 @@ checksums and GitHub build provenance. See
 
 Workbook parsing, PDF extraction, OCR, deterministic classification, workbook
 generation, and history storage run locally. BOQ content leaves the machine
-only when the user configures and uses Codex or Anthropic. Update checks make
-an unauthenticated request to the GitHub Releases API. See [Privacy](docs/PRIVACY.md).
+only after the user explicitly approves a Codex or Anthropic request. Anthropic
+keys use the operating system credential store when available. Update checks
+make an unauthenticated request to the GitHub Releases API. See
+[Privacy](docs/PRIVACY.md).
 
 ## Development
 
@@ -48,7 +56,7 @@ Requirements:
 
 - Windows x64, Linux x64, or macOS 12+ on Intel or Apple Silicon
 - Node.js 24
-- Rust 1.80+ (CI uses 1.97.0) with the target for the current platform
+- Rust 1.88+ (CI uses 1.97.0) with the target for the current platform
 - Platform-native Tauri build dependencies documented by Tauri
 
 ```powershell
