@@ -1,3 +1,5 @@
+import { normalizeText } from './normalize';
+
 export type DocumentLanguage = 'en' | 'ar' | 'mixed' | 'unknown';
 
 export type ProjectCandidateSource =
@@ -63,7 +65,7 @@ function normalizedKey(value: string): string {
     .replace(/[أإآ]/g, 'ا')
     .replace(/ى/g, 'ي')
     .replace(/ة/g, 'ه')
-    .toLocaleLowerCase()
+    .toLowerCase() // locale-insensitive: toLocaleLowerCase corrupts keys under e.g. Turkish (I→ı)
     .replace(/[\s\p{P}\p{S}]+/gu, ' ')
     .trim();
 }
@@ -166,7 +168,7 @@ export function detectProjectName(
 const EMPTY_COMMENT = /^(?:n\s*[/.]?\s*a|n\.a\.|none|null|nil|not applicable|no comments?|no remarks?|لا\s*يوجد|غير\s*متاح|بدون\s*ملاحظات)$/iu;
 const COURTESY_COMMENT = /^(?:thank(?:s|\s+you)(?:\s+(?:very much|for your (?:time|attention|business)))?|best regards|kind regards|regards|sincerely(?: yours)?|yours (?:faithfully|sincerely)|مع\s*(?:خالص\s*)?التحي(?:ه|ات)|وتفضلوا بقبول فائق الاحترام|شكرا(?:\s+لكم)?)[\s.!،,]*$/iu;
 const SIGNATURE_COMMENT = /^(?:(?:prepared|checked|approved|submitted|signed)\s+by|signature|authorized signatory|name\s*:\s*|date\s*:\s*|التوقيع|اعداد|اعده|مراجعه|اعتماد)(?:\s*[\p{L}. ]{0,60})?$/iu;
-const TOTAL_COMMENT = /^(?:(?:grand\s+)?total|sub[ -]?total|amount|net amount|carried (?:forward|to collection)|brought forward| الاجمالي|الإجمالي|اجمالي|المجموع|المبلغ)(?:\s*[:=]?\s*[\p{Sc}]?\s*[\d٠-٩۰-۹,.]+)?$/iu;
+const TOTAL_COMMENT = /^(?:(?:grand\s+)?total|sub[ -]?total|amount|net amount|carried (?:forward|to collection)|brought forward|الاجمالي|الإجمالي|اجمالي|المجموع|المبلغ)(?:\s*[:=]?\s*[\p{Sc}]?\s*[\d٠-٩۰-۹,.]+)?$/iu;
 const HEADER_COMMENT = /^(?:(?:item|item no|code|description|unit|qty|quantity|rate|price|amount|remarks?)(?:\s*[|/\-,:]\s*|\s+)){2,}(?:item|code|description|unit|qty|quantity|rate|price|amount|remarks?)$/iu;
 const ARABIC_HEADER_COMMENT = /^(?:(?:البند|الكود|الوصف|الوحده|الوحدة|الكميه|الكمية|السعر|الفئه|الفئة|المبلغ|الاجمالي|الإجمالي|ملاحظات)(?:\s*[|/\-،,:]\s*|\s+)){2,}(?:البند|الكود|الوصف|الوحده|الوحدة|الكميه|الكمية|السعر|الفئه|الفئة|المبلغ|الاجمالي|الإجمالي|ملاحظات)$/u;
 const LEGAL_COMMENT = /^(?:confidential(?: and proprietary)?|all rights reserved|terms and conditions(?: apply)?|without prejudice|subject to (?:our|the) (?:terms|conditions|approval)|this (?:document|quotation|offer) (?:is|remains) .{0,100}|for (?:internal|official) use only|not for distribution|سري(?:\s+للغايه)?|جميع الحقوق محفوظه)$/iu;
@@ -178,7 +180,7 @@ export function isMeaningfulComment(text: string): boolean {
   const value = cleanText(text);
   if (!value || !/[\p{L}\p{N}]/u.test(value)) return false;
   if (EMPTY_COMMENT.test(value) || COURTESY_COMMENT.test(value) || SIGNATURE_COMMENT.test(value)) return false;
-  if (TOTAL_COMMENT.test(value) || HEADER_COMMENT.test(value) || ARABIC_HEADER_COMMENT.test(value)) return false;
+  if (TOTAL_COMMENT.test(normalizeText(value)) || HEADER_COMMENT.test(value) || ARABIC_HEADER_COMMENT.test(value)) return false;
   if (LEGAL_COMMENT.test(value) || PAGE_COMMENT.test(value)) return false;
   if (/^(?:boq|bill of quantities|quotation|commercial offer|technical offer)$/iu.test(value)) return false;
   return true;

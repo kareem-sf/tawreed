@@ -1,6 +1,6 @@
 import { FileSpreadsheet, UploadCloud } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTranslation } from 'react-i18next';
 import { isDesktop, readInputFile } from '../bridge';
@@ -10,23 +10,28 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const rejectTimer = useRef<number | null>(null);
+  const onFileRef = useRef(onFile);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reject = (message: string) => {
+  useEffect(() => {
+    onFileRef.current = onFile;
+  }, [onFile]);
+
+  const reject = useCallback((message: string) => {
     setError(message);
     if (rejectTimer.current !== null) window.clearTimeout(rejectTimer.current);
     rejectTimer.current = window.setTimeout(() => { setError(null); rejectTimer.current = null; }, 3500);
-  };
+  }, []);
 
-  const accept = (file: File | undefined) => {
+  const accept = useCallback((file: File | undefined) => {
     if (!file) return;
-    if (!/\.(xlsx|pdf)$/i.test(file.name)) {
+    if (!/\.(xlsx|xls|csv|ods|pdf)$/i.test(file.name)) {
       reject(t('inputOnly'));
       return;
     }
-    onFile(file);
-  };
+    onFileRef.current(file);
+  }, [reject, t]);
 
   useEffect(() => {
     let disposed = false;
@@ -59,7 +64,7 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
       unlisten?.();
       if (rejectTimer.current !== null) window.clearTimeout(rejectTimer.current);
     };
-  }, [onFile, t]);
+  }, [accept, reject]);
 
   const onBrowserDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -71,7 +76,11 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
     <div
       className="relative mx-auto flex h-[300px] w-full max-w-lg flex-col items-center justify-center px-8 text-center"
       onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
+      onDragLeave={(event) => {
+        // dragleave also fires when the pointer moves onto a child — only clear when truly leaving the container.
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setDragging(false);
+      }}
       onDrop={onBrowserDrop}
     >
       <motion.div
@@ -112,8 +121,10 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
       <input
         ref={inputRef}
         type="file"
-        accept=".xlsx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        accept=".xlsx,.xls,.csv,.ods,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.oasis.opendocument.spreadsheet"
         className="sr-only"
+        aria-hidden="true"
+        tabIndex={-1}
         onChange={(event) => {
           accept(event.target.files?.[0]);
           event.target.value = '';

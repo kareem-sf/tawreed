@@ -5,6 +5,7 @@ import {
   estimateWrappedRowHeight,
   filterMeaningfulComments,
 } from './document-intelligence';
+import { itemTotal } from './item-total';
 
 export interface GenerateInput {
   packages: WorkPackage[];
@@ -39,7 +40,8 @@ function solid(argb: string): ExcelJS.Fill {
 }
 
 function safeSheetName(raw: string, used: Set<string>): string {
-  let base = raw.replace(/[[\]:*?/\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || 'Sheet';
+  // Excel forbids [ ] : * ? / \ anywhere in the name and apostrophes at either end.
+  const base = raw.replace(/[[\]:*?/\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31).replace(/^'+|'+$/g, '') || 'Sheet';
   let name = base;
   let suffix = 2;
   while (used.has(name)) {
@@ -94,7 +96,8 @@ function createWorkbook(projectName: string): ExcelJS.Workbook {
 }
 
 function headerSafe(text: string): string {
-  return text.replace(/&/g, '&&').slice(0, 180);
+  // Header/footer strings can't contain newlines or control chars; && escapes a literal ampersand.
+  return text.replace(/[\r\n]+/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '').replace(/&/g, '&&').slice(0, 180);
 }
 
 function configurePrint(ws: ExcelJS.Worksheet, projectName: string, printArea: string, repeatRows?: string) {
@@ -132,13 +135,6 @@ function applyTextDirection(cell: ExcelJS.Cell, value: string, defaultArabic: bo
     vertical: 'top',
     wrapText: true,
   };
-}
-
-function calculatedItemTotal(item: BoqItem): number {
-  if (item.total !== null && Number.isFinite(item.total)) return item.total;
-  const qty = Number.isFinite(item.qty) ? item.qty : 0;
-  const rate = item.rate !== null && Number.isFinite(item.rate) ? item.rate : 0;
-  return Math.round(qty * rate * 100) / 100;
 }
 
 interface PackageSheetInfo {
@@ -205,24 +201,36 @@ function addPackageSheet(
     if (!item) continue;
     const comments = filterMeaningfulComments(item.comments ?? []);
     const remarks = comments.join('\n');
-    const result = calculatedItemTotal(item);
+    const result = itemTotal(item);
     calculatedTotal += result;
     const qty = Number.isFinite(item.qty) ? item.qty : 0;
     const rate = item.rate !== null && Number.isFinite(item.rate) ? item.rate : null;
+    // Provenance flags set by ingest when a value is derived rather than sourced (absent for older callers).
+    const { rateDerived, totalDerived } = item as BoqItem & { rateDerived?: boolean; totalDerived?: boolean };
+    // 'other' is ingest's sentinel for "no unit column in source" — never display it as unit text.
+    const unitText = item.unitLabel === 'other' ? '' : item.unitLabel || item.unit;
     const row = ws.addRow([
       item.code,
       item.description,
-      item.unitLabel || item.unit,
+      unitText,
       qty,
       rate,
       null,
       remarks || null,
     ]);
-    if (item.total !== null && Number.isFinite(item.total)) {
+    // A derived rate stays a live formula so the workbook reconciles against the source total.
+    if (rateDerived && rate !== null) {
+      row.getCell(5).value = { formula: `ROUND(F${row.number}/D${row.number},2)`, result: rate };
+    }
+    if (totalDerived && item.total !== null && Number.isFinite(item.total)) {
+      // A derived total stays a live formula instead of a static number.
+      row.getCell(6).value = { formula: `ROUND(E${row.number}*D${row.number},2)`, result };
+    } else if (item.total !== null && Number.isFinite(item.total)) {
       row.getCell(6).value = item.total;
-    } else {
+    } else if (rate !== null) {
       row.getCell(6).value = { formula: `ROUND(E${row.number}*D${row.number},2)`, result };
     }
+    // Unpriced lines (no rate, no total) keep a blank total cell, matching the ingest contract.
     row.getCell(4).numFmt = QTY_FMT;
     row.getCell(5).numFmt = MONEY_FMT;
     row.getCell(6).numFmt = MONEY_FMT;

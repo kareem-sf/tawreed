@@ -13,8 +13,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  audit:
+    name: Audit Rust dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-audit
+
+      - name: Audit Rust dependencies
+        run: cargo audit -f src-tauri/Cargo.lock
+
   build:
     name: Build ${{ matrix.name }}
+    needs: [audit]
     strategy:
       fail-fast: false
       matrix:
@@ -89,12 +109,6 @@ jobs:
 
       - name: Audit npm dependencies
         run: npm audit --audit-level=high --omit=dev
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Audit Rust dependencies
-        run: cargo audit -f src-tauri/Cargo.lock
 
       - name: Build Windows portable executable
         if: runner.os == 'Windows'

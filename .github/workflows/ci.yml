@@ -58,7 +58,9 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-audit
 
       - name: Audit Rust dependencies
         run: cargo audit -f src-tauri/Cargo.lock
@@ -79,15 +81,39 @@ jobs:
             throw "Executable version $($exe.VersionInfo.ProductVersion) does not match $expected."
           }
 
+  frontend-tests:
+    name: Frontend tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
   platform-builds:
     name: Build ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Windows x64
-            runner: windows-2022
-            rust-targets: x86_64-pc-windows-msvc
           - name: Linux x64
             runner: ubuntu-24.04
             rust-targets: x86_64-unknown-linux-gnu
@@ -138,22 +164,6 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build Windows portable executable
-        if: runner.os == 'Windows'
-        run: npm run tauri -- build --no-bundle --ci -- --locked
-
-      - name: Verify Windows portable executable
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $exe = Get-Item "src-tauri/target/release/tawreed.exe"
-          $expected = (Get-Content "package.json" | ConvertFrom-Json).version
-          if ($exe.Length -lt 10MB) { throw "Portable executable is unexpectedly small." }
-          if ($exe.VersionInfo.ProductVersion -ne $expected) {
-            throw "Executable version $($exe.VersionInfo.ProductVersion) does not match $expected."
-          }
-
       - name: Build Linux packages
         if: runner.os == 'Linux'
         run: npm run tauri -- build --bundles appimage,deb --ci -- --locked
@@ -175,24 +185,23 @@ jobs:
             kill -0 "$pid"
           '
 
-      - name: Build universal macOS package
+      # PR CI validates the native app bundle. DMG generation drives Finder/
+      # hdiutil UI and is retried separately by the tagged release workflow.
+      - name: Build universal macOS app
         if: runner.os == 'macOS'
         env:
           APPLE_SIGNING_IDENTITY: "-"
-        run: npm run tauri -- build --target universal-apple-darwin --bundles dmg --ci -- --locked
+        run: npm run tauri -- build --target universal-apple-darwin --bundles app --ci -- --locked
 
-      - name: Verify universal macOS package
+      - name: Verify universal macOS app
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
-          bundle=src-tauri/target/universal-apple-darwin/release/bundle
-          test "$(find "$bundle/dmg" -maxdepth 1 -name '*.dmg' | wc -l)" -eq 1
-          test "$(stat -f '%z' "$bundle"/dmg/*.dmg)" -gt 10000000
-          mount_dir="$(mktemp -d)"
-          trap 'hdiutil detach "$mount_dir" >/dev/null 2>&1 || true; rmdir "$mount_dir" 2>/dev/null || true' EXIT
-          hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$bundle"/dmg/*.dmg
-          app="$mount_dir/Tawreed.app"
-          archs="$(lipo -archs "$app/Contents/MacOS/tawreed")"
+          app=src-tauri/target/universal-apple-darwin/release/bundle/macos/Tawreed.app
+          executable="$app/Contents/MacOS/tawreed"
+          test -d "$app"
+          test "$(stat -f '%z' "$executable")" -gt 10000000
+          archs="$(lipo -archs "$executable")"
           [[ "$archs" == *x86_64* && "$archs" == *arm64* ]]
           codesign --verify --deep --strict "$app"

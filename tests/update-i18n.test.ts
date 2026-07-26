@@ -31,4 +31,13 @@ describe('update localization', () => {
       }
     });
   }
+
+  it('has full key-set parity between en and ar', () => {
+    const en = i18n.getResourceBundle('en', 'translation') as Record<string, string>;
+    const ar = i18n.getResourceBundle('ar', 'translation') as Record<string, string>;
+    const missingInAr = Object.keys(en).filter((key) => !(key in ar));
+    const missingInEn = Object.keys(ar).filter((key) => !(key in en));
+    expect(missingInAr, `keys missing in ar: ${missingInAr.join(', ')}`).toEqual([]);
+    expect(missingInEn, `keys missing in en: ${missingInEn.join(', ')}`).toEqual([]);
+  });
 });

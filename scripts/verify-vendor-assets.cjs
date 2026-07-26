@@ -30,6 +30,20 @@ for (const entry of fs.readdirSync(path.join(root, 'public/ocr/core'))) {
   assertSame(`public/ocr/core/${entry}`, `node_modules/tesseract.js-core/${entry}`);
 }
 
+// engine/pdf-ingest.ts loads these runtime paths directly; fail if any are absent.
+const requireNonEmptyDirectory = (relative) => {
+  const directory = path.join(root, relative);
+  if (!fs.statSync(directory, { throwIfNoEntry: false })?.isDirectory() || fs.readdirSync(directory).length === 0) {
+    throw new Error(`Required vendor asset directory is missing or empty: ${relative}`);
+  }
+};
+requireFile('public/ocr/worker.min.js');
+requireNonEmptyDirectory('public/ocr/lang');
+requireNonEmptyDirectory('public/ocr/core');
+requireNonEmptyDirectory('public/pdfjs/wasm');
+requireNonEmptyDirectory('public/pdfjs/standard_fonts');
+requireNonEmptyDirectory('public/pdfjs/cmaps');
+
 const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
   const absolute = path.join(directory, entry.name);
   return entry.isDirectory() ? walk(absolute) : [absolute];

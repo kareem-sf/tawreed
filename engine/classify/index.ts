@@ -18,7 +18,7 @@ export async function classifyAll(items: BoqItem[], opts: ClassifyOptions): Prom
     return [...classified, ...remaining.map((i) => heuristicFallback(i))];
   }
   if (!opts.transport) throw new Error('LLM classification requested but no transport provided.');
-  return llmClassify(items, opts.transport, (done, total) =>
-    opts.onProgress?.({ phase: 'llm', done, total, remainingItems: items.length })
+  return llmClassify(items, opts.transport, (done, total, processedItems) =>
+    opts.onProgress?.({ phase: 'llm', done, total, remainingItems: Math.max(0, items.length - processedItems) })
   );
 }

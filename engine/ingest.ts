@@ -66,7 +66,7 @@ function cellText(v: ExcelJS.CellValue): string {
 function cellNumber(v: ExcelJS.CellValue): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'object' && v !== null && 'result' in v) {
-    const r = (v as any).result;
+    const r = (v as { result?: unknown }).result;
     if (typeof r === 'number') return Number.isFinite(r) ? r : null;
     if (typeof r === 'string') return cellNumber(r); // re-route through the text path
     return null;
@@ -82,15 +82,19 @@ function cellNumber(v: ExcelJS.CellValue): number | null {
   return parseNumber(numericText);
 }
 
-/** Shared numeric classifier — aligned with cellNumber's Arabic-Indic + currency handling. */
+/** Shared numeric classifier — aligned with cellNumber's currency stripping + Arabic-Indic digit/separator handling. */
 function isNumericLike(raw: unknown): boolean {
   if (raw === null || raw === undefined) return false;
   if (typeof raw === 'number') return Number.isFinite(raw);
   if (typeof raw === 'object' && raw !== null && 'result' in raw) return isNumericLike((raw as Record<string, unknown>).result);
   const text = String(raw).trim();
   if (!text) return false;
-  // Strip currency symbols, separators, parens, percent — same as cellNumber
-  const stripped = text.replace(/[\s,.$€£¥%()\-٬]/g, '').replace(/[ًٌٍَُِّْـ]/g, '');
+  // Strip the same currency tokens as cellNumber, then separators/symbols (incl. Arabic decimal ٫ and thousands ٬)
+  const stripped = text
+    .replace(/\b(?:egp|usd|eur|gbp|sar|aed|qar|kwd|omr)\b/gi, '')
+    .replace(/(?:ج\.?\s?م|ريال|دولار|درهم)/g, '')
+    .replace(/[\s,.$€£¥%()\-+٬٫]/g, '')
+    .replace(/[ًٌٍَُِّْـ]/g, '');
   return /^[\d٠-٩۰-۹.]+$/.test(stripped) && stripped.length > 0;
 }
 
@@ -198,9 +202,9 @@ function rowShape(sheet: ExcelJS.Worksheet, rowNumber: number): RowShape {
   let longestText = 0;
   row.eachCell({ includeEmpty: false }, (cell) => {
     const text = cellText(cell.value).trim();
-    if (!text && cellNumber(cell.value) === null) return;
-    nonEmpty++;
     const number = cellNumber(cell.value);
+    if (!text && number === null) return;
+    nonEmpty++;
     if (number !== null && isNumericLike(cell.value)) {
       numericCells++;
     } else if (text) {
@@ -294,21 +298,24 @@ function inferArithmeticColumns(
   rows: number[],
   numericCols: number[],
 ): { qty: number; rate: number; total: number; score: number } | null {
+  // Cell values don't change across candidate triples — read each numeric column once up front.
+  const colValues = new Map<number, (number | null)[]>();
+  for (const col of numericCols) {
+    colValues.set(col, rows.map((r) => cellNumber(sheet.getRow(r).getCell(col).value)));
+  }
   let best: { qty: number; rate: number; total: number; score: number } | null = null;
   for (let i = 0; i < numericCols.length; i++) {
     for (let j = i + 1; j < numericCols.length; j++) {
       for (let k = 0; k < numericCols.length; k++) {
         const a = numericCols[i]!, b = numericCols[j]!, total = numericCols[k]!;
         if (total === a || total === b) continue;
+        const aVals = colValues.get(a)!, bVals = colValues.get(b)!, tVals = colValues.get(total)!;
         let compared = 0;
         let matched = 0;
         let errorSum = 0;
-        for (const rowNumber of rows) {
-          const row = sheet.getRow(rowNumber);
-          const av = cellNumber(row.getCell(a).value);
-          const bv = cellNumber(row.getCell(b).value);
-          const tv = cellNumber(row.getCell(total).value);
-          if (av === null || bv === null || tv === null) continue;
+        for (let ri = 0; ri < rows.length; ri++) {
+          const av = aVals[ri], bv = bVals[ri], tv = tVals[ri];
+          if (av == null || bv == null || tv == null) continue;
           compared++;
           const error = Math.abs(tv - av * bv) / Math.max(1, Math.abs(tv));
           errorSum += Math.min(error, 10);
@@ -317,8 +324,8 @@ function inferArithmeticColumns(
         if (compared < 2) continue;
         const score = matched * 12 + compared * 2 - (errorSum / compared) * 10;
         if (!best || score > best.score) {
-          const aValues = rows.map((r) => cellNumber(sheet.getRow(r).getCell(a).value)).filter((v): v is number => v !== null);
-          const bValues = rows.map((r) => cellNumber(sheet.getRow(r).getCell(b).value)).filter((v): v is number => v !== null);
+          const aValues = aVals.filter((v): v is number => v !== null);
+          const bValues = bVals.filter((v): v is number => v !== null);
           const aIntegers = aValues.filter(v => Number.isInteger(v)).length;
           const bIntegers = bValues.filter(v => Number.isInteger(v)).length;
           const aMedian = median(aValues);
@@ -439,19 +446,27 @@ function extractItems(
   mapping: ColumnMapping,
   startRow: number,
   endRow: number,
-): BoqItem[] {
+): { items: BoqItem[]; rejectedCount: number } {
   const items: BoqItem[] = [];
+  let rejectedCount = 0;
   let pendingComments: string[] = [];
   for (let r = startRow; r <= Math.min(endRow, MAX_DATA_ROW); r++) {
     const row = sheet.getRow(r);
-    if (row.hidden) continue; // hidden rows are excluded from BOQ extraction
+    if (row.hidden) continue; // hidden rows are excluded from BOQ extraction (and are not counted as rejections)
     const get = (col: number | null) => col === null ? null : row.getCell(col).value;
     const description = cellText(get(mapping.description)).trim();
     const remarks = mapping.remarks !== null ? cellText(get(mapping.remarks)).trim() : '';
     const notes = rowNotes(row);
     const rowComments = uniqueComments([remarks, ...notes]);
     const explicitComment = isExplicitComment(description);
-    if (!description || (isHeaderLike(description) && !explicitComment) || isSummaryDescription(description)) {
+    const qty = cellNumber(get(mapping.qty));
+    // "Real content" = a parseable quantity, or a description that is not a structural line
+    // (blank / repeated header / summary total / explicit comment) — only those count as rejected.
+    const headerLike = isHeaderLike(description);
+    const summary = isSummaryDescription(description);
+    const meaningful = description ? !headerLike && !summary && !explicitComment : qty !== null;
+    if (!description || (headerLike && !explicitComment) || summary) {
+      if (meaningful) rejectedCount++;
       if (rowComments.length) {
         if (items.length) addComments(items[items.length - 1]!, rowComments);
         else pendingComments = uniqueComments([...pendingComments, ...rowComments]);
@@ -464,12 +479,12 @@ function extractItems(
     const rawUnit = get(mapping.unit);
     const unitLabel = hasUnitColumn ? cellText(rawUnit).trim() : 'other';
     const unit: Unit = hasUnitColumn ? canonicalUnit(rawUnit) : 'other';
-    const qty = cellNumber(get(mapping.qty));
     let rate = cellNumber(get(mapping.rate));
     let total = cellNumber(get(mapping.total));
 
     // Procurement items must have a description and a source quantity (negative quantities represent deductions and are kept).
     if ((hasUnitColumn && !unitLabel) || qty === null) {
+      if (meaningful) rejectedCount++;
       const comments = uniqueComments([...(explicitComment ? [description] : []), ...rowComments]);
       if (comments.length) {
         if (items.length) addComments(items[items.length - 1]!, comments);
@@ -478,8 +493,10 @@ function extractItems(
       continue;
     }
 
-    if (rate === null && qty !== null && total !== null && qty !== 0) rate = total / qty;
-    if (total === null && qty !== null && rate !== null) total = qty * rate;
+    let rateDerived = false;
+    let totalDerived = false;
+    if (rate === null && qty !== null && total !== null && qty !== 0) { rate = total / qty; rateDerived = true; }
+    if (total === null && qty !== null && rate !== null) { total = qty * rate; totalDerived = true; }
 
     const item: BoqItem = {
       id: items.length + 1,
@@ -492,12 +509,14 @@ function extractItems(
       total,
       row: r,
     };
+    if (rateDerived) item.rateDerived = true;
+    if (totalDerived) item.totalDerived = true;
     addComments(item, [...pendingComments, ...rowComments]);
     pendingComments = [];
     items.push(item);
   }
   if (pendingComments.length && items.length) addComments(items[items.length - 1]!, pendingComments);
-  return items;
+  return { items, rejectedCount };
 }
 
 interface SheetCandidate {
@@ -505,6 +524,7 @@ interface SheetCandidate {
   headerRow: number;
   mapping: ColumnMapping;
   items: BoqItem[];
+  rejectedCount: number;
   score: number;
   inferred: boolean;
 }
@@ -524,10 +544,10 @@ function analyzeSheet(sheet: ExcelJS.Worksheet): SheetCandidate | null {
     const block = findDataBlock(sheet, hit.row + 1);
     if (!block) continue;
     const mapping = inferMapping(sheet, block, hit.mapping) ?? hit.mapping;
-    const items = extractItems(sheet, mapping, hit.row + 1, Math.min(block.end + 5, MAX_DATA_ROW));
+    const { items, rejectedCount } = extractItems(sheet, mapping, hit.row + 1, Math.min(block.end + 5, MAX_DATA_ROW));
     const score = candidateScore(items, mapping, hit.lexicalScore);
     if (!best || score > best.score) {
-      best = { sheet, headerRow: hit.row, mapping, items, score, inferred: false };
+      best = { sheet, headerRow: hit.row, mapping, items, rejectedCount, score, inferred: false };
     }
   }
 
@@ -536,14 +556,22 @@ function analyzeSheet(sheet: ExcelJS.Worksheet): SheetCandidate | null {
   if (block) {
     const mapping = inferMapping(sheet, block);
     if (mapping) {
-      const items = extractItems(sheet, mapping, block.start, Math.min(block.end + 5, MAX_DATA_ROW));
+      const { items, rejectedCount } = extractItems(sheet, mapping, block.start, Math.min(block.end + 5, MAX_DATA_ROW));
       const score = candidateScore(items, mapping, 0);
       if (!best || score > best.score) {
-        best = { sheet, headerRow: Math.max(0, block.start - 1), mapping, items, score, inferred: true };
+        best = { sheet, headerRow: Math.max(0, block.start - 1), mapping, items, rejectedCount, score, inferred: true };
       }
     }
   }
   return best;
+}
+
+/** Thrown when the strict ExcelJS reader cannot load the workbook bytes at all (as opposed to finding no BOQ table inside). */
+export class WorkbookParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkbookParseError';
+  }
 }
 
 export async function inspectWorkbook(
@@ -556,7 +584,7 @@ export async function inspectWorkbook(
     await wb.xlsx.load(bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes);
   } catch {
     // ExcelJS throws a cryptic "reading 'sheets'" on malformed xl/workbook.xml; surface a clear, actionable error.
-    throw new Error('The standard Excel reader could not open this workbook. It may be corrupt or saved in an unsupported format.');
+    throw new WorkbookParseError('The standard Excel reader could not open this workbook. It may be corrupt or saved in an unsupported format.');
   }
   return analyzeLoadedWorkbook(wb, fileName, sourceKind);
 }
@@ -591,7 +619,9 @@ export function analyzeLoadedWorkbook(wb: ExcelJS.Workbook, fileName: string, so
   if (wb.title) projectCandidates.push({ text: wb.title, source: 'workbook-metadata', prominence: 0.9, order: 0 });
   if (wb.subject) projectCandidates.push({ text: wb.subject, source: 'workbook-metadata', prominence: 0.6, order: 1 });
   projectCandidates.push({ text: best.sheet.name, source: 'sheet-name', prominence: 0.25, order: 10 });
-  const titleEnd = Math.max(1, best.headerRow - 1);
+  // Headerless sheets whose data block starts at row 1 have no title region — row 1 is data,
+  // so scanning it would turn a long first description into the project name.
+  const titleEnd = best.inferred && best.headerRow === 0 ? 0 : Math.max(1, best.headerRow - 1);
   for (let rowNumber = 1; rowNumber <= titleEnd; rowNumber++) {
     const row = best.sheet.getRow(rowNumber);
     row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
@@ -626,7 +656,7 @@ export function analyzeLoadedWorkbook(wb: ExcelJS.Workbook, fileName: string, so
     pageCount: wb.worksheets.length,
     ocrPages: 0,
     annotationCount: best.items.reduce((sum, item) => sum + (item.comments?.length ?? 0), 0),
-    rejectedCount: Math.max(0, best.sheet.rowCount - best.headerRow - best.items.length),
+    rejectedCount: best.rejectedCount,
     sheetName: best.sheet.name,
     headerRow: best.headerRow,
     mapping: best.mapping,

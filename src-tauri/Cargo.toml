@@ -2,7 +2,7 @@
 name = "tawreed"
 version = "0.3.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.88"
 description = "Portable BOQ → work-package workbook converter"
 license = "MIT"
 authors = ["Kareem Safwat"]
@@ -17,13 +17,18 @@ tauri = { version = "2", features = ["macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["macros", "time"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
 dotenvy = "0.15"
+keyring = "4.1.5"
 base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 semver = "1"
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [profile.release]
 lto = true

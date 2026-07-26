@@ -14,12 +14,27 @@ interface WorkerProgress {
   progress: PdfProgress;
 }
 
+/** Rejection sentinel for user-cancelled jobs — callers check `instanceof` and stay silent. */
+export class WorkerCancelledError extends Error {
+  constructor() {
+    super('Worker job cancelled by user');
+    this.name = 'WorkerCancelledError';
+  }
+}
+
+export interface WorkerJob<T> {
+  promise: Promise<T>;
+  /** The worker is one-shot per request: terminating it rejects `promise` with WorkerCancelledError. */
+  cancel: () => void;
+}
+
 function execute<T>(
   message: unknown,
   transfer: Transferable[] = [],
   options: { timeoutMs?: number; onProgress?: (progress: PdfProgress) => void } = {},
-): Promise<T> {
-  return new Promise((resolve, reject) => {
+): WorkerJob<T> {
+  let cancel: () => void = () => undefined;
+  const promise = new Promise<T>((resolve, reject) => {
     const worker = new Worker(new URL('./workers/boq.worker.ts', import.meta.url), { type: 'module' });
     const timeoutMs = options.timeoutMs ?? 120_000;
     const timeout = window.setTimeout(() => {
@@ -32,6 +47,7 @@ function execute<T>(
       worker.terminate();
       callback();
     };
+    cancel = () => finish(() => reject(new WorkerCancelledError()));
     worker.onmessage = (event: MessageEvent<WorkerResponse<T> | WorkerProgress>) => {
       const response = event.data;
       if (response.type === 'progress') {
@@ -55,13 +71,14 @@ function execute<T>(
       finish(() => reject(error));
     }
   });
+  return { promise, cancel };
 }
 
 export function inspectInWorker(
   bytes: Uint8Array,
   fileName: string,
   onProgress?: (progress: PdfProgress) => void,
-): Promise<InspectionResult> {
+): WorkerJob<InspectionResult> {
   const copy = bytes.slice();
   return execute<InspectionResult>(
     { type: 'inspect', bytes: copy, fileName },
@@ -70,6 +87,6 @@ export function inspectInWorker(
   );
 }
 
-export function generateInWorker(input: GenerateInput): Promise<GeneratedArtifact[]> {
+export function generateInWorker(input: GenerateInput): WorkerJob<GeneratedArtifact[]> {
   return execute({ type: 'generate', input }, [], { timeoutMs: 10 * 60_000 });
 }

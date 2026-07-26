@@ -40,7 +40,7 @@ all platform packages, and publishes:
 
 ## Current Signing Policy
 
-Version `0.2.0` has no commercial platform certificates. Windows remains
+Current releases have no commercial platform certificates. Windows remains
 unsigned and macOS uses ad-hoc signing without notarization. Release notes must
 state the platform warnings, native runtime requirements, SHA-256 verification,
 and GitHub provenance. Do not claim Authenticode, Developer ID signing, or

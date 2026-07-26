@@ -21,14 +21,18 @@ export function parseNumber(raw: unknown): number | null {
   if (raw == null) return null;
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
   let s = normalizeDigits(String(raw))
-    .replace(/[٬,]/g, '') // thousands separators (Arabic + western)
+    .replace(/[٬]/g, '') // Arabic thousands separator
     .replace(/[٫]/g, '.') // Arabic decimal separator
-    .replace(/[^\d.\-()]/g, '') // drop currency symbols, units, whitespace
+    .replace(/[^\d.,\-()]/g, '') // drop currency symbols, units, whitespace
     .trim();
   if (!s) return null;
   // Accounting parentheses = negative
   const paren = /^\((.*)\)$/.exec(s);
   if (paren) s = '-' + paren[1];
+  // Comma disambiguation: a single comma with 1-2 trailing digits is a decimal separator
+  // ("1,5" → 1.5, "1,50" → 1.5); 3-digit groups or repeated commas are thousands ("1,500" → 1500).
+  const decimalComma = /^(-?\d+),(\d{1,2})$/.exec(s);
+  s = decimalComma ? `${decimalComma[1]}.${decimalComma[2]}` : s.replace(/,/g, '');
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }

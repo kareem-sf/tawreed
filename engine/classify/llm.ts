@@ -15,13 +15,14 @@ export interface LlmRequest {
   max_tokens: number;
   system: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  output_schema?: Record<string, unknown>;
 }
 
 export const UNCLASSIFIED_CODE = 'WP-99';
 const BATCH_SIZE = 100;
 const MAX_PACKAGES = 40;
 const MAX_DISTINCT_FOR_PROPOSAL = 400;
-export const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+export const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 // Dynamic package codes look like WP-<SLUG>; WP-99 is reserved for unclassified.
 const CODE_RE = /^WP-[A-Z0-9][A-Z0-9-]{0,30}$/;
@@ -47,6 +48,50 @@ const classificationSchema = z.object({
     })
   ),
 });
+
+const proposalOutputSchema: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['packages'],
+  properties: {
+    packages: {
+      type: 'array',
+      maxItems: MAX_PACKAGES + 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'nameEn', 'nameAr'],
+        properties: {
+          code: { type: 'string' },
+          nameEn: { type: 'string' },
+          nameAr: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+const classificationOutputSchema: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['classifications'],
+  properties: {
+    classifications: {
+      type: 'array',
+      maxItems: BATCH_SIZE,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['itemId', 'packageCode', 'confidence'],
+        properties: {
+          itemId: { type: 'integer', minimum: 1 },
+          packageCode: { type: 'string' },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+        },
+      },
+    },
+  },
+};
 
 const PROPOSE_SYSTEM = `You are a senior quantity surveyor. You are given the distinct line-item descriptions from a construction BOQ (bill of quantities). Define the procurement work-packages for THIS project — the bundles of work you would send out to different subcontractors and suppliers.
 Do NOT use any fixed or standard list. Derive the packages purely from the trades and work actually present in this BOQ. Create as many packages as this project genuinely needs — merge only genuinely identical trades, keep distinct trades separate.
@@ -90,22 +135,28 @@ function extractJson(text: string): unknown {
   return JSON.parse(text.slice(start, end + 1));
 }
 
-/** Call the transport and parse against a schema, with one repair attempt on malformed output. */
-async function callJson<S extends z.ZodType>(transport: LlmTransport, request: LlmRequest, schema: S): Promise<z.output<S> | null> {
+/** Call the transport and parse against a schema, with one repair attempt on malformed output.
+ *  Transport errors (provider down, auth, network) propagate to the caller — only JSON
+ *  parse/schema failures trigger the repair round-trip, and unrepairable content returns null. */
+export async function callJson<S extends z.ZodType>(transport: LlmTransport, request: LlmRequest, schema: S): Promise<z.output<S> | null> {
+  const first = await transport(request);
   try {
-    return schema.parse(extractJson(await transport(request)));
-  } catch {
+    return schema.parse(extractJson(first));
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    const repair: LlmRequest = {
+      ...request,
+      messages: [
+        ...request.messages,
+        { role: 'assistant', content: '(previous response was malformed)' },
+        { role: 'user', content: 'Your previous response was not valid JSON per the schema. Return ONLY the corrected JSON object, no prose.' },
+      ],
+    };
+    const repaired = await transport(repair);
     try {
-      const repair: LlmRequest = {
-        ...request,
-        messages: [
-          ...request.messages,
-          { role: 'assistant', content: '(previous response was malformed)' },
-          { role: 'user', content: 'Your previous response was not valid JSON per the schema. Return ONLY the corrected JSON object, no prose.' },
-        ],
-      };
-      return schema.parse(extractJson(await transport(repair)));
-    } catch {
+      return schema.parse(extractJson(repaired));
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error;
       return null;
     }
   }
@@ -125,6 +176,7 @@ function buildProposalRequest(items: BoqItem[], model: string): LlmRequest {
     model,
     max_tokens: 4096,
     system: PROPOSE_SYSTEM,
+    output_schema: proposalOutputSchema,
     messages: [
       {
         role: 'user',
@@ -145,6 +197,7 @@ function buildClassifyRequest(items: BoqItem[], model: string, structure: Propos
     model,
     max_tokens: 4096,
     system: CLASSIFY_SYSTEM,
+    output_schema: classificationOutputSchema,
     messages: [
       {
         role: 'user',
@@ -214,13 +267,14 @@ async function classifyBatch(
 export async function llmClassify(
   items: BoqItem[],
   transport: LlmTransport,
-  onBatch?: (done: number, total: number) => void,
+  onBatch?: (done: number, total: number, processedItems: number) => void,
   model: string = DEFAULT_MODEL
 ): Promise<Classification[]> {
   let structure: ProposedPackage[];
   try {
     structure = await proposeStructure(items, transport, model);
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
     // No usable structure from the LLM → degrade to the offline keyword heuristic.
     const { classified, remaining } = heuristicClassify(items);
     return [...classified, ...remaining.map((i) => heuristicFallback(i))];
@@ -229,8 +283,18 @@ export async function llmClassify(
   const totalBatches = Math.ceil(items.length / BATCH_SIZE);
   for (let b = 0; b < totalBatches; b++) {
     const batch = items.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
-    out.push(...(await classifyBatch(batch, structure, transport, model)));
-    onBatch?.(b + 1, totalBatches);
+    try {
+      out.push(...(await classifyBatch(batch, structure, transport, model)));
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      out.push(...batch.map((item) => ({
+        itemId: item.id,
+        packageCode: UNCLASSIFIED_CODE,
+        confidence: 0,
+        source: 'fallback' as const,
+      })));
+    }
+    onBatch?.(b + 1, totalBatches, Math.min(items.length, (b + 1) * BATCH_SIZE));
   }
   return out;
 }

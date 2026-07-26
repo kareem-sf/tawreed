@@ -1,11 +1,15 @@
-// Codex CLI provider — uses the user's ChatGPT subscription via the official Codex CLI.
-// Auth is OAuth handled by the CLI itself (~/.codex/auth.json); Tawreed never sees tokens.
+// Codex CLI provider. Authentication remains owned by the official Codex CLI;
+// Tawreed never reads or transports Codex credentials.
 use crate::store;
 use serde::Serialize;
 use serde_json::Value;
-use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc,
+};
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -15,7 +19,7 @@ const EXEC_TIMEOUT_SECS: u64 = 240;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Spawn a process with NO console window — a GUI app must never flash terminals.
+/// Spawn a process without flashing a console window from the desktop app.
 pub fn quiet_command<P: AsRef<std::ffi::OsStr>>(program: P) -> Command {
     #[cfg(windows)]
     {
@@ -29,8 +33,10 @@ pub fn quiet_command<P: AsRef<std::ffi::OsStr>>(program: P) -> Command {
     }
 }
 
-// Detection is expensive (probing a 325MB exe) — cache it; explicit status checks bypass.
 static DETECT_CACHE: std::sync::Mutex<Option<CodexStatus>> = std::sync::Mutex::new(None);
+static MODELS_CACHE: std::sync::Mutex<Option<(Instant, Vec<ModelInfo>)>> =
+    std::sync::Mutex::new(None);
+const MODELS_TTL_SECS: u64 = 300;
 
 pub fn invalidate_cache() {
     if let Ok(mut guard) = DETECT_CACHE.lock() {
@@ -57,12 +63,36 @@ pub struct ModelInfo {
     pub default_reasoning_level: Option<String>,
 }
 
-// Model catalog cache — `codex debug models` costs a process spawn + 280KB parse.
-static MODELS_CACHE: std::sync::Mutex<Option<(Instant, Vec<ModelInfo>)>> =
-    std::sync::Mutex::new(None);
-const MODELS_TTL_SECS: u64 = 300;
+fn bounded_tail(value: &str, max_chars: usize) -> String {
+    value
+        .chars()
+        .rev()
+        .take(max_chars)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect()
+}
 
-/// Live model catalog for the signed-in subscription, via the CLI's own debug surface.
+/// Drain a child-process pipe fully to avoid deadlock while retaining bounded diagnostics.
+fn drain_pipe<R: Read>(mut reader: R, max_bytes: usize) -> String {
+    let mut retained = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                if retained.len() < max_bytes {
+                    let keep = read.min(max_bytes - retained.len());
+                    retained.extend_from_slice(&chunk[..keep]);
+                }
+            }
+        }
+    }
+    String::from_utf8_lossy(&retained).into_owned()
+}
+
+/// Use the stable app-server `model/list` JSON-RPC method documented for rich clients.
 pub fn list_models() -> Result<Vec<ModelInfo>, String> {
     if let Ok(guard) = MODELS_CACHE.lock() {
         if let Some((at, models)) = guard.as_ref() {
@@ -71,42 +101,156 @@ pub fn list_models() -> Result<Vec<ModelInfo>, String> {
             }
         }
     }
+
     let status = detect(false);
     let exe = status.path.ok_or("Codex CLI not installed")?;
-    let out = quiet_command(exe)
-        .args(["debug", "models"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|e| format!("spawn codex debug models: {e}"))?;
-    if !out.status.success() {
-        return Err("codex debug models failed — is the CLI signed in?".into());
+    if !status.authenticated {
+        return Err("Codex CLI is not signed in".into());
     }
-    let parsed: Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("parse model catalog: {e}"))?;
-    let mut models: Vec<(i64, ModelInfo)> = parsed
-        .get("models")
+
+    let mut child = quiet_command(exe)
+        .args(["app-server", "--listen", "stdio://"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn Codex app server: {e}"))?;
+
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or("Codex app server stderr unavailable")?;
+    let stderr_reader = std::thread::spawn(move || drain_pipe(stderr_pipe, 1024 * 1024));
+
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or("Codex app server stdout unavailable")?;
+    let (line_tx, line_rx) = mpsc::channel::<String>();
+    let stdout_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout_pipe).lines().map_while(Result::ok) {
+            if line_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let request_result = (|| -> Result<Value, String> {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or("Codex app server stdin unavailable")?;
+        let mut send = |message: &Value| -> Result<(), String> {
+            serde_json::to_writer(&mut stdin, message)
+                .map_err(|e| format!("serialize Codex app-server request: {e}"))?;
+            stdin
+                .write_all(b"\n")
+                .and_then(|_| stdin.flush())
+                .map_err(|e| format!("write Codex app-server request: {e}"))
+        };
+        send(&serde_json::json!({
+            "method": "initialize",
+            "id": 0,
+            "params": {
+                "clientInfo": {
+                    "name": "tawreed",
+                    "title": "Tawreed",
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            }
+        }))?;
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut initialized = false;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("Codex model catalog timed out after 30s".into());
+            }
+            match line_rx.recv_timeout(remaining.min(Duration::from_millis(500))) {
+                Ok(line) => {
+                    let message: Value = serde_json::from_str(&line)
+                        .map_err(|e| format!("parse Codex app-server response: {e}"))?;
+                    let id = message.get("id").and_then(Value::as_i64);
+                    if id == Some(0) && !initialized {
+                        if let Some(error) = message.get("error") {
+                            return Err(format!("Codex app-server initialization error: {error}"));
+                        }
+                        send(&serde_json::json!({"method": "initialized", "params": {}}))?;
+                        send(&serde_json::json!({
+                            "method": "model/list",
+                            "id": 1,
+                            "params": {"limit": 100, "includeHidden": false}
+                        }))?;
+                        initialized = true;
+                        continue;
+                    }
+                    if id != Some(1) {
+                        continue;
+                    }
+                    if let Some(error) = message.get("error") {
+                        return Err(format!("Codex model catalog error: {error}"));
+                    }
+                    return message
+                        .get("result")
+                        .cloned()
+                        .ok_or("Codex model catalog response had no result".into());
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Ok(Some(exit)) = child.try_wait() {
+                        return Err(format!(
+                            "Codex app server exited before returning models ({exit})"
+                        ));
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("Codex app server closed before returning the model catalog".into());
+                }
+            }
+        }
+    })();
+
+    let _ = child.kill();
+    let _ = child.wait();
+    drop(line_rx);
+    let _ = stdout_reader.join();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    let parsed = request_result.map_err(|error| {
+        let detail = bounded_tail(&stderr, 400);
+        if detail.is_empty() {
+            error
+        } else {
+            format!("{error}. {detail}")
+        }
+    })?;
+
+    let mut models: Vec<(bool, ModelInfo)> = parsed
+        .get("data")
         .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter(|m| m.get("visibility").and_then(Value::as_str) == Some("list"))
-                .filter_map(|m| {
+        .map(|items| {
+            items
+                .iter()
+                .filter(|model| model.get("hidden").and_then(Value::as_bool) != Some(true))
+                .filter_map(|model| {
                     Some((
-                        m.get("priority").and_then(Value::as_i64).unwrap_or(999),
+                        model
+                            .get("isDefault")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                         ModelInfo {
-                            slug: m.get("slug").and_then(Value::as_str)?.to_string(),
-                            display_name: m
-                                .get("display_name")
+                            slug: model.get("model").and_then(Value::as_str)?.to_string(),
+                            display_name: model
+                                .get("displayName")
                                 .and_then(Value::as_str)
                                 .unwrap_or("")
                                 .to_string(),
-                            description: m
+                            description: model
                                 .get("description")
                                 .and_then(Value::as_str)
                                 .unwrap_or("")
                                 .to_string(),
-                            default_reasoning_level: m
-                                .get("default_reasoning_level")
+                            default_reasoning_level: model
+                                .get("defaultReasoningEffort")
                                 .and_then(Value::as_str)
                                 .map(str::to_string),
                         },
@@ -115,19 +259,17 @@ pub fn list_models() -> Result<Vec<ModelInfo>, String> {
                 .collect()
         })
         .unwrap_or_default();
-    models.sort_by_key(|(p, _)| *p);
-    let out_models: Vec<ModelInfo> = models.into_iter().map(|(_, m)| m).collect();
-    if out_models.is_empty() {
-        return Err("model catalog was empty".into());
+    // Stable sort keeps the server's catalog order while placing its default first.
+    models.sort_by_key(|(is_default, _)| !*is_default);
+    let models: Vec<ModelInfo> = models.into_iter().map(|(_, model)| model).collect();
+    if models.is_empty() {
+        return Err("Codex model catalog was empty".into());
     }
-    store::log_line(&format!(
-        "model catalog fetched: {} models",
-        out_models.len()
-    ));
+    store::log_line(&format!("model catalog fetched: {} models", models.len()));
     if let Ok(mut guard) = MODELS_CACHE.lock() {
-        *guard = Some((Instant::now(), out_models.clone()));
+        *guard = Some((Instant::now(), models.clone()));
     }
-    Ok(out_models)
+    Ok(models)
 }
 
 pub fn managed_bin() -> Result<PathBuf, String> {
@@ -136,88 +278,101 @@ pub fn managed_bin() -> Result<PathBuf, String> {
 }
 
 fn candidate_paths() -> Vec<PathBuf> {
-    let mut v = Vec::new();
-    if let Ok(p) = managed_bin() {
-        v.push(p);
+    let mut paths = Vec::new();
+    if let Ok(path) = managed_bin() {
+        paths.push(path);
     }
-    // npm global installs of the official Codex CLI (@openai/codex) on Windows.
+
     #[cfg(windows)]
     if let Some(appdata) = std::env::var_os("APPDATA") {
         let base = PathBuf::from(appdata).join(r"npm\node_modules\@openai");
         if let Ok(vendors) = std::fs::read_dir(&base) {
             for vendor in vendors.flatten() {
-                // <pkg>/node_modules/@openai/<platform-pkg>/codex.exe
                 let nested = vendor.path().join("node_modules").join("@openai");
                 if let Ok(platforms) = std::fs::read_dir(&nested) {
-                    for plat in platforms.flatten() {
-                        let exe = plat.path().join("codex.exe");
-                        if exe.exists() {
-                            v.push(exe);
+                    for platform in platforms.flatten() {
+                        let executable = platform.path().join("codex.exe");
+                        if executable.is_file() {
+                            paths.push(executable);
                         }
                     }
                 }
                 let direct = vendor.path().join("bin").join("codex.exe");
-                if direct.exists() {
-                    v.push(direct);
+                if direct.is_file() {
+                    paths.push(direct);
                 }
             }
         }
     }
+
     if let Some(path) = std::env::var_os("PATH") {
         let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
         for directory in std::env::split_paths(&path) {
             let candidate = directory.join(binary);
             if candidate.is_file() {
-                v.push(candidate);
+                paths.push(candidate);
             }
         }
     }
-    v
+    paths
 }
 
-fn exe_version(path: &PathBuf) -> Option<String> {
+fn wait_with_timeout(child: &mut std::process::Child, timeout: Duration) -> Option<bool> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status.success()),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+fn exe_version(path: &Path) -> Option<String> {
     let mut child = quiet_command(path)
         .arg("--version")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    // A hostile or broken binary on PATH could hang forever; give up after 10s so
-    // detection never blocks the UI.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if Instant::now() > deadline {
-                    let _ = child.kill();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(200));
-            }
-            Err(_) => return None,
-        }
-    };
-    if !status.success() {
+    if wait_with_timeout(&mut child, Duration::from_secs(10)) != Some(true) {
         return None;
     }
     let mut stdout = String::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        let _ = pipe.read_to_string(&mut stdout);
+    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
+    let version = stdout.trim();
+    let mut parts = version.split_whitespace();
+    let product = parts.next()?;
+    let number = parts.next()?;
+    let valid_product = matches!(product, "codex" | "codex-cli");
+    let valid_number = number.split('.').count() >= 3
+        && number
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'));
+    if !valid_product || !valid_number || parts.next().is_some() || version.len() > 80 {
+        return None;
     }
-    let version_str = stdout.trim().to_string();
-    // Real Codex CLI prints a version like "codex-cli 0.1.x" or "codex 0.x.x".
-    // A non-Codex binary squatting on the name is rejected here.
-    if version_str.is_empty() || version_str.len() > 200 {
-        return None; // not a real Codex binary
-    }
-    Some(version_str)
+    Some(version.to_string())
 }
 
-fn auth_json_exists() -> bool {
-    dirs::home_dir()
-        .map(|h| h.join(".codex").join("auth.json").exists())
-        .unwrap_or(false)
+fn authenticated(path: &Path) -> bool {
+    let Ok(mut child) = quiet_command(path)
+        .args(["login", "status"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    wait_with_timeout(&mut child, Duration::from_secs(10)) == Some(true)
 }
 
 pub fn detect(force: bool) -> CodexStatus {
@@ -236,141 +391,227 @@ pub fn detect(force: bool) -> CodexStatus {
 }
 
 fn detect_uncached() -> CodexStatus {
-    for p in candidate_paths() {
-        if p.exists() {
-            if let Some(ver) = exe_version(&p) {
-                return CodexStatus {
-                    installed: true,
-                    authenticated: auth_json_exists(),
-                    version: Some(ver),
-                    path: Some(p.to_string_lossy().to_string()),
-                };
-            }
+    for path in candidate_paths() {
+        if let Some(version) = exe_version(&path) {
+            return CodexStatus {
+                installed: true,
+                authenticated: authenticated(&path),
+                version: Some(version),
+                path: Some(path.to_string_lossy().to_string()),
+            };
         }
     }
     CodexStatus {
         installed: false,
-        authenticated: auth_json_exists(),
+        authenticated: false,
         version: None,
         path: None,
     }
 }
 
-/// Run one classification prompt through `codex exec` (non-interactive, read-only sandbox).
-pub fn complete(prompt: &str, model: Option<&str>) -> Result<String, String> {
+fn create_request_dir() -> Result<PathBuf, String> {
+    let base = std::env::temp_dir();
+    for sequence in 0..8u8 {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = base.join(format!(
+            "tawreed-codex-{}-{stamp}-{sequence}",
+            std::process::id()
+        ));
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("create isolated Codex directory: {error}")),
+        }
+    }
+    Err("Could not allocate an isolated Codex directory".into())
+}
+
+fn valid_model(model: &str) -> bool {
+    !model.is_empty()
+        && model.len() <= 160
+        && model
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+/// Run a schema-constrained, ephemeral one-shot classification. The empty working
+/// directory and ignored user config/rules prevent project files, `.env`, or personal
+/// instructions from becoming implicit model context.
+pub fn complete(
+    prompt: &str,
+    model: Option<&str>,
+    output_schema: Option<&Value>,
+    cancelled: Arc<AtomicBool>,
+) -> Result<String, String> {
+    if prompt.is_empty() || prompt.len() > 512 * 1024 {
+        return Err("Codex prompt must be between 1 byte and 512 KB".into());
+    }
+    if cancelled.load(Ordering::Relaxed) {
+        return Err("AI job cancelled".into());
+    }
     let status = detect(false);
     if !status.installed {
         return Err("Codex CLI not detected. Install it from Settings or add an API key.".into());
     }
     if !status.authenticated {
         return Err(
-            "Codex CLI is not signed in. Use Settings → Codex → Sign in with ChatGPT.".into(),
+            "Codex CLI is not signed in. Use Settings -> Codex -> Sign in with ChatGPT.".into(),
         );
     }
     let exe = status.path.ok_or("Codex path missing")?;
-    let tmp = std::env::temp_dir().join(format!(
-        "tawreed-codex-{}-{}.txt",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
+    let work_dir = create_request_dir()?;
+    let result_path = work_dir.join("response.json");
+    let schema_path = work_dir.join("output-schema.json");
 
-    let mut args: Vec<String> = vec![
-        "exec".into(),
-        "--skip-git-repo-check".into(),
-        "--sandbox".into(),
-        "read-only".into(),
-        "--output-last-message".into(),
-        tmp.to_string_lossy().to_string(),
-    ];
-    if let Some(m) = model {
-        if !m.trim().is_empty() {
-            args.push("-m".into());
-            args.push(m.trim().to_string());
+    let result = (|| -> Result<String, String> {
+        let mut args: Vec<String> = vec![
+            "exec".into(),
+            "--ephemeral".into(),
+            "--ignore-user-config".into(),
+            "--ignore-rules".into(),
+            "--skip-git-repo-check".into(),
+            "--sandbox".into(),
+            "read-only".into(),
+            "--color".into(),
+            "never".into(),
+            "--cd".into(),
+            work_dir.to_string_lossy().to_string(),
+            "--output-last-message".into(),
+            result_path.to_string_lossy().to_string(),
+            "-c".into(),
+            "shell_environment_policy.inherit=\"none\"".into(),
+        ];
+
+        if let Some(schema) = output_schema {
+            if !schema.is_object() {
+                return Err("Codex output schema must be a JSON object".into());
+            }
+            let bytes = serde_json::to_vec(schema)
+                .map_err(|e| format!("serialize Codex output schema: {e}"))?;
+            if bytes.len() > 128 * 1024 {
+                return Err("Codex output schema exceeds the 128 KB limit".into());
+            }
+            std::fs::write(&schema_path, bytes)
+                .map_err(|e| format!("write Codex output schema: {e}"))?;
+            args.push("--output-schema".into());
+            args.push(schema_path.to_string_lossy().to_string());
         }
-    }
-    // Read the prompt from stdin so large BOQ batches never hit Windows' command-line limit.
-    args.push("-".into());
-
-    let work_dir = store::data_dir()?;
-    std::fs::create_dir_all(&work_dir).map_err(|e| format!("create data dir: {e}"))?;
-    let mut child = quiet_command(&exe)
-        .args(&args)
-        .current_dir(work_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("spawn codex: {e}"))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(prompt.as_bytes()) {
-            let _ = child.kill();
-            let _ = std::fs::remove_file(&tmp);
-            return Err(format!("write codex stdin: {e}"));
+        if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
+            if !valid_model(model) {
+                return Err("Invalid Codex model identifier".into());
+            }
+            args.push("--model".into());
+            args.push(model.to_string());
         }
-    }
+        args.push("-".into());
 
-    // Drain stdout on a reader thread so a chatty CLI can't deadlock on a full pipe.
-    // Cap at 10 MB so a runaway CLI can't exhaust memory.
-    let stdout_pipe = child.stdout.take().expect("piped");
-    let reader = std::thread::spawn(move || {
-        let mut buf = String::new();
-        let _ = stdout_pipe.take(10 * 1024 * 1024).read_to_string(&mut buf);
-        buf
-    });
+        let mut command = quiet_command(&exe);
+        command
+            .args(&args)
+            .current_dir(&work_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env("NO_COLOR", "1");
+        for secret in [
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "AZURE_OPENAI_API_KEY",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "GOOGLE_API_KEY",
+        ] {
+            command.env_remove(secret);
+        }
+        let mut child = command.spawn().map_err(|e| format!("spawn Codex: {e}"))?;
 
-    let deadline = Instant::now() + Duration::from_secs(EXEC_TIMEOUT_SECS);
-    let exit = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) => {
-                if Instant::now() > deadline {
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Err(error) = stdin.write_all(prompt.as_bytes()) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("write Codex stdin: {error}"));
+            }
+        }
+
+        let stdout_pipe = child.stdout.take().ok_or("Codex stdout unavailable")?;
+        let stderr_pipe = child.stderr.take().ok_or("Codex stderr unavailable")?;
+        let stdout_reader = std::thread::spawn(move || drain_pipe(stdout_pipe, 10 * 1024 * 1024));
+        let stderr_reader = std::thread::spawn(move || drain_pipe(stderr_pipe, 2 * 1024 * 1024));
+
+        let deadline = Instant::now() + Duration::from_secs(EXEC_TIMEOUT_SECS);
+        let mut was_cancelled = false;
+        let exit = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if cancelled.load(Ordering::Relaxed) => {
+                    was_cancelled = true;
                     let _ = child.kill();
-                    let _ = std::fs::remove_file(&tmp);
+                    break child
+                        .wait()
+                        .map_err(|e| format!("wait for cancelled Codex process: {e}"))?;
+                }
+                Ok(None) if Instant::now() > deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
                     return Err(format!("Codex timed out after {EXEC_TIMEOUT_SECS}s"));
                 }
-                std::thread::sleep(Duration::from_millis(400));
+                Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(format!("wait on Codex: {error}"));
+                }
             }
-            Err(e) => {
-                let _ = child.kill();
-                let _ = std::fs::remove_file(&tmp);
-                return Err(format!("wait on codex: {e}"));
-            }
+        };
+
+        let stdout = stdout_reader.join().unwrap_or_default();
+        let stderr = stderr_reader.join().unwrap_or_default();
+        if was_cancelled {
+            return Err("AI job cancelled".into());
         }
-    };
-    let stdout = reader.join().unwrap_or_default();
 
-    // Preferred: the exact final agent message written by --output-last-message.
-    let last = std::fs::read_to_string(&tmp).unwrap_or_default();
-    let _ = std::fs::remove_file(&tmp);
-    let text = if !last.trim().is_empty() {
-        last
-    } else {
-        stdout
-    };
+        let last = std::fs::read_to_string(&result_path).unwrap_or_default();
+        let text = if last.trim().is_empty() { stdout } else { last };
+        if !exit.success() {
+            store::log_line(&format!("codex exec exited with {exit}"));
+            let detail = bounded_tail(
+                if stderr.trim().is_empty() {
+                    &text
+                } else {
+                    &stderr
+                },
+                500,
+            );
+            return Err(format!(
+                "Codex exec failed ({exit}). {detail}\nIf this mentions authentication, sign in again from Settings."
+            ));
+        }
+        if text.trim().is_empty() {
+            return Err("Codex returned an empty completion".into());
+        }
+        if output_schema.is_some() {
+            serde_json::from_str::<Value>(&text)
+                .map_err(|e| format!("Codex returned invalid structured JSON: {e}"))?;
+        }
+        store::log_line("codex classification batch completed");
+        Ok(text)
+    })();
 
-    if !exit.success() {
-        store::log_line(&format!("codex exec exited with {exit}"));
-        let tail: String = text
-            .chars()
-            .rev()
-            .take(300)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        return Err(format!(
-            "Codex exec failed ({exit}). {tail}\nIf this mentions auth, sign in again from Settings."
-        ));
-    }
-    store::log_line("codex classification batch completed");
-    Ok(text)
+    let _ = std::fs::remove_dir_all(&work_dir);
+    result
 }
 
-/// Spawn `codex login` detached — the browser OAuth flow belongs to the CLI.
+/// Spawn `codex login`; the browser OAuth flow and credential storage remain CLI-owned.
 pub fn login() -> Result<(), String> {
     let status = detect(false);
     let exe = status.path.ok_or("Codex CLI not installed")?;
@@ -380,15 +621,17 @@ pub fn login() -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| format!("spawn codex login: {e}"))?;
-    invalidate_cache(); // auth state is about to change
+        .map_err(|e| format!("spawn Codex login: {e}"))?;
+    invalidate_cache();
     store::log_line("codex login spawned");
     Ok(())
 }
 
-/// Download the official Codex CLI binary (latest GitHub release) into ~/.tawreed/bin.
+/// Download and verify the official Windows CLI release into Tawreed's managed bin.
 #[cfg(windows)]
 pub async fn install() -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+
     let client = reqwest::Client::builder()
         .user_agent("tawreed-app")
         .timeout(Duration::from_secs(300))
@@ -397,155 +640,159 @@ pub async fn install() -> Result<String, String> {
         .build()
         .map_err(|e| format!("http client: {e}"))?;
 
-    let release: Value = client
+    let release_response = client
         .get("https://api.github.com/repos/openai/codex/releases/latest")
         .send()
         .await
-        .map_err(|e| format!("query releases: {e}"))?
+        .map_err(|e| format!("query Codex releases: {e}"))?;
+    if !release_response.status().is_success() {
+        return Err(format!(
+            "query Codex releases failed with HTTP {}",
+            release_response.status()
+        ));
+    }
+    let release: Value = release_response
         .json()
         .await
-        .map_err(|e| format!("parse release: {e}"))?;
-
+        .map_err(|e| format!("parse Codex release: {e}"))?;
     let assets = release
         .get("assets")
         .and_then(Value::as_array)
         .ok_or("no assets in latest Codex release")?;
-    // Exact match required: the release also ships app-server / lint / proxy binaries
-    // with similar names — picking the first fuzzy match would grab the wrong tool.
     let asset = assets
         .iter()
-        .find(|a| {
-            a.get("name").and_then(Value::as_str) == Some("codex-x86_64-pc-windows-msvc.exe.zip")
+        .find(|asset| {
+            asset.get("name").and_then(Value::as_str)
+                == Some("codex-x86_64-pc-windows-msvc.exe.zip")
         })
-        .ok_or("codex-x86_64-pc-windows-msvc.exe.zip not found in latest Codex release")?;
+        .ok_or("Windows Codex CLI archive not found in latest release")?;
     let url = asset
         .get("browser_download_url")
         .and_then(Value::as_str)
-        .ok_or("asset has no download URL")?;
+        .ok_or("Codex release asset has no download URL")?;
+    let expected_digest = asset
+        .get("digest")
+        .and_then(Value::as_str)
+        .and_then(|digest| digest.strip_prefix("sha256:"))
+        .filter(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or("Codex release asset has no valid SHA-256 digest")?
+        .to_ascii_lowercase();
+    let declared_size = asset.get("size").and_then(Value::as_u64);
 
-    store::log_line(&format!("downloading codex from {url}"));
-    // Redirects are disabled on the client; follow them manually so every hop stays HTTPS
-    // and a malicious 3xx can't bounce the download to a plain-HTTP or attacker host.
+    store::log_line("downloading signed Codex CLI release asset");
     const MAX_DOWNLOAD: usize = 500 * 1024 * 1024;
-    let mut current_url = url.to_string();
-    let mut response: Option<reqwest::Response> = None;
-    // Initial request plus up to 3 HTTPS-only redirects.
+    let mut current_url =
+        reqwest::Url::parse(url).map_err(|e| format!("invalid Codex asset URL: {e}"))?;
+    let mut response = None;
     for _ in 0..=3 {
-        let res = client
-            .get(&current_url)
+        let candidate = client
+            .get(current_url.clone())
             .send()
             .await
-            .map_err(|e| format!("download codex: {e}"))?;
-        if res.status().is_redirection() {
-            let location = res
+            .map_err(|e| format!("download Codex: {e}"))?;
+        if candidate.status().is_redirection() {
+            let location = candidate
                 .headers()
                 .get(reqwest::header::LOCATION)
-                .and_then(|v| v.to_str().ok())
-                .ok_or("redirect response missing a Location header")?;
-            if !location.starts_with("https://") {
-                return Err("refusing to follow a non-HTTPS redirect".into());
+                .and_then(|value| value.to_str().ok())
+                .ok_or("Codex download redirect has no Location header")?;
+            let next = current_url
+                .join(location)
+                .map_err(|e| format!("invalid Codex redirect URL: {e}"))?;
+            let host = next.host_str().unwrap_or_default();
+            let trusted = host == "github.com"
+                || host.ends_with(".github.com")
+                || host.ends_with(".githubusercontent.com");
+            if next.scheme() != "https" || !trusted {
+                return Err(format!("refusing Codex download redirect to {host}"));
             }
-            // Only follow redirects to GitHub domains
-            let redirect_host = reqwest::Url::parse(location)
-                .ok()
-                .and_then(|u| u.host_str().map(|h| h.to_string()))
-                .unwrap_or_default();
-            if !redirect_host.ends_with(".github.com")
-                && redirect_host != "github.com"
-                && !redirect_host.ends_with(".githubusercontent.com")
-            {
-                return Err(format!(
-                    "refusing to follow redirect to untrusted host: {redirect_host}"
-                ));
-            }
-            store::log_line(&format!("following codex download redirect to {location}"));
-            current_url = location.to_string();
+            store::log_line("following approved GitHub download redirect");
+            current_url = next;
             continue;
         }
-        response = Some(res);
+        response = Some(candidate);
         break;
     }
-    let mut res = response.ok_or("too many redirects while downloading codex")?;
-    let res_status = res.status();
-    if !res_status.is_success() {
-        return Err(format!("codex download failed with HTTP {res_status}"));
+    let mut response = response.ok_or("too many redirects while downloading Codex")?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Codex download failed with HTTP {}",
+            response.status()
+        ));
     }
 
-    // Stream the body and enforce the size cap as it arrives.
-    let mut bytes: Vec<u8> = Vec::new();
-    while let Some(chunk) = res
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|e| format!("read codex bytes: {e}"))?
+        .map_err(|e| format!("read Codex bytes: {e}"))?
     {
         if bytes.len() + chunk.len() > MAX_DOWNLOAD {
-            return Err("codex download exceeded the 500 MB limit".into());
+            return Err("Codex download exceeded the 500 MB limit".into());
         }
         bytes.extend_from_slice(&chunk);
     }
-
-    let dest = managed_bin()?;
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("create bin dir: {e}"))?;
+    if declared_size.is_some_and(|size| size != bytes.len() as u64) {
+        return Err("Codex release asset size did not match its signed metadata".into());
     }
-    let tmp_dest = dest.with_extension("exe.tmp");
+    let actual_digest = format!("{:x}", Sha256::digest(&bytes));
+    if actual_digest != expected_digest {
+        return Err("Codex release asset failed SHA-256 verification".into());
+    }
+
+    let destination = managed_bin()?;
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create Codex bin dir: {e}"))?;
+    }
+    let temporary = destination.with_file_name("codex.installing.exe");
+    let _ = std::fs::remove_file(&temporary);
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("unzip: {e}"))?;
-    // The archive ships several tools: codex-command-runner.exe,
-    // codex-windows-sandbox-setup.exe, codex-x86_64-pc-windows-msvc.exe (the CLI we want).
-    let mut chosen: Option<usize> = None;
-    for i in 0..archive.len() {
+    let mut chosen = None;
+    for index in 0..archive.len() {
         let name = archive
-            .by_index(i)
-            .map_err(|e| format!("zip entry: {e}"))?
+            .by_index(index)
+            .map_err(|e| format!("read Codex zip entry: {e}"))?
             .name()
-            .to_string();
-        let lower = name.to_lowercase();
-        if lower == "codex-x86_64-pc-windows-msvc.exe" {
-            chosen = Some(i);
+            .to_ascii_lowercase();
+        if name == "codex-x86_64-pc-windows-msvc.exe" {
+            chosen = Some(index);
             break;
         }
-        // Fallback: the main CLI binary, never helper tools.
-        if lower.starts_with("codex-")
-            && lower.ends_with(".exe")
-            && lower.contains("windows-msvc")
-            && !lower.contains("runner")
-            && !lower.contains("setup")
-        {
-            chosen = chosen.or(Some(i));
-        }
     }
-    let i = chosen.ok_or("codex CLI binary not found inside the downloaded archive")?;
-    let mut file = archive.by_index(i).map_err(|e| format!("zip entry: {e}"))?;
-    let entry_name = file.name().to_string();
-    store::log_line(&format!(
-        "extracting codex binary from archive entry: {entry_name}"
-    ));
-    // Extract to a temp file first, then rename into place on success.
-    // Cap the *actual* bytes written rather than trusting the zip header's declared
-    // size (which an attacker controls); a zip-bomb entry can't blow past the limit.
-    let extract = (|| -> Result<(), String> {
-        let mut limited = (&mut file).take(MAX_DOWNLOAD as u64 + 1);
-        let mut out =
-            std::fs::File::create(&tmp_dest).map_err(|e| format!("create codex temp: {e}"))?;
-        let copied =
-            std::io::copy(&mut limited, &mut out).map_err(|e| format!("extract codex.exe: {e}"))?;
+    let index = chosen.ok_or("Codex CLI binary not found in verified archive")?;
+    let mut source = archive
+        .by_index(index)
+        .map_err(|e| format!("read Codex zip entry: {e}"))?;
+    let extraction = (|| -> Result<(), String> {
+        let mut limited = (&mut source).take(MAX_DOWNLOAD as u64 + 1);
+        let mut output = std::fs::File::create(&temporary)
+            .map_err(|e| format!("create Codex temporary executable: {e}"))?;
+        let copied = std::io::copy(&mut limited, &mut output)
+            .map_err(|e| format!("extract Codex executable: {e}"))?;
         if copied > MAX_DOWNLOAD as u64 {
-            return Err("codex archive entry exceeds the 500 MB limit".into());
+            return Err("Codex executable exceeds the 500 MB limit".into());
         }
-        Ok(())
+        output
+            .sync_all()
+            .map_err(|e| format!("flush Codex executable: {e}"))
     })();
-    if let Err(e) = extract {
-        let _ = std::fs::remove_file(&tmp_dest);
-        return Err(e);
+    if let Err(error) = extraction {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error);
     }
-    std::fs::rename(&tmp_dest, &dest).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp_dest);
-        format!("install codex.exe: {e}")
+    if exe_version(&temporary).is_none() {
+        let _ = std::fs::remove_file(&temporary);
+        return Err("Verified archive did not contain a valid Codex CLI executable".into());
+    }
+    store::replace_file(&temporary, &destination).map_err(|e| {
+        let _ = std::fs::remove_file(&temporary);
+        format!("install Codex executable: {e}")
     })?;
-    store::log_line("codex cli installed to managed bin");
+
+    store::log_line("Codex CLI installed to managed bin after SHA-256 verification");
     invalidate_cache();
-    Ok(dest.to_string_lossy().to_string())
+    Ok(destination.to_string_lossy().to_string())
 }
 
 #[cfg(not(windows))]
