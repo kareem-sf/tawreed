@@ -79,7 +79,7 @@ jobs:
           set -euo pipefail
           pr_number="$(jq -r '.number' <<<"$RELEASE_PR")"
           head_branch="$(jq -r '.headBranchName' <<<"$RELEASE_PR")"
-          head_sha="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid')"
+          head_sha="$(git rev-parse HEAD)"
           test "$pr_number" != "null"
           test -n "$head_branch"
           test -n "$head_sha"
