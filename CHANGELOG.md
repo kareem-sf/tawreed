@@ -3,6 +3,20 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.4.1 (2026-07-27)
+
+## What's Changed
+* fix(ci): finalize token-merged releases by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/21
+* fix(ci): prioritize release asset publication by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/23
+* fix(ci): detect quarantined pull request runs by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/24
+* fix(ci): publish draft releases by id by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/25
+* fix(ci): aggregate protected release checks by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/26
+* fix(ci): capture dispatched release run directly by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/27
+* fix(ci): use the pushed release commit SHA by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/28
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.4.0...v0.4.1
+
 ## 0.4.0 (2026-07-27)
 
 ## What's Changed
