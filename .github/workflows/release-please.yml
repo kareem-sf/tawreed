@@ -38,18 +38,18 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       - name: Check out the release pull request
-        if: steps.release.outputs.prs_created == 'true'
+        if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
           fetch-depth: 0
 
       - name: Synchronize desktop version manifests
-        if: steps.release.outputs.prs_created == 'true'
+        if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
         run: npm run sync:version
 
       - name: Commit synchronized desktop versions
-        if: steps.release.outputs.prs_created == 'true'
+        if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
         shell: bash
         env:
           HEAD_BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
@@ -68,7 +68,7 @@ jobs:
       # require human approval. Remove only those unstarted runs, then use the
       # documented workflow_dispatch exception to run the exact same CI suite.
       - name: Validate and merge the release pull request
-        if: steps.release.outputs.prs_created == 'true'
+        if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -137,7 +137,7 @@ jobs:
       # release immediately from the newly merged default branch.
       - name: Finalize the merged release
         id: finalize
-        if: steps.release.outputs.prs_created == 'true'
+        if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ github.token }}

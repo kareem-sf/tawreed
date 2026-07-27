@@ -30,15 +30,20 @@ the pull request, and finalizes the release in the same run:
 An hourly recovery pass safely finalizes a release if GitHub interrupts its
 originating workflow after the release pull request merges.
 
+If Release Please creates a release and prepares the next release pull request
+in the same pass, asset publication takes priority. The next pull request is
+processed by the following push, dispatch, or hourly recovery run.
+
 Release Please's manifest and configuration live in
 `.release-please-manifest.json` and `release-please-config.json`. Do not edit
 generated release versions by hand.
 
 ## Manual recovery
 
-The tag trigger remains available if the automation needs recovery. First update
-all version files and `CHANGELOG.md` through a reviewed pull request, then create
-and push an annotated or signed canonical tag:
+The tag trigger and the Release workflow's manual dispatch remain available if
+the automation needs recovery. First update all version files and `CHANGELOG.md`
+through a reviewed pull request, then create and push an annotated or signed
+canonical tag:
 
 ```powershell
 git tag -s vX.Y.Z -m "Tawreed vX.Y.Z"
