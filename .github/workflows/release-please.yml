@@ -89,7 +89,7 @@ jobs:
               gh api \
                 "repos/${GH_REPO}/actions/workflows/ci.yml/runs?event=pull_request&branch=${head_branch}&per_page=100" |
                 jq -r --arg sha "$head_sha" \
-                  '.workflow_runs[] | select(.head_sha == $sha and .status == "action_required") | .id'
+                  '.workflow_runs[] | select(.head_sha == $sha and (.status == "action_required" or .conclusion == "action_required")) | .id'
             )"
 
             if [[ -z "$run_ids" ]]; then
