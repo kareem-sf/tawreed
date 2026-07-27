@@ -13,8 +13,11 @@ use std::path::PathBuf;
 #[derive(Serialize, Clone)]
 pub struct BootstrapInfo {
     pub first_run: bool,
+    pub onboarding_required: bool,
+    pub onboarding_step: String,
     pub data_dir: String,
     pub has_api_key: bool,
+    pub has_compatible_key: bool,
     pub run_count: i64,
     pub version: String,
     /// "codex" | "anthropic" | "none" — resolved AI provider for this session.
@@ -47,7 +50,7 @@ fn log_path() -> Result<PathBuf, String> {
 
 pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
     let dir = data_dir()?;
-    let first_run = !dir.exists();
+    let data_dir_existed = dir.exists();
     fs::create_dir_all(dir.join("output")).map_err(|e| format!("create output dir: {e}"))?;
     fs::create_dir_all(dir.join("logs")).map_err(|e| format!("create logs dir: {e}"))?;
     // Interrupted generations remain hidden temp directories; remove them on the next launch.
@@ -81,12 +84,15 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
         set_private_permissions(&env_file);
     }
     let settings = dir.join("settings.json");
-    if !settings.exists() {
-        fs::write(
-            &settings,
-            "{\n  \"language\": \"en\",\n  \"provider\": \"auto\"\n}\n",
-        )
-        .map_err(|e| format!("create settings: {e}"))?;
+    let settings_existed = settings.exists();
+    let current_settings = fs::read_to_string(&settings)
+        .ok()
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let migrated_settings = migrate_settings(current_settings.clone(), !settings_existed);
+    if !settings_existed || migrated_settings != current_settings {
+        write_settings(&settings, &migrated_settings)
+            .map_err(|e| format!("create or migrate settings: {e}"))?;
     }
 
     let conn = open_db()?;
@@ -96,23 +102,35 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
 
     let codex = crate::codex::detect(false);
     let has_key = api_key().is_some();
-    let provider_preference = get_settings()
-        .get("provider")
+    let has_compatible_key = compatible_api_key().is_some();
+    let settings_value = get_settings();
+    let onboarding_step = settings_value
+        .pointer("/onboarding/step")
         .and_then(serde_json::Value::as_str)
-        .filter(|value| matches!(*value, "auto" | "codex" | "anthropic" | "offline"))
-        .unwrap_or("auto")
+        .filter(|value| matches!(*value, "language" | "video" | "connection" | "complete"))
+        .unwrap_or("complete")
+        .to_string();
+    let onboarding_required = onboarding_step != "complete";
+    let processing_mode = settings_value
+        .get("processingMode")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| matches!(*value, "ask" | "online" | "offline"))
+        .unwrap_or("ask");
+    let provider_preference = settings_value
+        .get("activeProvider")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| matches!(*value, "codex" | "anthropic" | "compatible"))
+        .unwrap_or("codex")
         .to_string();
     let provider = match provider_preference.as_str() {
-        "offline" => "none",
+        _ if processing_mode == "offline" => "none",
         "codex" if codex.installed && codex.authenticated => "codex",
         "anthropic" if has_key => "anthropic",
-        "codex" | "anthropic" => "none",
-        _ if codex.installed && codex.authenticated => "codex",
-        _ if has_key => "anthropic",
+        "compatible" if has_compatible_key => "compatible",
         _ => "none",
     };
 
-    log_line(if first_run {
+    log_line(if !data_dir_existed {
         "first run — data directory initialized"
     } else {
         "app started"
@@ -123,9 +141,12 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
     ));
 
     Ok(BootstrapInfo {
-        first_run,
+        first_run: onboarding_required,
+        onboarding_required,
+        onboarding_step,
         data_dir: dir.to_string_lossy().to_string(),
         has_api_key: has_key,
+        has_compatible_key,
         run_count,
         version: env!("CARGO_PKG_VERSION").to_string(),
         provider: provider.to_string(),
@@ -133,6 +154,60 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
         codex_installed: codex.installed,
         codex_authenticated: codex.authenticated,
     })
+}
+
+fn migrate_settings(value: serde_json::Value, new_install: bool) -> serde_json::Value {
+    let mut object = value.as_object().cloned().unwrap_or_default();
+    let schema_version = object
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if schema_version < 2 {
+        let legacy_provider = object
+            .get("provider")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("auto");
+        let processing_mode = if legacy_provider == "offline" {
+            "offline"
+        } else {
+            "ask"
+        };
+        let active_provider = match legacy_provider {
+            "anthropic" => "anthropic",
+            "codex" => "codex",
+            _ => "codex",
+        };
+        object.insert("schemaVersion".into(), serde_json::json!(2));
+        object.insert("processingMode".into(), serde_json::json!(processing_mode));
+        object.insert("activeProvider".into(), serde_json::json!(active_provider));
+        object.insert(
+            "onboarding".into(),
+            serde_json::json!({
+                "version": 1,
+                "step": if new_install { "language" } else { "complete" }
+            }),
+        );
+        object.insert(
+            "compatible".into(),
+            serde_json::json!({ "baseUrl": "", "model": "" }),
+        );
+        object.remove("provider");
+    }
+    object
+        .entry("language")
+        .or_insert_with(|| serde_json::json!("en"));
+    object
+        .entry("theme")
+        .or_insert_with(|| serde_json::json!("auto"));
+    serde_json::Value::Object(object)
+}
+
+fn write_settings(path: &std::path::Path, settings: &serde_json::Value) -> Result<(), String> {
+    let serialized =
+        serde_json::to_string_pretty(settings).map_err(|e| format!("serialize settings: {e}"))?;
+    let tmp = path.with_file_name("settings.json.tmp");
+    std::fs::write(&tmp, serialized).map_err(|e| format!("write settings: {e}"))?;
+    replace_file(&tmp, path).map_err(|e| format!("replace settings: {e}"))
 }
 
 pub fn open_db() -> Result<rusqlite::Connection, String> {
@@ -234,10 +309,15 @@ fn migrate_runs_table(conn: &rusqlite::Connection) -> Result<(), String> {
 
 const KEYRING_SERVICE: &str = "com.tawreed.desktop";
 const KEYRING_ACCOUNT: &str = "anthropic-api-key";
+const COMPATIBLE_KEYRING_ACCOUNT: &str = "compatible-provider-api-key";
+
+fn credential_entry_for(account: &str) -> Result<keyring::v1::Entry, String> {
+    keyring::v1::Entry::new(KEYRING_SERVICE, account)
+        .map_err(|error| format!("open operating system credential store: {error}"))
+}
 
 fn credential_entry() -> Result<keyring::v1::Entry, String> {
-    keyring::v1::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|error| format!("open operating system credential store: {error}"))
+    credential_entry_for(KEYRING_ACCOUNT)
 }
 
 fn legacy_file_api_key() -> Option<String> {
@@ -291,12 +371,58 @@ pub fn get_settings() -> serde_json::Value {
 
 /// Keys the frontend is allowed to persist. Anything else is rejected so a compromised
 /// renderer can't scribble arbitrary entries into settings.json.
-const ALLOWED_SETTINGS: &[&str] = &["language", "model", "provider", "theme"];
+const ALLOWED_SETTINGS: &[&str] = &[
+    "language",
+    "model",
+    "theme",
+    "processingMode",
+    "activeProvider",
+    "onboarding",
+    "compatible",
+];
 
 /// Merge one key into settings.json.
 pub fn set_setting(key: &str, value: serde_json::Value) -> Result<(), String> {
     if !ALLOWED_SETTINGS.contains(&key) {
         return Err(format!("unknown setting: {key}"));
+    }
+    match key {
+        "language" if !matches!(value.as_str(), Some("en" | "ar")) => {
+            return Err("language must be 'en' or 'ar'".into());
+        }
+        "theme" if !matches!(value.as_str(), Some("auto" | "light" | "dark")) => {
+            return Err("theme must be auto, light, or dark".into());
+        }
+        "processingMode" if !matches!(value.as_str(), Some("ask" | "online" | "offline")) => {
+            return Err("processingMode must be ask, online, or offline".into());
+        }
+        "activeProvider"
+            if !matches!(value.as_str(), Some("codex" | "anthropic" | "compatible")) =>
+        {
+            return Err("activeProvider must be codex, anthropic, or compatible".into());
+        }
+        "onboarding" => {
+            let version = value.get("version").and_then(serde_json::Value::as_u64);
+            let step = value.get("step").and_then(serde_json::Value::as_str);
+            if version != Some(1)
+                || !matches!(step, Some("language" | "video" | "connection" | "complete"))
+            {
+                return Err("invalid onboarding state".into());
+            }
+        }
+        "compatible" => {
+            let base_url = value.get("baseUrl").and_then(serde_json::Value::as_str);
+            let model = value.get("model").and_then(serde_json::Value::as_str);
+            if base_url.is_none_or(|text| text.len() > 2048)
+                || model.is_none_or(|text| text.len() > 160)
+            {
+                return Err("invalid compatible provider settings".into());
+            }
+        }
+        "model" if value.as_str().is_none_or(|text| text.len() > 160) => {
+            return Err("invalid model setting".into());
+        }
+        _ => {}
     }
     let path = data_dir()?.join("settings.json");
     let mut settings = get_settings();
@@ -304,12 +430,7 @@ pub fn set_setting(key: &str, value: serde_json::Value) -> Result<(), String> {
         settings = serde_json::json!({});
     }
     settings[key] = value;
-    let serialized = serde_json::to_string_pretty(&settings).unwrap_or_else(|_| "{}".into());
-    // Atomic write: serialize to a sibling temp file, then rename over the original so a
-    // crash mid-write can't leave a truncated settings.json.
-    let tmp = path.with_file_name("settings.json.tmp");
-    std::fs::write(&tmp, serialized).map_err(|e| format!("write settings: {e}"))?;
-    replace_file(&tmp, &path).map_err(|e| format!("replace settings: {e}"))
+    write_settings(&path, &settings)
 }
 
 /// Atomically replace a file where the platform supports it. Windows' standard
@@ -447,6 +568,34 @@ pub fn write_env_key(value: Option<&str>) -> Result<(), String> {
     }
 }
 
+pub fn compatible_api_key() -> Option<String> {
+    if let Ok(key) = std::env::var("TAWREED_COMPATIBLE_API_KEY") {
+        if !key.trim().is_empty() {
+            return Some(key.trim().to_string());
+        }
+    }
+    let entry = credential_entry_for(COMPATIBLE_KEYRING_ACCOUNT).ok()?;
+    entry
+        .get_password()
+        .ok()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+}
+
+pub fn write_compatible_api_key(value: Option<&str>) -> Result<(), String> {
+    let entry = credential_entry_for(COMPATIBLE_KEYRING_ACCOUNT)?;
+    match value {
+        Some(secret) if !secret.trim().is_empty() => entry
+            .set_password(secret.trim())
+            .map_err(|error| format!("save compatible provider key: {error}")),
+        Some(_) => Err("Empty compatible provider key".into()),
+        None => match entry.delete_credential() {
+            Ok(()) | Err(keyring::v1::Error::NoEntry) => Ok(()),
+            Err(error) => Err(format!("remove compatible provider key: {error}")),
+        },
+    }
+}
+
 pub fn log_line(message: &str) {
     // Strip newlines so a caller-supplied message can't forge extra log lines.
     let sanitized = message.replace(['\n', '\r'], " ");
@@ -473,7 +622,7 @@ pub fn log_line(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate_runs_table, rewrite_env_key};
+    use super::{migrate_runs_table, migrate_settings, rewrite_env_key};
 
     #[test]
     fn rewrite_env_key_rewrites_plain_and_export_lines_in_canonical_form() {
@@ -515,5 +664,39 @@ mod tests {
             .map(|count| count == 1)
             .unwrap();
         assert!(has_revision);
+    }
+
+    #[test]
+    fn new_install_starts_at_language_before_any_provider_setup() {
+        let settings = migrate_settings(serde_json::json!({}), true);
+        assert_eq!(settings["schemaVersion"], 2);
+        assert_eq!(settings["onboarding"]["step"], "language");
+        assert_eq!(settings["processingMode"], "ask");
+    }
+
+    #[test]
+    fn existing_install_migrates_without_forcing_onboarding() {
+        let settings = migrate_settings(
+            serde_json::json!({
+                "language": "ar",
+                "provider": "offline"
+            }),
+            false,
+        );
+        assert_eq!(settings["language"], "ar");
+        assert_eq!(settings["onboarding"]["step"], "complete");
+        assert_eq!(settings["processingMode"], "offline");
+    }
+
+    #[test]
+    fn interrupted_v2_onboarding_is_preserved() {
+        let input = serde_json::json!({
+            "schemaVersion": 2,
+            "language": "en",
+            "onboarding": { "version": 1, "step": "video" }
+        });
+        let migrated = migrate_settings(input, false);
+        assert_eq!(migrated["onboarding"]["step"], "video");
+        assert_eq!(migrated["theme"], "auto");
     }
 }

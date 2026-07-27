@@ -17,7 +17,13 @@ function matchesKeyword(text: string, kw: string): boolean {
   return tokens.some((t) => t === kw || t.startsWith(kw));
 }
 
-function score(item: BoqItem): { packageCode: string; confidence: number; hits: number } {
+function score(item: BoqItem): {
+  packageCode: string;
+  packageNameEn?: string;
+  packageNameAr?: string;
+  confidence: number;
+  hits: number;
+} {
   const text = normalizeText(item.description + ' ' + item.code);
   let bestCode = '';
   let bestHits = 0;
@@ -33,6 +39,12 @@ function score(item: BoqItem): { packageCode: string; confidence: number; hits: 
         longest = Math.max(longest, kw.length);
       }
     }
+    for (const negative of new Set(pkg.negativeKeywords ?? [])) {
+      if (matchesKeyword(text, negative)) hits -= negative.length >= 5 ? 3 : 2;
+    }
+    if (hits > 0 && pkg.unitSignals?.includes(item.unit)) hits += 1;
+    if (hits > 0) hits += pkg.priority ?? 0;
+    hits = Math.max(0, hits);
     // On a score tie, prefer the package with the longer (more specific) keyword match —
     // e.g. 'screed finish' (WP-04) beats plain 'screed' (WP-02) for the same points.
     if (hits > bestHits) { secondHits = bestHits; bestHits = hits; bestCode = pkg.code; bestLongest = longest; }
@@ -41,8 +53,17 @@ function score(item: BoqItem): { packageCode: string; confidence: number; hits: 
   }
   // Confidence grows with margin over the runner-up and absolute hit strength.
   const margin = bestHits - secondHits;
-  const confidence = bestHits === 0 ? 0 : Math.min(0.95, 0.45 + bestHits * 0.1 + margin * 0.15);
-  return { packageCode: bestCode, confidence, hits: bestHits };
+  const confidence = bestHits === 0
+    ? 0
+    : Math.min(0.97, 0.42 + bestHits * 0.08 + Math.max(0, margin) * 0.13);
+  const definition = TAXONOMY.find((pkg) => pkg.code === bestCode);
+  return {
+    packageCode: bestCode,
+    packageNameEn: definition?.nameEn,
+    packageNameAr: definition?.nameAr,
+    confidence,
+    hits: bestHits,
+  };
 }
 
 export function heuristicClassify(items: BoqItem[]): { classified: Classification[]; remaining: BoqItem[] } {
@@ -51,7 +72,14 @@ export function heuristicClassify(items: BoqItem[]): { classified: Classificatio
   for (const item of items) {
     const s = score(item);
     if (s.hits >= MIN_SCORE) {
-      classified.push({ itemId: item.id, packageCode: s.packageCode, confidence: +s.confidence.toFixed(2), source: 'heuristic' });
+      classified.push({
+        itemId: item.id,
+        packageCode: s.packageCode,
+        packageNameEn: s.packageNameEn,
+        packageNameAr: s.packageNameAr,
+        confidence: +s.confidence.toFixed(2),
+        source: 'heuristic',
+      });
     } else {
       remaining.push(item);
     }
@@ -62,5 +90,12 @@ export function heuristicClassify(items: BoqItem[]): { classified: Classificatio
 /** Force-assign an item using the best available (possibly weak) heuristic guess. */
 export function heuristicFallback(item: BoqItem): Classification {
   const s = score(item);
-  return { itemId: item.id, packageCode: s.packageCode || 'WP-99', confidence: +s.confidence.toFixed(2), source: 'fallback' };
+  return {
+    itemId: item.id,
+    packageCode: s.packageCode || 'WP-99',
+    packageNameEn: s.packageNameEn,
+    packageNameAr: s.packageNameAr,
+    confidence: +s.confidence.toFixed(2),
+    source: 'fallback',
+  };
 }

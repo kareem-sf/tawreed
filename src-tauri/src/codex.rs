@@ -3,6 +3,7 @@
 use crate::store;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -53,6 +54,7 @@ pub struct CodexStatus {
     pub authenticated: bool,
     pub version: Option<String>,
     pub path: Option<String>,
+    pub source: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -277,31 +279,79 @@ pub fn managed_bin() -> Result<PathBuf, String> {
     Ok(store::data_dir()?.join("bin").join(binary))
 }
 
-fn candidate_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
+#[derive(Clone, Debug)]
+struct CodexCandidate {
+    path: PathBuf,
+    source: &'static str,
+}
+
+fn npm_vendor_candidates(appdata: &Path) -> Vec<CodexCandidate> {
+    let package = appdata.join(r"npm\node_modules\@openai\codex");
+    [
+        (
+            package.join(
+                r"node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe",
+            ),
+            "npm (Windows x64)",
+        ),
+        (
+            package.join(
+                r"node_modules\@openai\codex-win32-arm64\vendor\aarch64-pc-windows-msvc\bin\codex.exe",
+            ),
+            "npm (Windows arm64)",
+        ),
+        (package.join(r"bin\codex.exe"), "npm"),
+    ]
+    .into_iter()
+    .map(|(path, source)| CodexCandidate { path, source })
+    .collect()
+}
+
+#[cfg(windows)]
+fn appx_candidates() -> Vec<CodexCandidate> {
+    let output = quiet_command("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue).InstallLocation",
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|location| CodexCandidate {
+            path: PathBuf::from(location).join(r"app\resources\codex.exe"),
+            source: "Codex desktop app",
+        })
+        .collect()
+}
+
+fn candidate_paths() -> Vec<CodexCandidate> {
+    let mut candidates = Vec::new();
     if let Ok(path) = managed_bin() {
-        paths.push(path);
+        candidates.push(CodexCandidate {
+            path,
+            source: "Tawreed managed",
+        });
     }
 
     #[cfg(windows)]
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        let base = PathBuf::from(appdata).join(r"npm\node_modules\@openai");
-        if let Ok(vendors) = std::fs::read_dir(&base) {
-            for vendor in vendors.flatten() {
-                let nested = vendor.path().join("node_modules").join("@openai");
-                if let Ok(platforms) = std::fs::read_dir(&nested) {
-                    for platform in platforms.flatten() {
-                        let executable = platform.path().join("codex.exe");
-                        if executable.is_file() {
-                            paths.push(executable);
-                        }
-                    }
-                }
-                let direct = vendor.path().join("bin").join("codex.exe");
-                if direct.is_file() {
-                    paths.push(direct);
-                }
-            }
+    {
+        if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") {
+            candidates.push(CodexCandidate {
+                path: PathBuf::from(local_appdata).join(r"Programs\OpenAI\Codex\bin\codex.exe"),
+                source: "Codex standalone",
+            });
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            candidates.extend(npm_vendor_candidates(&PathBuf::from(appdata)));
         }
     }
 
@@ -309,12 +359,27 @@ fn candidate_paths() -> Vec<PathBuf> {
         let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
         for directory in std::env::split_paths(&path) {
             let candidate = directory.join(binary);
-            if candidate.is_file() {
-                paths.push(candidate);
-            }
+            candidates.push(CodexCandidate {
+                path: candidate,
+                source: "system PATH",
+            });
         }
     }
-    paths
+
+    #[cfg(windows)]
+    candidates.extend(appx_candidates());
+
+    let mut seen = HashSet::new();
+    candidates.retain(|candidate| {
+        let normalized = candidate
+            .path
+            .canonicalize()
+            .unwrap_or_else(|_| candidate.path.clone())
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        seen.insert(normalized)
+    });
+    candidates
 }
 
 fn wait_with_timeout(child: &mut std::process::Child, timeout: Duration) -> Option<bool> {
@@ -391,13 +456,14 @@ pub fn detect(force: bool) -> CodexStatus {
 }
 
 fn detect_uncached() -> CodexStatus {
-    for path in candidate_paths() {
-        if let Some(version) = exe_version(&path) {
+    for candidate in candidate_paths() {
+        if let Some(version) = exe_version(&candidate.path) {
             return CodexStatus {
                 installed: true,
-                authenticated: authenticated(&path),
+                authenticated: authenticated(&candidate.path),
                 version: Some(version),
-                path: Some(path.to_string_lossy().to_string()),
+                path: Some(candidate.path.to_string_lossy().to_string()),
+                source: Some(candidate.source.to_string()),
             };
         }
     }
@@ -406,6 +472,7 @@ fn detect_uncached() -> CodexStatus {
         authenticated: false,
         version: None,
         path: None,
+        source: None,
     }
 }
 
@@ -798,4 +865,44 @@ pub async fn install() -> Result<String, String> {
 #[cfg(not(windows))]
 pub async fn install() -> Result<String, String> {
     Err("Automatic Codex installation is available on Windows only. Install the official CLI with `npm install -g @openai/codex`, then restart Tawreed.".into())
+}
+
+#[cfg(test)]
+mod detection_tests {
+    use super::*;
+
+    #[test]
+    fn includes_current_npm_vendor_layouts() {
+        let appdata = PathBuf::from(r"C:\Users\engineer\AppData\Roaming");
+        let candidates = npm_vendor_candidates(&appdata);
+        let paths: Vec<String> = candidates
+            .iter()
+            .map(|candidate| candidate.path.to_string_lossy().replace('\\', "/"))
+            .collect();
+
+        assert!(paths.iter().any(|path| path.ends_with(
+            "npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
+        )));
+        assert!(paths.iter().any(|path| path.ends_with(
+            "npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-arm64/vendor/aarch64-pc-windows-msvc/bin/codex.exe"
+        )));
+    }
+
+    #[test]
+    fn duplicate_candidates_are_removed_case_insensitively() {
+        let mut candidates = vec![
+            CodexCandidate {
+                path: PathBuf::from(r"C:\Tools\codex.exe"),
+                source: "one",
+            },
+            CodexCandidate {
+                path: PathBuf::from(r"c:\tools\CODEX.EXE"),
+                source: "two",
+            },
+        ];
+        let mut seen = HashSet::new();
+        candidates
+            .retain(|candidate| seen.insert(candidate.path.to_string_lossy().to_ascii_lowercase()));
+        assert_eq!(candidates.len(), 1);
+    }
 }

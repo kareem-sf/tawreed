@@ -122,14 +122,26 @@ body {
   color: #fff;
 }
 
-/* Package row hover */
-.pkg-row {
-  border-radius: 9px;
-  transition: background 120ms;
+.titlebar-nav {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.67;
+  transition: opacity 120ms, background 120ms;
 }
 
-.pkg-row:hover {
-  background: rgba(232, 181, 74, 0.08);
+.titlebar-nav:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.12);
 }
 
 /* Magic UI — ShimmerButton keyframes */
@@ -168,4 +180,28 @@ body {
 @keyframes shiny-sweep {
   from { background-position: 0 0; }
   to { background-position: calc(-1 * var(--shiny-width, 120px)) 0; }
+}
+
+:root {
+  --legend: oklch(1 0 0);
+  --legend-foreground: oklch(0.141 0.005 285.823);
+  --legend-muted: oklch(0.967 0.001 286.375);
+  --legend-muted-foreground: oklch(0.552 0.016 285.938);
+  --legend-track: oklch(0.92 0.004 286.32);
+}
+
+[data-mantine-color-scheme='dark'] {
+  --legend: oklch(0.21 0.006 285.885);
+  --legend-foreground: oklch(0.985 0 0);
+  --legend-muted: oklch(0.274 0.006 286.033);
+  --legend-muted-foreground: oklch(0.705 0.015 286.067);
+  --legend-track: oklch(0.274 0.006 286.033);
+}
+
+@theme inline {
+  --color-legend: var(--legend);
+  --color-legend-foreground: var(--legend-foreground);
+  --color-legend-muted: var(--legend-muted);
+  --color-legend-muted-foreground: var(--legend-muted-foreground);
+  --color-legend-track: var(--legend-track);
 }

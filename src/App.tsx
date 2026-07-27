@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Badge, Button, Drawer, Group, Modal, Text, Tooltip } from '@mantine/core';
+import { Button, Drawer, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { AnimatePresence } from 'motion/react';
-import { FileSpreadsheet, FolderOpen, ShieldCheck } from 'lucide-react';
+import { FileSpreadsheet, FolderOpen, LockKeyhole } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   appLog,
@@ -11,6 +11,7 @@ import {
   getSettings,
   listClassificationMemory,
   makeCodexTransport,
+  makeCompatibleTransport,
   makeLlmTransport,
   openGeneratedFolder,
   openUpdateRelease,
@@ -30,9 +31,10 @@ import ReviewPanel, { type PipelineData } from './components/ReviewPanel';
 import SettingsModal from './components/SettingsModal';
 import HistoryDrawer from './components/HistoryDrawer';
 import AboutModal, { type UpdateState } from './components/AboutModal';
-import { AnimatedShinyText } from './components/ui/animated-shiny-text';
 import { BlurFade } from './components/ui/blur-fade';
 import { DotPattern } from './components/ui/dot-pattern';
+import WorkLoader from './components/WorkLoader';
+import Onboarding from './components/Onboarding';
 import { DEFAULT_MODEL, UNCLASSIFIED_CODE } from '../engine/classify/llm';
 import {
   applyClassificationMemory,
@@ -69,8 +71,10 @@ export default function App() {
   const { t, i18n } = useTranslation();
   const [view, setView] = useState<View>('idle');
   const [busyMsg, setBusyMsg] = useState('');
+  const [busyProgress, setBusyProgress] = useState<number | null>(null);
   const [boot, setBoot] = useState<BootstrapInfo | null>(null);
   const [modelSlug, setModelSlug] = useState<string | null>(null);
+  const [processingMode, setProcessingMode] = useState<'ask' | 'online' | 'offline'>('ask');
   const [pendingInspection, setPendingInspection] = useState<PendingInspection | null>(null);
   const [pendingPublication, setPendingPublication] = useState<PendingPublication | null>(null);
   const [data, setData] = useState<PipelineData | null>(null);
@@ -79,6 +83,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingRequired, setOnboardingRequired] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState<'language' | 'video' | 'connection'>('language');
   const [update, setUpdate] = useState<UpdateState>({ status: 'idle' });
   const [generating, setGenerating] = useState(false);
   const [cancellable, setCancellable] = useState(false);
@@ -91,7 +98,19 @@ export default function App() {
     Promise.all([bootstrap(), getSettings()])
       .then(([info, settings]) => {
         setBoot(info);
+        if (info.onboarding_required) {
+          setOnboardingRequired(true);
+          setOnboardingStep(info.onboarding_step === 'complete' ? 'language' : info.onboarding_step);
+          setOnboardingOpen(true);
+        }
         setModelSlug(typeof settings.model === 'string' && settings.model ? settings.model : null);
+        if (
+          settings.processingMode === 'ask'
+          || settings.processingMode === 'online'
+          || settings.processingMode === 'offline'
+        ) {
+          setProcessingMode(settings.processingMode);
+        }
         if (typeof settings.language === 'string' && ['en', 'ar'].includes(settings.language)) {
           void i18n.changeLanguage(settings.language);
         }
@@ -132,8 +151,6 @@ export default function App() {
 
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const openHistory = useCallback(() => setHistoryOpen(true), []);
-  const openAbout = useCallback(() => setAboutOpen(true), []);
-
   function clearActiveCancellation() {
     cancelJobRef.current = null;
     setCancellable(false);
@@ -156,6 +173,7 @@ export default function App() {
   async function analyze(pending: PendingInspection, allowAi: boolean) {
     setError(null);
     setView('busy');
+    setBusyProgress(null);
     const resolvedProvider = allowAi && boot?.provider !== 'none'
       ? boot?.provider
       : 'offline';
@@ -164,7 +182,9 @@ export default function App() {
       ? modelSlug ?? ''
       : provider === 'anthropic'
         ? DEFAULT_MODEL
-        : '';
+        : provider === 'compatible'
+          ? 'configured service'
+          : '';
     const controller = new AbortController();
     if (provider !== 'offline') {
       cancelJobRef.current = () => controller.abort();
@@ -179,13 +199,15 @@ export default function App() {
     )];
 
     try {
-      const [{ classifyAll }, { refineInspectionWithAgent }] = await Promise.all([
+      const [{ classifyPlan }, { refineInspectionWithAgent }] = await Promise.all([
         import('../engine/classify'),
         import('../engine/document-agent'),
       ]);
       const transport = provider === 'codex'
         ? makeCodexTransport(modelSlug, controller.signal)
-        : makeLlmTransport(controller.signal);
+        : provider === 'compatible'
+          ? makeCompatibleTransport(controller.signal)
+          : makeLlmTransport(controller.signal);
       let inspection = pending.inspection;
       let llmFailed = false;
 
@@ -218,15 +240,18 @@ export default function App() {
       }
 
       setBusyMsg(t('classifying'));
-      let classifications;
+      let classificationPlan;
       try {
-        classifications = await classifyAll(inspection.items, {
+        classificationPlan = await classifyPlan(inspection.items, {
           useLlm: provider !== 'offline',
           transport: provider !== 'offline' ? transport : undefined,
-          onProgress: (progress) => setBusyMsg(t('aiBusy', {
-            done: progress.done,
-            total: progress.total,
-          })),
+          onProgress: (progress) => {
+            setBusyMsg(t('aiBusy', {
+              done: progress.done,
+              total: progress.total,
+            }));
+            setBusyProgress(progress.total ? (progress.done / progress.total) * 100 : null);
+          },
         });
       } catch (reason) {
         if (isCancellation(reason)) throw reason;
@@ -234,8 +259,9 @@ export default function App() {
         void appLog(
           `classification fallback: ${reason instanceof Error ? reason.message : String(reason)}`,
         );
-        classifications = await classifyAll(inspection.items, { useLlm: false });
+        classificationPlan = await classifyPlan(inspection.items, { useLlm: false });
       }
+      let classifications = classificationPlan.classifications;
       const llmApplied = classifications.some(
         (classification) =>
           classification.source === 'llm' && classification.packageCode !== UNCLASSIFIED_CODE,
@@ -268,6 +294,20 @@ export default function App() {
       }
 
       const packages = buildPackages(inspection.items, classifications);
+      const packageCatalog = classificationPlan.catalog.map((definition) =>
+        packages.find((workPackage) => workPackage.code === definition.code) ?? {
+          code: definition.code,
+          nameEn: definition.nameEn,
+          nameAr: definition.nameAr,
+          itemIds: [],
+          totalCost: 0,
+          itemCount: 0,
+        });
+      for (const workPackage of packages) {
+        if (!packageCatalog.some((candidate) => candidate.code === workPackage.code)) {
+          packageCatalog.push(workPackage);
+        }
+      }
       const issues = validate(inspection.items, classifications, packages);
       trace.push(workflowEvent(
         'validate',
@@ -280,7 +320,7 @@ export default function App() {
         inspection,
         classifications,
         packages,
-        packageCatalog: packages,
+        packageCatalog,
         issues,
         llmUsed: provider !== 'offline' && !llmFailed && llmApplied,
         llmFailed,
@@ -310,6 +350,7 @@ export default function App() {
     setError(null);
     setOutput(null);
     setView('busy');
+    setBusyProgress(null);
     const trace = [workflowEvent('inspect', 'started', 'Local document inspection started')];
     try {
       setBusyMsg(t('parsing'));
@@ -317,14 +358,17 @@ export default function App() {
       const startedAt = Date.now();
       const inspectJob = inspectInWorker(bytes, file.name, (progress) => {
         if (progress.phase === 'ocr') {
+          setBusyProgress((progress.progress ?? 0) * 100);
           setBusyMsg(t('ocrProgress', {
             page: progress.page,
             total: progress.total,
             percent: Math.round((progress.progress ?? 0) * 100),
           }));
         } else if (progress.phase === 'pdf') {
+          setBusyProgress(progress.total ? (progress.page / progress.total) * 100 : null);
           setBusyMsg(t('pdfProgress', { page: progress.page, total: progress.total }));
         } else {
+          setBusyProgress(null);
           setBusyMsg(t('analyzingDocument'));
         }
       });
@@ -341,7 +385,9 @@ export default function App() {
         `inspection: file=${file.name} source=${inspection.sourceKind} project=${inspection.projectName} items=${inspection.items.length} confidence=${inspection.mapping.confidence.toFixed(2)}`,
       );
       const pending = { inspection, fileName: file.name, bytes, startedAt, trace };
-      if (boot?.provider && boot.provider !== 'none') {
+      if (boot?.provider && boot.provider !== 'none' && processingMode === 'online') {
+        await analyze(pending, true);
+      } else if (boot?.provider && boot.provider !== 'none' && processingMode === 'ask') {
         setPendingInspection(pending);
         setView('consent');
       } else {
@@ -385,6 +431,7 @@ export default function App() {
     setGenerating(true);
     setError(null);
     setView('busy');
+    setBusyProgress(null);
     let reservation = pendingPublication?.reservation ?? null;
     let artifacts = pendingPublication?.artifacts ?? null;
     const trace = [...data.trace];
@@ -510,10 +557,38 @@ export default function App() {
     }
   }
 
-  const consentProvider = boot?.provider === 'codex' ? 'Codex' : 'Anthropic';
-  const consentModel = boot?.provider === 'codex'
-    ? modelSlug || t('modelPlaceholder')
-    : DEFAULT_MODEL;
+  const consentProvider = boot?.provider === 'codex'
+    ? 'Codex'
+    : boot?.provider === 'compatible'
+      ? t('connectedService')
+      : 'Anthropic';
+
+  if (!boot) {
+    return (
+      <div className="app-frame flex items-center justify-center">
+        <WorkLoader title={t('startingTawreed')} size="md" />
+      </div>
+    );
+  }
+
+  if (onboardingOpen) {
+    return (
+      <div className="app-frame">
+        <Onboarding
+          initialStep={onboardingStep}
+          required={onboardingRequired}
+          hasKey={boot.has_api_key}
+          hasCompatibleKey={boot.has_compatible_key}
+          onComplete={() => {
+            setOnboardingOpen(false);
+            setOnboardingRequired(false);
+            refreshConfiguration();
+          }}
+          onClose={() => setOnboardingOpen(false)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app-frame relative">
@@ -521,7 +596,6 @@ export default function App() {
       <TitleBar
         onSettings={openSettings}
         onHistory={openHistory}
-        onAbout={openAbout}
         updateAvailable={update.status === 'available'}
         modalOpen={settingsOpen || historyOpen || aboutOpen}
       />
@@ -545,19 +619,19 @@ export default function App() {
           )}
 
           {view === 'consent' && pendingInspection && (
-            <BlurFade key="consent" className="flex h-full flex-col items-center justify-center gap-3 px-10">
-              <ShieldCheck className="h-11 w-11 text-amber-500" strokeWidth={1.4} />
-              <Text fw={650} size="lg">{t('aiConsentTitle')}</Text>
-              <Text size="sm" c="dimmed" ta="center" maw={520}>{t('aiConsentBody')}</Text>
-              <Group gap="xs">
-                <Badge color="grape" variant="light">{consentProvider}</Badge>
-                <Badge color="gray" variant="light">{consentModel}</Badge>
-                <Badge color="teal" variant="light">
-                  {t('itemCount', { count: pendingInspection.inspection.items.length })}
-                </Badge>
-              </Group>
-              <Text size="xs" c="dimmed" ta="center" maw={500}>{t('aiConsentPrivacy')}</Text>
-              <Group mt="xs">
+            <BlurFade key="consent" className="flex h-full items-center justify-center px-8">
+              <section className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm dark:border-white/10 dark:bg-zinc-950/80">
+                <LockKeyhole className="h-8 w-8 text-amber-500" strokeWidth={1.6} />
+                <Text fw={650} size="lg" mt="md">{t('aiConsentTitle')}</Text>
+                <Text size="sm" c="dimmed" mt={6}>{t('aiConsentBody')}</Text>
+                <div className="mt-4 rounded-xl bg-zinc-50 p-3 text-xs leading-5 text-zinc-600 dark:bg-white/[0.04] dark:text-zinc-300">
+                  {t('sharedFieldsSimple', {
+                    count: pendingInspection.inspection.items.length,
+                    provider: consentProvider,
+                  })}
+                </div>
+                <Text size="xs" c="dimmed" mt="sm">{t('aiConsentPrivacy')}</Text>
+                <Group mt="lg" justify="flex-end">
                 <Button
                   variant="subtle"
                   color="gray"
@@ -566,18 +640,22 @@ export default function App() {
                   {t('stayOffline')}
                 </Button>
                 <Button color="yellow" onClick={() => void analyze(pendingInspection, true)}>
-                  {t('allowProvider', { provider: consentProvider })}
+                  {t('improvePackages')}
                 </Button>
-              </Group>
+                </Group>
+              </section>
             </BlurFade>
           )}
 
           {view === 'busy' && (
-            <BlurFade key="busy" className="flex h-full flex-col items-center justify-center gap-2 px-8">
-              <div role="status" aria-live="polite">
-                <AnimatedShinyText className="text-xl">{busyMsg}</AnimatedShinyText>
-              </div>
+            <BlurFade key="busy" className="flex h-full flex-col items-center justify-center px-8">
+              <WorkLoader
+                title={busyMsg}
+                subtitle={t('busyReassurance')}
+                progress={busyProgress}
+              />
               <Button
+                mt="md"
                 size="xs"
                 variant="subtle"
                 color="gray"
@@ -672,11 +750,17 @@ export default function App() {
         closeButtonProps={{ 'aria-label': t('close') }}
       >
         <SettingsModal
-          dataDir={boot?.data_dir ?? ''}
-          hasKey={!!boot?.has_api_key}
+          hasKey={boot.has_api_key}
+          hasCompatibleKey={boot.has_compatible_key}
           onOpenAbout={() => {
             setSettingsOpen(false);
             setAboutOpen(true);
+          }}
+          onRunOnboarding={() => {
+            setSettingsOpen(false);
+            setOnboardingRequired(false);
+            setOnboardingStep('language');
+            setOnboardingOpen(true);
           }}
         />
       </Modal>

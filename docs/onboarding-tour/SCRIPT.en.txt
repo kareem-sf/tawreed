@@ -1,0 +1,13 @@
+Welcome to Tawreed. Start by choosing English or Arabic.
+
+Add your bill of quantities as an Excel, PDF, CSV, or ODS file. Tawreed reads the document locally and keeps your original file unchanged.
+
+If you connected ChatGPT or another online service, Tawreed can improve package suggestions after showing exactly which extracted fields will be shared. You can always continue offline.
+
+While Tawreed works, clear progress shows whether it is reading the BOQ, preparing work packages, or creating the final files.
+
+On the review screen, every package shows its number of items, its percentage of the full BOQ, and its total value. Open any package to move an item if needed. Items that need attention are clearly marked without technical confidence scores.
+
+When the grouping looks right, choose Approve and generate. Tawreed creates the master workbook and separate package files, then opens the result.
+
+From Settings, you can change the language, choose online or offline processing, update your connection, or replay this guide at any time.

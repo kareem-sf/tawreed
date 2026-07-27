@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  Badge,
   Button,
   Group,
   Modal,
@@ -8,8 +7,8 @@ import {
   Select,
   Table,
   Text,
-  Tooltip,
 } from '@mantine/core';
+import { AlertTriangle, ArrowLeft, Check, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type {
   AgentEvent,
@@ -19,9 +18,16 @@ import type {
   ValidationIssue,
   WorkPackage,
 } from '../../shared/types';
-import { AnimatedList } from './ui/animated-list';
+import {
+  Legend,
+  LegendLabel,
+  LegendMarker,
+  LegendProgress,
+  LegendValue,
+  useLegend,
+  useLegendItem,
+} from './charts/legend';
 import { NumberTicker } from './ui/number-ticker';
-import { ShimmerButton } from './ui/shimmer-button';
 
 export interface PipelineData {
   inspection: InspectionResult;
@@ -51,9 +57,87 @@ interface Props {
   onClassificationChange: (itemId: number, packageCode: string) => void;
 }
 
+interface PackageLegendRowProps {
+  packages: WorkPackage[];
+  locale: string;
+  flaggedCodes: Set<string>;
+  formatItemCount: (value: number) => string;
+  currencyLabel: string;
+  needsReviewLabel: string;
+  onSelect: (workPackage: WorkPackage) => void;
+}
+
 const PAGE_SIZE = 100;
-const compact = (value: number, locale: string) =>
-  new Intl.NumberFormat(locale, { maximumFractionDigits: 1, notation: 'compact' }).format(value);
+
+function PackageLegendRow({
+  packages,
+  locale,
+  flaggedCodes,
+  formatItemCount,
+  currencyLabel,
+  needsReviewLabel,
+  onSelect,
+}: PackageLegendRowProps) {
+  const { setHoveredIndex } = useLegend();
+  const { index, isHovered } = useLegendItem();
+  const workPackage = packages[index];
+  if (!workPackage) return null;
+
+  const compactCost = new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 1,
+    notation: 'compact',
+  }).format(workPackage.totalCost);
+
+  return (
+    <button
+      type="button"
+      className="group w-full rounded-xl border-0 bg-transparent px-3 py-2.5 text-start text-inherit transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70 dark:hover:bg-white/[0.045]"
+      data-hovered={isHovered || undefined}
+      onMouseEnter={() => setHoveredIndex(index)}
+      onMouseLeave={() => setHoveredIndex(null)}
+      onFocus={() => setHoveredIndex(index)}
+      onBlur={() => setHoveredIndex(null)}
+      onClick={() => onSelect(workPackage)}
+    >
+      <div className="flex items-start gap-3">
+        <LegendMarker className="mt-1.5 size-2 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="min-w-0">
+              <LegendLabel className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100" />
+              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-400">
+                <span>{workPackage.code}</span>
+                {flaggedCodes.has(workPackage.code) && (
+                  <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+                    <AlertTriangle size={10} /> {needsReviewLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <LegendValue
+                showPercentage
+                className="gap-1.5 text-xs text-zinc-500"
+                percentageClassName="text-xs tabular-nums text-zinc-400"
+                formatValue={formatItemCount}
+                formatPercentage={(percentage) => new Intl.NumberFormat(locale, {
+                  style: 'percent',
+                  minimumFractionDigits: 1,
+                  maximumFractionDigits: 1,
+                }).format(percentage / 100)}
+              />
+              <span className="w-14 text-end text-[12px] font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
+                {currencyLabel} {compactCost}
+              </span>
+              <ChevronRight className="size-3 text-zinc-300 transition-transform group-hover:translate-x-0.5 rtl:rotate-180" />
+            </div>
+          </div>
+          <LegendProgress height="h-1" trackClassName="mt-2 bg-zinc-100 dark:bg-white/[0.07]" />
+        </div>
+      </div>
+    </button>
+  );
+}
 
 export default function ReviewPanel({
   data,
@@ -68,16 +152,44 @@ export default function ReviewPanel({
   const { t, i18n } = useTranslation();
   const [itemsOpen, setItemsOpen] = useState(false);
   const [page, setPage] = useState(0);
-  const visibleTrace = Array.from(
-    new Map(data.trace.map((event) => [event.stage, event])).values(),
-  );
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [packageFilter, setPackageFilter] = useState<string | null>(null);
   const ar = i18n.language === 'ar';
-  const errors = data.issues.filter((issue) => issue.severity === 'error');
-  const warnings = data.issues.filter((issue) => issue.severity === 'warning');
+  const locale = ar ? 'ar-EG' : 'en-EG';
+  const totalItems = Math.max(1, data.inspection.items.length);
   const grand = data.packages.reduce((sum, workPackage) => sum + workPackage.totalCost, 0);
+
   const classifications = useMemo(
     () => new Map(data.classifications.map((classification) => [classification.itemId, classification])),
     [data.classifications],
+  );
+  const reviewItemIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const issue of data.issues) {
+      for (const itemId of issue.itemIds) ids.add(itemId);
+    }
+    for (const classification of data.classifications) {
+      if (classification.packageCode === 'WP-99' || classification.confidence < 0.55) {
+        ids.add(classification.itemId);
+      }
+    }
+    return ids;
+  }, [data.classifications, data.issues]);
+  const flaggedCodes = useMemo(() => {
+    const codes = new Set<string>();
+    for (const itemId of reviewItemIds) {
+      codes.add(classifications.get(itemId)?.packageCode ?? 'WP-99');
+    }
+    return codes;
+  }, [classifications, reviewItemIds]);
+  const legendItems = useMemo(
+    () => data.packages.map((workPackage) => ({
+      label: ar ? workPackage.nameAr : workPackage.nameEn,
+      value: workPackage.itemCount,
+      maxValue: totalItems,
+      color: workPackage.code === 'WP-99' ? '#dc2626' : '#f5a800',
+    })),
+    [ar, data.packages, totalItems],
   );
   const packageOptions = useMemo(() => {
     const values = data.packageCatalog.map((workPackage) => ({
@@ -89,146 +201,122 @@ export default function ReviewPanel({
     }
     return values;
   }, [ar, data.packageCatalog, t]);
-  const pageCount = Math.max(1, Math.ceil(data.inspection.items.length / PAGE_SIZE));
-  const pageItems = data.inspection.items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const filteredItems = packageFilter
+    ? data.inspection.items.filter(
+      (item) => classifications.get(item.id)?.packageCode === packageFilter,
+    )
+    : data.inspection.items;
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageItems = filteredItems.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+  const openItems = (workPackage?: WorkPackage) => {
+    setPackageFilter(workPackage?.code ?? null);
+    setPage(0);
+    setItemsOpen(true);
+  };
 
   return (
-    <div className="flex h-full flex-col gap-2.5 px-4 pb-3">
-      <Group justify="space-between" gap="xs" wrap="nowrap">
+    <div className="flex h-full flex-col gap-3 px-4 pb-3">
+      <div className="flex items-start justify-between gap-4 px-1">
         <div className="min-w-0">
-          <Text size="sm" fw={600} truncate maw={310}>{data.inspection.projectName}</Text>
-          <Text size="xs" c="dimmed">
-            {data.inspection.sourceKind.toUpperCase()} · {data.fileName}
+          <Text size="sm" fw={650} truncate>{data.inspection.projectName}</Text>
+          <Text size="xs" c="dimmed" truncate>
+            {data.fileName} · {t('summaryLine', {
+              items: data.inspection.items.length,
+              packages: data.packages.length,
+            })}
           </Text>
         </div>
-        <Group gap={6} wrap="nowrap">
-          {data.llmUsed && (
-            <Tooltip label={t('aiEnhancedDetail')} openDelay={180}>
-              <Badge size="xs" color="grape" variant="light">{t('aiEnhanced')}</Badge>
-            </Tooltip>
-          )}
-          {data.memoryApplied > 0 && (
-            <Tooltip label={t('memoryAppliedDetail', { count: data.memoryApplied })} openDelay={180}>
-              <Badge size="xs" color="teal" variant="light">
-                {t('memoryApplied', { count: data.memoryApplied })}
-              </Badge>
-            </Tooltip>
-          )}
-          {data.llmFailed && (
-            <Tooltip label={t('aiFailedDetail')} openDelay={180}>
-              <Badge size="xs" color="orange" variant="light">{t('aiFailed')}</Badge>
-            </Tooltip>
-          )}
-        </Group>
-      </Group>
+        <div className="shrink-0 text-end">
+          <Text size="xs" c="dimmed">{t('totalValue')}</Text>
+          <div className="flex items-baseline justify-end gap-1.5">
+            <Text size="xs" c="dimmed">{t('currencyEgp')}</Text>
+            <NumberTicker
+              value={grand}
+              locale={locale}
+              className="text-[18px] font-bold text-zinc-950 dark:text-white"
+            />
+          </div>
+        </div>
+      </div>
 
-      <Group gap={5} wrap="nowrap" aria-label={t('agentTimeline')}>
-        {visibleTrace.map((event) => (
-          <Tooltip
-            key={event.stage}
-            label={`${t(`agentStage.${event.stage}`)}: ${event.detail}`}
-            openDelay={120}
-          >
-            <Badge
-              size="xs"
-              variant="dot"
-              color={event.status === 'failed' ? 'red' : event.status === 'fallback' ? 'orange' : 'teal'}
-            >
-              {t(`agentStage.${event.stage}`)}
-            </Badge>
-          </Tooltip>
-        ))}
-      </Group>
-
-      <div className="min-h-0 flex-1 rounded-xl bg-white shadow-sm ring-1 ring-zinc-300 dark:bg-white/[0.03] dark:shadow-none dark:ring-white/10">
+      <div className="min-h-0 flex-1 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.025]">
         <ScrollArea h="100%" offsetScrollbars scrollbarSize={4}>
-          <AnimatedList className="gap-0.5 p-1.5" stagger={0.04}>
-            {data.packages.map((workPackage) => (
-              <Tooltip.Floating
-                key={workPackage.code}
-                label={t('packageDetail', {
-                  code: workPackage.code,
-                  items: workPackage.itemCount,
-                  cost: workPackage.totalCost.toLocaleString(i18n.language),
-                })}
-              >
-                <div className="pkg-row flex items-center justify-between px-2.5 py-1.5">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="w-8 shrink-0 text-[11px] font-semibold text-amber-600/80 dark:text-amber-400/70">
-                      {workPackage.code.replace('WP-', '')}
-                    </span>
-                    <span className="truncate text-[13px] text-zinc-800 dark:text-zinc-200">
-                      {ar ? workPackage.nameAr : workPackage.nameEn}
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3 ps-2">
-                    <span className="text-xs text-zinc-400">{workPackage.itemCount}</span>
-                    <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">
-                      {compact(workPackage.totalCost, i18n.language)}
-                    </span>
-                  </div>
-                </div>
-              </Tooltip.Floating>
-            ))}
-          </AnimatedList>
+          <Legend
+            items={legendItems}
+            hoveredIndex={hoveredIndex}
+            onHoverChange={setHoveredIndex}
+            className="gap-0 p-1.5"
+          >
+            <PackageLegendRow
+              packages={data.packages}
+              locale={locale}
+              flaggedCodes={flaggedCodes}
+              formatItemCount={(value) => t('packageItemCount', { count: value })}
+              currencyLabel={t('currencyEgp')}
+              needsReviewLabel={t('needsReview')}
+              onSelect={openItems}
+            />
+          </Legend>
         </ScrollArea>
       </div>
 
-      <div className="flex items-baseline justify-between px-1">
-        <Group gap="xs">
-          <Text size="xs" c="dimmed">
-            {t('summaryLine', { items: data.inspection.items.length, packages: data.packages.length })}
-          </Text>
-          <Button variant="subtle" size="compact-xs" onClick={() => setItemsOpen(true)}>
-            {t('reviewItems')}
-          </Button>
-        </Group>
-        <div className="flex items-baseline gap-1.5">
-          <Text size="xs" c="dimmed">{t('currencyEgp')}</Text>
-          <NumberTicker
-            value={grand}
-            locale={i18n.language}
-            className="text-[17px] font-bold text-zinc-900 dark:text-white"
-          />
+      {(hasErrors || reviewItemIds.size > 0) && (
+        <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>{t('itemsNeedReview', { count: reviewItemIds.size })}</span>
         </div>
-      </div>
-
-      {errors.map((issue) => (
-        <Text key={issue.code} size="xs" c="red" lh={1.3}>● {ar ? issue.messageAr : issue.messageEn}</Text>
-      ))}
-      {warnings.slice(0, 3).map((issue) => (
-        <Text key={issue.code} size="xs" c="yellow.7" lh={1.3}>
-          ● {ar ? issue.messageAr : issue.messageEn}
-        </Text>
-      ))}
-      {warnings.length > 3 && (
-        <Text size="xs" c="dimmed">{t('moreIssues', { count: warnings.length - 3 })}</Text>
       )}
 
       {error && (
         <Text size="xs" c="red" ta="center" role="alert" className="allow-select">{error}</Text>
       )}
 
-      <Group justify="space-between" mt={2}>
-        <Button variant="subtle" size="xs" color="gray" onClick={onReset}>← {t('newFile')}</Button>
-        <ShimmerButton disabled={busy || hasErrors} onClick={onGenerate} className="px-5 py-2 text-[13px]">
-          {busy
-            ? t('generatingShort')
-            : retryingPublication
-              ? t('retryPublish')
-              : t('approveGenerate')}
-        </ShimmerButton>
-      </Group>
+      <div className="flex items-center justify-between gap-3">
+        <Button
+          variant="subtle"
+          size="xs"
+          color="gray"
+          leftSection={<ArrowLeft size={13} className="rtl:rotate-180" />}
+          onClick={onReset}
+        >
+          {t('newFile')}
+        </Button>
+        <Group gap="xs">
+          <Button variant="subtle" color="gray" size="xs" onClick={() => openItems()}>
+            {reviewItemIds.size
+              ? t('reviewCountItems', { count: reviewItemIds.size })
+              : t('reviewItems')}
+          </Button>
+          <Button
+            color="yellow"
+            size="sm"
+            disabled={busy || hasErrors}
+            onClick={onGenerate}
+            leftSection={<Check size={15} />}
+            styles={{ root: { color: '#18181b', fontWeight: 650 } }}
+          >
+            {busy
+              ? t('generatingShort')
+              : retryingPublication
+                ? t('retryPublish')
+                : t('approveGenerate')}
+          </Button>
+        </Group>
+      </div>
 
       <Modal
         opened={itemsOpen}
         onClose={() => setItemsOpen(false)}
-        title={t('reviewItemsTitle')}
+        title={packageFilter
+          ? packageOptions.find((option) => option.value === packageFilter)?.label
+          : t('reviewItemsTitle')}
         size="xl"
         centered
         closeButtonProps={{ 'aria-label': t('close') }}
       >
-        <Text size="xs" c="dimmed" mb="sm">{t('reviewItemsDetail')}</Text>
+        <Text size="xs" c="dimmed" mb="sm">{t('reviewItemsSimpleDetail')}</Text>
         <ScrollArea h={420} offsetScrollbars>
           <Table striped highlightOnHover withRowBorders>
             <Table.Thead>
@@ -236,12 +324,13 @@ export default function ReviewPanel({
                 <Table.Th>{t('source')}</Table.Th>
                 <Table.Th>{t('description')}</Table.Th>
                 <Table.Th>{t('workPackage')}</Table.Th>
-                <Table.Th>{t('confidence')}</Table.Th>
+                <Table.Th>{t('status')}</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {pageItems.map((item) => {
                 const classification = classifications.get(item.id);
+                const needsReview = reviewItemIds.has(item.id);
                 return (
                   <Table.Tr key={item.id}>
                     <Table.Td>
@@ -264,9 +353,8 @@ export default function ReviewPanel({
                       />
                     </Table.Td>
                     <Table.Td>
-                      <Text size="xs">
-                        {Math.round((classification?.confidence ?? 0) * 100)}% ·{' '}
-                        {t(`classificationSource.${classification?.source ?? 'fallback'}`)}
+                      <Text size="xs" c={needsReview ? 'yellow.8' : 'dimmed'}>
+                        {needsReview ? t('needsReview') : t('checked')}
                       </Text>
                     </Table.Td>
                   </Table.Tr>
@@ -279,16 +367,16 @@ export default function ReviewPanel({
           <Button
             size="xs"
             variant="subtle"
-            disabled={page === 0}
+            disabled={safePage === 0}
             onClick={() => setPage((current) => Math.max(0, current - 1))}
           >
             {t('previous')}
           </Button>
-          <Text size="xs">{t('pageCount', { page: page + 1, pages: pageCount })}</Text>
+          <Text size="xs">{t('pageCount', { page: safePage + 1, pages: pageCount })}</Text>
           <Button
             size="xs"
             variant="subtle"
-            disabled={page + 1 >= pageCount}
+            disabled={safePage + 1 >= pageCount}
             onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
           >
             {t('next')}

@@ -6,12 +6,15 @@ import type { GeneratedArtifact } from '../engine/generate';
 
 export interface BootstrapInfo {
   first_run: boolean;
+  onboarding_required: boolean;
+  onboarding_step: 'language' | 'video' | 'connection' | 'complete';
   data_dir: string;
   has_api_key: boolean;
+  has_compatible_key: boolean;
   run_count: number;
   version: string;
-  provider: 'codex' | 'anthropic' | 'none';
-  provider_preference: 'auto' | 'codex' | 'anthropic' | 'offline';
+  provider: 'codex' | 'anthropic' | 'compatible' | 'none';
+  provider_preference: 'codex' | 'anthropic' | 'compatible';
   codex_installed: boolean;
   codex_authenticated: boolean;
 }
@@ -21,6 +24,7 @@ export interface CodexStatus {
   authenticated: boolean;
   version: string | null;
   path: string | null;
+  source: string | null;
 }
 
 export interface UpdateInfo {
@@ -39,7 +43,9 @@ export async function bootstrap(): Promise<BootstrapInfo> {
   if (!isDesktop()) {
     return {
       first_run: false, data_dir: '(browser dev — no data dir)', has_api_key: false,
-      run_count: 0, version: 'dev', provider: 'none', provider_preference: 'offline',
+      has_compatible_key: false,
+      onboarding_required: false, onboarding_step: 'complete',
+      run_count: 0, version: 'dev', provider: 'none', provider_preference: 'codex',
       codex_installed: false, codex_authenticated: false,
     };
   }
@@ -56,6 +62,16 @@ export async function deleteApiKey(): Promise<void> {
   await invoke('delete_api_key');
 }
 
+export async function setCompatibleApiKey(key: string): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke('set_compatible_api_key', { key });
+}
+
+export async function deleteCompatibleApiKey(): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke('delete_compatible_api_key');
+}
+
 /** Transport injected into the engine's LLM classifier — HTTP happens in Rust. */
 function abortError(): Error {
   const error = new Error('AI job cancelled');
@@ -64,7 +80,7 @@ function abortError(): Error {
 }
 
 async function invokeAi(
-  command: 'llm_complete' | 'codex_complete',
+  command: 'llm_complete' | 'codex_complete' | 'compatible_complete',
   args: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -95,6 +111,18 @@ export function makeLlmTransport(signal?: AbortSignal) {
     if (!isDesktop()) throw new Error('LLM transport is only available in the desktop app');
     return invokeAi('llm_complete', { request }, signal);
   };
+}
+
+export function makeCompatibleTransport(signal?: AbortSignal) {
+  return async (request: LlmRequest): Promise<string> => {
+    if (!isDesktop()) throw new Error('Online transport is only available in the desktop app');
+    return invokeAi('compatible_complete', { request }, signal);
+  };
+}
+
+export async function testCompatibleProvider(): Promise<boolean> {
+  if (!isDesktop()) return false;
+  return invoke<boolean>('compatible_test');
 }
 
 /** Transport that routes classification through the Codex CLI (ChatGPT subscription quota). */
@@ -132,7 +160,15 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
 }
 
 export async function codexStatus(): Promise<CodexStatus> {
-  if (!isDesktop()) return { installed: false, authenticated: false, version: null, path: null };
+  if (!isDesktop()) {
+    return {
+      installed: false,
+      authenticated: false,
+      version: null,
+      path: null,
+      source: null,
+    };
+  }
   return invoke<CodexStatus>('codex_status');
 }
 
