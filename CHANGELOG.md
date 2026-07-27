@@ -3,6 +3,14 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.5.0 (2026-07-27)
+
+## What's Changed
+* Simplify onboarding, provider setup, and work-package review by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/29
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.4.1...v0.5.0
+
 ## 0.4.1 (2026-07-27)
 
 ## What's Changed
