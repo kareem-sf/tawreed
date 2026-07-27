@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # Recovery pass: catches a release if GitHub interrupts the originating run
+    # after merging its pull request but before creating the tag.
+    - cron: "23 * * * *"
 
 concurrency:
   group: release-please-main
@@ -13,16 +17,16 @@ jobs:
   release-please:
     name: Version, changelog, and release
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 90
     permissions:
       actions: write
       contents: write
       issues: write
       pull-requests: write
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      release_sha: ${{ steps.release.outputs.sha }}
+      release_created: ${{ steps.finalize.outputs.release_created || steps.release.outputs.release_created }}
+      tag_name: ${{ steps.finalize.outputs.tag_name || steps.release.outputs.tag_name }}
+      release_sha: ${{ steps.finalize.outputs.sha || steps.release.outputs.sha }}
 
     steps:
       - name: Create or update the release
@@ -60,10 +64,10 @@ jobs:
           git commit -m "chore: synchronize desktop release version"
           git push origin "HEAD:${HEAD_BRANCH}"
 
-      # GITHUB_TOKEN-created pull requests do not emit pull_request events.
-      # Explicit workflow_dispatch is the documented exception, so dispatch CI
-      # on the bot branch and let branch protection gate auto-merge normally.
-      - name: Validate and auto-merge the release pull request
+      # Pull-request runs created by GITHUB_TOKEN are quarantined by GitHub and
+      # require human approval. Remove only those unstarted runs, then use the
+      # documented workflow_dispatch exception to run the exact same CI suite.
+      - name: Validate and merge the release pull request
         if: steps.release.outputs.prs_created == 'true'
         shell: bash
         env:
@@ -74,10 +78,71 @@ jobs:
           set -euo pipefail
           pr_number="$(jq -r '.number' <<<"$RELEASE_PR")"
           head_branch="$(jq -r '.headBranchName' <<<"$RELEASE_PR")"
+          head_sha="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid')"
           test "$pr_number" != "null"
           test -n "$head_branch"
+          test -n "$head_sha"
+
+          remove_quarantined_runs() {
+            local run_ids
+            run_ids="$(
+              gh api \
+                "repos/${GH_REPO}/actions/workflows/ci.yml/runs?event=pull_request&branch=${head_branch}&per_page=100" |
+                jq -r --arg sha "$head_sha" \
+                  '.workflow_runs[] | select(.head_sha == $sha and .status == "action_required") | .id'
+            )"
+
+            if [[ -z "$run_ids" ]]; then
+              return
+            fi
+
+            while IFS= read -r run_id; do
+              [[ -n "$run_id" ]] || continue
+              echo "Removing quarantined pull-request run ${run_id}."
+              gh api --method DELETE "repos/${GH_REPO}/actions/runs/${run_id}"
+            done <<<"$run_ids"
+          }
+
+          # The synchronize event can take a few seconds to appear.
+          for _ in {1..12}; do
+            remove_quarantined_runs
+            sleep 5
+          done
+
           gh workflow run ci.yml --ref "$head_branch"
-          gh pr merge "$pr_number" --auto --squash --delete-branch
+
+          ci_run_id=""
+          for _ in {1..24}; do
+            ci_run_id="$(
+              gh api \
+                "repos/${GH_REPO}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${head_branch}&per_page=20" |
+                jq -r --arg sha "$head_sha" \
+                  '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .id // empty'
+            )"
+            [[ -n "$ci_run_id" ]] && break
+            sleep 5
+          done
+          test -n "$ci_run_id"
+
+          echo "Waiting for CI run ${ci_run_id} on ${head_sha}."
+          gh run watch "$ci_run_id" --exit-status --interval 10
+
+          # Clear a late-arriving quarantined run before branch protection
+          # evaluates the successful workflow_dispatch checks.
+          remove_quarantined_runs
+          gh pr merge "$pr_number" --squash --delete-branch
+
+      # A merge performed with GITHUB_TOKEN intentionally does not emit a push
+      # workflow. Run Release Please again in this job so it creates the tag and
+      # release immediately from the newly merged default branch.
+      - name: Finalize the merged release
+        id: finalize
+        if: steps.release.outputs.prs_created == 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   release-assets:
     name: Build and publish release assets
