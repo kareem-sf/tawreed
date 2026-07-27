@@ -27,6 +27,10 @@ the pull request, and finalizes the release in the same run:
 5. Builds, tests, audits, signs or attests as configured, and uploads every
    verified platform package.
 
+The protected `Release gate` is an aggregate of Windows verification, Linux and
+universal macOS builds, and frontend tests on Ubuntu and macOS. Release
+automation can mark it successful only after that exact five-job run passes.
+
 An hourly recovery pass safely finalizes a release if GitHub interrupts its
 originating workflow after the release pull request merges.
 

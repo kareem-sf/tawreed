@@ -206,3 +206,25 @@ jobs:
           archs="$(lipo -archs "$executable")"
           [[ "$archs" == *x86_64* && "$archs" == *arm64* ]]
           codesign --verify --deep --strict "$app"
+
+  release-gate:
+    name: Release gate
+    if: always()
+    needs: [verify, frontend-tests, platform-builds]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every CI job
+        shell: bash
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
+          PLATFORM_RESULT: ${{ needs.platform-builds.result }}
+        run: |
+          set -euo pipefail
+          printf 'verify=%s frontend=%s platforms=%s\n' \
+            "$VERIFY_RESULT" "$FRONTEND_RESULT" "$PLATFORM_RESULT"
+          [[ "$VERIFY_RESULT" == "success" ]]
+          [[ "$FRONTEND_RESULT" == "success" ]]
+          [[ "$PLATFORM_RESULT" == "success" ]]
