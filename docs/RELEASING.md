@@ -15,8 +15,8 @@ Use Conventional Commit titles on merged pull requests:
 
 After a qualifying change reaches `main`, `.github/workflows/release-please.yml`
 creates or updates the Release Please pull request. The workflow explicitly
-dispatches CI for that bot-created branch, enables squash auto-merge behind the
-protected `Verify` check, and then:
+dispatches CI for that bot-created branch, waits for the protected checks, merges
+the pull request, and finalizes the release in the same run:
 
 1. Updates `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`,
    `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` to one semantic
@@ -26,6 +26,9 @@ protected `Verify` check, and then:
 4. Calls the reusable release workflow at the immutable release commit.
 5. Builds, tests, audits, signs or attests as configured, and uploads every
    verified platform package.
+
+An hourly recovery pass safely finalizes a release if GitHub interrupts its
+originating workflow after the release pull request merges.
 
 Release Please's manifest and configuration live in
 `.release-please-manifest.json` and `release-please-config.json`. Do not edit
