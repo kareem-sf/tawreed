@@ -110,20 +110,9 @@ jobs:
             sleep 5
           done
 
-          gh workflow run ci.yml --ref "$head_branch"
-
-          ci_run_id=""
-          for _ in {1..24}; do
-            ci_run_id="$(
-              gh api \
-                "repos/${GH_REPO}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${head_branch}&per_page=20" |
-                jq -r --arg sha "$head_sha" \
-                  '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .id // empty'
-            )"
-            [[ -n "$ci_run_id" ]] && break
-            sleep 5
-          done
-          test -n "$ci_run_id"
+          ci_run_url="$(gh workflow run ci.yml --ref "$head_branch")"
+          ci_run_id="${ci_run_url##*/}"
+          [[ "$ci_run_id" =~ ^[0-9]+$ ]]
 
           echo "Waiting for CI run ${ci_run_id} on ${head_sha}."
           gh run watch "$ci_run_id" --exit-status --interval 10
