@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit --incremental false",
     "verify:assets": "node scripts/verify-vendor-assets.cjs",
     "verify:version": "node scripts/verify-version.cjs",
+    "sync:version": "node scripts/sync-release-version.cjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run verify:assets && npm run verify:version",
     "tauri": "tauri"
   },

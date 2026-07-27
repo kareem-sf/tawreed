@@ -28,5 +28,9 @@ provenance, checksums, and license notices.
 
 ## Commit and Pull Request Quality
 
-Use concise imperative commit messages. Pull requests must explain behavior,
-testing, privacy impact, and release impact. CI must pass before merge.
+Use Conventional Commit titles because merged pull requests drive automated
+versioning and changelog generation: `feat:` for features, `fix:` for fixes,
+and `type!:` or a `BREAKING CHANGE:` footer for incompatible changes. Use
+`docs:`, `test:`, `refactor:`, `perf:`, `build:`, `ci:`, or `chore:` where
+appropriate. Pull requests must explain behavior, testing, privacy impact, and
+release impact. CI must pass before merge.
