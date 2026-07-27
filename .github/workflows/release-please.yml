@@ -23,6 +23,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+      statuses: write
     outputs:
       release_created: ${{ steps.finalize.outputs.release_created || steps.release.outputs.release_created }}
       tag_name: ${{ steps.finalize.outputs.tag_name || steps.release.outputs.tag_name }}
@@ -130,7 +131,23 @@ jobs:
           # Clear a late-arriving quarantined run before branch protection
           # evaluates the successful workflow_dispatch checks.
           remove_quarantined_runs
-          gh pr merge "$pr_number" --squash --delete-branch
+          test "$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid')" = "$head_sha"
+          gh api --method POST "repos/${GH_REPO}/statuses/${head_sha}" \
+            -f state=success \
+            -f context="Release gate" \
+            -f description="All five required CI jobs passed." \
+            -f target_url="https://github.com/${GH_REPO}/actions/runs/${ci_run_id}" \
+            --silent
+
+          merged=false
+          for _ in {1..12}; do
+            if gh pr merge "$pr_number" --squash --delete-branch; then
+              merged=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$merged" == "true" ]]
 
       # A merge performed with GITHUB_TOKEN intentionally does not emit a push
       # workflow. Run Release Please again in this job so it creates the tag and
