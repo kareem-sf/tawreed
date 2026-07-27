@@ -3,6 +3,16 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.4.0 (2026-07-27)
+
+## What's Changed
+* feat: universal workbook ingestion (xls, csv, ods, corrupt, protected) by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/14
+* Harden agentic BOQ workflow by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/15
+* ci: automate versioned desktop releases by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/19
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.3.0...v0.4.0
+
 ## [0.3.0] - 2026-07-20
 
 ### Added
