@@ -11,6 +11,16 @@ on:
         description: Immutable commit SHA referenced by the release tag
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v-prefixed release tag to build and populate
+        required: true
+        type: string
+      release_sha:
+        description: Immutable commit SHA referenced by the release tag
+        required: true
+        type: string
   push:
     tags:
       - "v*.*.*"
