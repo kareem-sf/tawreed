@@ -32,6 +32,7 @@ videos/
 marketing-video/
 public/video/
 *.mp4
+!public/onboarding/*.mp4
 *.mov
 *.avi
 *.mkv

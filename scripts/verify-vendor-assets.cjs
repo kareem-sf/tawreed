@@ -53,6 +53,24 @@ for (const file of walk(path.join(root, 'public/pdfjs'))) {
   assertSame(`public/pdfjs/${relative}`, `node_modules/pdfjs-dist/${relative}`);
 }
 
+for (const language of ['en', 'ar']) {
+  const video = requireFile(`public/onboarding/tawreed-tour-${language}.mp4`);
+  const captions = requireFile(`public/onboarding/tawreed-tour-${language}.vtt`);
+  const poster = requireFile(`public/onboarding/tawreed-tour-${language}-poster.jpg`);
+  const videoHeader = fs.readFileSync(video).subarray(0, 32).toString('latin1');
+  if (fs.statSync(video).size < 100_000 || !videoHeader.includes('ftyp')) {
+    throw new Error(`Invalid onboarding video: ${path.relative(root, video)}`);
+  }
+  const captionText = fs.readFileSync(captions, 'utf8');
+  if (!captionText.startsWith('WEBVTT') || !captionText.includes('-->')) {
+    throw new Error(`Invalid onboarding captions: ${path.relative(root, captions)}`);
+  }
+  const posterHeader = fs.readFileSync(poster).subarray(0, 2);
+  if (posterHeader[0] !== 0xff || posterHeader[1] !== 0xd8) {
+    throw new Error(`Invalid onboarding poster: ${path.relative(root, poster)}`);
+  }
+}
+
 const dist = path.join(root, 'dist');
 if (fs.statSync(dist, { throwIfNoEntry: false })?.isDirectory()) {
   for (const file of walk(path.join(root, 'public'))) {
@@ -61,4 +79,4 @@ if (fs.statSync(dist, { throwIfNoEntry: false })?.isDirectory()) {
   }
 }
 
-console.log('Verified bundled OCR and PDF.js assets.');
+console.log('Verified bundled OCR, PDF.js, and onboarding assets.');

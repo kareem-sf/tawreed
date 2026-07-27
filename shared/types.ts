@@ -23,7 +23,7 @@ export interface BoqItem {
 }
 
 export type ClassifySource = 'heuristic' | 'llm' | 'fallback' | 'memory' | 'user';
-export type AiProvider = 'offline' | 'codex' | 'anthropic';
+export type AiProvider = 'offline' | 'codex' | 'anthropic' | 'compatible';
 
 export type AgentStage =
   | 'inspect'
@@ -57,6 +57,16 @@ export interface WorkPackageDef {
   nameEn: string;
   nameAr: string;
   keywords: string[]; // lowercase, pre-normalized
+  negativeKeywords?: string[];
+  unitSignals?: Unit[];
+  priority?: number;
+}
+
+export type PackageDefinition = WorkPackageDef;
+
+export interface ClassificationPlan {
+  catalog: PackageDefinition[];
+  classifications: Classification[];
 }
 
 export interface WorkPackage {

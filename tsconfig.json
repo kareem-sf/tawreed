@@ -14,6 +14,10 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
     "types": ["vite/client"]
   },
   "include": ["src", "engine", "shared", "tests"]

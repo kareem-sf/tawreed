@@ -91,6 +91,20 @@ pub fn delete_api_key() -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub fn set_compatible_api_key(key: String) -> Result<bool, String> {
+    store::write_compatible_api_key(Some(key.trim()))?;
+    store::log_line("compatible provider key updated");
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn delete_compatible_api_key() -> Result<bool, String> {
+    store::write_compatible_api_key(None)?;
+    store::log_line("compatible provider key removed");
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn llm_complete(request: Value, job_id: String) -> Result<String, String> {
     let cancelled = begin_ai_job(&job_id)?;
     let result = llm_complete_inner(request, cancelled).await;
@@ -221,6 +235,185 @@ async fn llm_complete_inner(request: Value, cancelled: Arc<AtomicBool>) -> Resul
         }
     }
     Err(last_err)
+}
+
+fn compatible_endpoint(base_url: &str) -> Result<reqwest::Url, String> {
+    let mut url =
+        reqwest::Url::parse(base_url.trim()).map_err(|_| "Enter a valid HTTPS service URL")?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(
+            "The service URL must use HTTPS and cannot contain credentials, a query, or a fragment"
+                .into(),
+        );
+    }
+    let endpoint = format!("{}/v1/chat/completions", url.path().trim_end_matches('/'));
+    url.set_path(&endpoint);
+    Ok(url)
+}
+
+fn sanitize_compatible_messages(request: &Value) -> Result<Vec<Value>, String> {
+    let mut output = Vec::new();
+    if let Some(system) = request.get("system").and_then(Value::as_str) {
+        output.push(json!({ "role": "system", "content": system }));
+    }
+    let messages = request
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or("request.messages must be an array")?;
+    if messages.is_empty() {
+        return Err("request.messages must not be empty".into());
+    }
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .ok_or("message.role must be a string")?;
+        if role != "user" && role != "assistant" {
+            return Err(format!("message.role '{role}' is not allowed"));
+        }
+        let content = match message.get("content") {
+            Some(Value::String(text)) => text.clone(),
+            Some(Value::Array(blocks)) if !blocks.is_empty() => {
+                let mut text = String::new();
+                for block in blocks {
+                    if block.get("type").and_then(Value::as_str) != Some("text") {
+                        return Err("only text content blocks are allowed".into());
+                    }
+                    let part = block
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .ok_or("a text content block requires text")?;
+                    text.push_str(part);
+                }
+                text
+            }
+            _ => return Err("message.content must be text".into()),
+        };
+        output.push(json!({ "role": role, "content": content }));
+    }
+    Ok(output)
+}
+
+async fn compatible_complete_inner(
+    request: Value,
+    cancelled: Arc<AtomicBool>,
+) -> Result<String, String> {
+    let settings = store::get_settings();
+    let compatible = settings
+        .get("compatible")
+        .ok_or("Compatible provider is not configured")?;
+    let base_url = compatible
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .ok_or("Compatible provider URL is not configured")?;
+    let model = compatible
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 160)
+        .ok_or("Compatible provider model is not configured")?;
+    let endpoint = compatible_endpoint(base_url)?;
+    let key = store::compatible_api_key()
+        .ok_or("No compatible provider key is saved. Open Settings and add the service API key.")?;
+    let messages = sanitize_compatible_messages(&request)?;
+    let max_tokens = request
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(4096)
+        .min(8192);
+    let payload = json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": request
+            .get("temperature")
+            .and_then(Value::as_f64)
+            .filter(|value| (0.0..=1.0).contains(value))
+            .unwrap_or(0.0),
+    });
+    let body = serialize_capped(&payload)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+
+    let request_task = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .header("content-type", "application/json")
+        .body(body)
+        .send();
+    let response = tokio::select! {
+        result = request_task => result.map_err(|e| format!("compatible provider network error: {e}"))?,
+        _ = wait_for_cancellation(cancelled.clone()) => return Err("AI job cancelled".into()),
+    };
+    if response.status().is_redirection() {
+        return Err("The compatible provider attempted an unsafe redirect".into());
+    }
+    let status = response.status();
+    if response
+        .content_length()
+        .is_some_and(|length| length > 10 * 1024 * 1024)
+    {
+        return Err("Compatible provider response exceeded the 10 MB limit".into());
+    }
+    let bytes = tokio::select! {
+        result = response.bytes() => {
+            result.map_err(|e| format!("read compatible provider response: {e}"))?
+        }
+        _ = wait_for_cancellation(cancelled) => return Err("AI job cancelled".into()),
+    };
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err("Compatible provider response exceeded the 10 MB limit".into());
+    }
+    let response_body: Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse provider response: {e}"))?;
+    if !status.is_success() {
+        let message: String = response_body
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or("The service rejected the request")
+            .chars()
+            .take(300)
+            .collect();
+        return Err(format!("Compatible provider error {status}: {message}"));
+    }
+    let text = response_body
+        .pointer("/choices/0/message/content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .ok_or("Compatible provider returned an empty response")?;
+    store::log_line("compatible provider classification batch completed");
+    Ok(text.to_string())
+}
+
+#[tauri::command]
+pub async fn compatible_complete(request: Value, job_id: String) -> Result<String, String> {
+    let cancelled = begin_ai_job(&job_id)?;
+    let result = compatible_complete_inner(request, cancelled).await;
+    finish_ai_job(&job_id);
+    result
+}
+
+#[tauri::command]
+pub async fn compatible_test() -> Result<bool, String> {
+    let request = json!({
+        "messages": [{ "role": "user", "content": "Reply with OK only." }],
+        "max_tokens": 16,
+        "temperature": 0
+    });
+    compatible_complete_inner(request, Arc::new(AtomicBool::new(false)))
+        .await
+        .map(|_| true)
 }
 
 /// Re-serialize webview-supplied chat messages into the only shape forwarded to Anthropic:
@@ -1003,6 +1196,56 @@ mod external_url_tests {
         ] {
             assert!(approved_external_url(url).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod compatible_provider_tests {
+    use super::{compatible_endpoint, sanitize_compatible_messages};
+    use serde_json::json;
+
+    #[test]
+    fn endpoint_accepts_https_and_appends_fixed_chat_path() {
+        let endpoint = compatible_endpoint("https://provider.example/api").unwrap();
+        assert_eq!(
+            endpoint.as_str(),
+            "https://provider.example/api/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn endpoint_rejects_credentials_queries_fragments_and_http() {
+        for value in [
+            "http://provider.example",
+            "https://user:secret@provider.example",
+            "https://provider.example?next=https://evil.example",
+            "https://provider.example/#fragment",
+        ] {
+            assert!(compatible_endpoint(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn compatible_messages_drop_extra_fields_and_reject_tools() {
+        let messages = sanitize_compatible_messages(&json!({
+            "system": "Group construction BOQ items.",
+            "messages": [{
+                "role": "user",
+                "content": "Concrete works",
+                "tool_call": { "url": "https://evil.example" }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(messages[1].get("tool_call").is_none());
+
+        assert!(sanitize_compatible_messages(&json!({
+            "messages": [{
+                "role": "user",
+                "content": [{ "type": "image", "url": "https://evil.example" }]
+            }]
+        }))
+        .is_err());
     }
 }
 
