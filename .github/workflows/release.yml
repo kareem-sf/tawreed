@@ -1,6 +1,16 @@
 name: Release
 
 on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Existing v-prefixed release tag to build and populate
+        required: true
+        type: string
+      release_sha:
+        description: Immutable commit SHA referenced by the release tag
+        required: true
+        type: string
   push:
     tags:
       - "v*.*.*"
@@ -9,12 +19,51 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Stage GitHub release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Create or hide the release during verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --silent
+          releases="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft] | @tsv")"
+          count="$(printf '%s\n' "$releases" | sed '/^$/d' | wc -l)"
+          if [[ "$count" -gt 1 ]]; then
+            echo "Multiple releases exist for $tag; refusing automated recovery." >&2
+            exit 1
+          fi
+          if [[ "$count" -eq 0 ]]; then
+            gh release create "$tag" \
+              --draft \
+              --generate-notes \
+              --title "Tawreed $tag" \
+              --verify-tag
+          else
+            release_id="$(printf '%s' "$releases" | cut -f1)"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -F draft=true \
+              --silent
+          fi
+
   audit:
     name: Audit Rust dependencies
+    needs: [prepare]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -22,6 +71,7 @@ jobs:
       - name: Check out tagged source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
+          ref: ${{ inputs.release_sha || github.sha }}
           persist-credentials: false
 
       - name: Install cargo-audit
@@ -58,6 +108,7 @@ jobs:
       - name: Check out tagged source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
+          ref: ${{ inputs.release_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -93,7 +144,7 @@ jobs:
         run: npm ci
 
       - name: Verify tag version
-        run: npm run verify:version -- "${{ github.ref_name }}"
+        run: npm run verify:version -- "${{ inputs.release_tag || github.ref_name }}"
 
       - name: Verify frontend, tests, build, assets, and version
         run: npm run check
@@ -202,13 +253,14 @@ jobs:
       - name: Upload verified platform payload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: tawreed-${{ github.ref_name }}-${{ matrix.artifact }}
+          name: tawreed-${{ inputs.release_tag || github.ref_name }}-${{ matrix.artifact }}
           path: release/*
           if-no-files-found: error
           retention-days: 1
 
   legal:
     name: Generate legal payload
+    needs: [prepare]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -216,6 +268,7 @@ jobs:
       - name: Check out tagged source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
+          ref: ${{ inputs.release_sha || github.sha }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -241,7 +294,7 @@ jobs:
       - name: Upload verified legal payload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: tawreed-${{ github.ref_name }}-legal
+          name: tawreed-${{ inputs.release_tag || github.ref_name }}-legal
           path: release/*
           if-no-files-found: error
           retention-days: 1
@@ -260,7 +313,7 @@ jobs:
       - name: Download verified release payloads
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: tawreed-${{ github.ref_name }}-*
+          pattern: tawreed-${{ inputs.release_tag || github.ref_name }}-*
           path: release
           merge-multiple: true
 
@@ -275,7 +328,7 @@ jobs:
           (cd release && sha256sum --check SHA256SUMS.txt)
 
       - name: Attest platform packages
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: |
             release/Tawreed-Linux-x64.AppImage
@@ -283,88 +336,74 @@ jobs:
             release/Tawreed-Windows-x64.exe
             release/Tawreed-macOS-universal.dmg
 
-      - name: Publish immutable GitHub release
+      - name: Populate and verify the GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft] | @tsv")"
-          if [[ -n "$existing" ]]; then
-            if [[ "$(printf '%s\n' "$existing" | wc -l)" -ne 1 ]]; then
-              echo "Multiple releases exist for $tag; refusing automated recovery." >&2
-              exit 1
-            fi
-            release_id="$(printf '%s' "$existing" | cut -f1)"
-            is_draft="$(printf '%s' "$existing" | cut -f2)"
-            if [[ "$is_draft" != "true" ]]; then
-              echo "Published release $tag already exists; refusing to overwrite it." >&2
-              exit 1
-            fi
-            echo "Removing incomplete draft release $tag before a clean retry."
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
+          tag="$RELEASE_TAG"
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --silent
+
+          releases="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft] | @tsv")"
+          if [[ "$(printf '%s\n' "$releases" | sed '/^$/d' | wc -l)" -gt 1 ]]; then
+            echo "Multiple releases exist for $tag; refusing automated recovery." >&2
+            exit 1
           fi
 
-          cat >RELEASE_NOTES.md <<EOF
-          ## Tawreed $tag
+          if [[ -z "$releases" ]]; then
+            # Manual tag fallback: Release Please normally creates this release.
+            gh release create "$tag" \
+              --draft \
+              --generate-notes \
+              --title "Tawreed $tag" \
+              --verify-tag
+          fi
 
-          Cross-platform desktop release for Windows x64, Linux x64, and macOS
-          on Intel or Apple Silicon. Tawreed provides dynamic Excel and PDF BOQ
-          processing, local English/Arabic OCR, grounded AI-assisted work
-          packaging, and revision-controlled workbook delivery.
+          gh release upload "$tag" --clobber \
+            release/LICENSES.txt \
+            release/SHA256SUMS.txt \
+            release/THIRD_PARTY_NOTICES.md \
+            release/Tawreed-Linux-x64.AppImage \
+            release/Tawreed-Linux-x64.deb \
+            release/Tawreed-Windows-x64.exe \
+            release/Tawreed-macOS-universal.dmg
 
-          ### Packages
-
-          - Windows x64: \`Tawreed-Windows-x64.exe\`
-          - Linux x64: \`Tawreed-Linux-x64.AppImage\` or \`Tawreed-Linux-x64.deb\`
-          - macOS universal: \`Tawreed-macOS-universal.dmg\`
-
-          These packages are not signed with commercial platform certificates.
-          Verify \`SHA256SUMS.txt\` and GitHub provenance before installation.
-          See the tagged installation guide for platform-specific requirements.
-          EOF
-
-          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --silent
-          release_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
-            -f tag_name="$tag" \
-            -f name="Tawreed $tag" \
-            -f body="$(cat RELEASE_NOTES.md)" \
-            -F draft=true \
-            -F prerelease=false \
-            --jq '.id')"
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.id')"
           test -n "$release_id"
-
-          # Wait for the draft to be resolvable by tag before uploading.
-          for wait in {1..12}; do
-            if gh release view "$tag" --json id --jq '.id' >/dev/null 2>&1; then break; fi
-            echo "Waiting for draft release to become resolvable by tag ($wait/12)."
-            sleep 5
-          done
-
-          uploaded=false
-          for attempt in {1..6}; do
-            if gh release upload "$tag" --clobber \
-              release/LICENSES.txt \
-              release/SHA256SUMS.txt \
-              release/THIRD_PARTY_NOTICES.md \
-              release/Tawreed-Linux-x64.AppImage \
-              release/Tawreed-Linux-x64.deb \
-              release/Tawreed-Windows-x64.exe \
-              release/Tawreed-macOS-universal.dmg; then
-              uploaded=true
-              break
-            fi
-            echo "Draft release is not visible to gh yet; retrying upload ($attempt/6)."
-            sleep 5
-          done
-          test "$uploaded" = true
 
           expected=$'LICENSES.txt\nSHA256SUMS.txt\nTHIRD_PARTY_NOTICES.md\nTawreed-Linux-x64.AppImage\nTawreed-Linux-x64.deb\nTawreed-Windows-x64.exe\nTawreed-macOS-universal.dmg'
           actual="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq '.assets[].name' | sort)"
           if [[ "$actual" != "$expected" ]]; then
-            echo "Draft release asset set is not exact; leaving the release unpublished." >&2
+            echo "Release asset set is not exact; refusing publication." >&2
             exit 1
           fi
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" -F draft=false -f make_latest=true --silent
+
+          marker="<!-- tawreed-desktop-packages -->"
+          current_body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq '.body // ""')"
+          if [[ "$current_body" != *"$marker"* ]]; then
+            cat >PACKAGE_NOTES.md <<'EOF'
+          <!-- tawreed-desktop-packages -->
+
+          ### Verified desktop packages
+
+          - Windows x64: `Tawreed-Windows-x64.exe`
+          - Linux x64: `Tawreed-Linux-x64.AppImage` or `Tawreed-Linux-x64.deb`
+          - macOS Intel and Apple Silicon: `Tawreed-macOS-universal.dmg`
+
+          Packages are not signed with commercial platform certificates.
+          Verify `SHA256SUMS.txt` and GitHub build provenance before installation.
+          EOF
+            current_body="${current_body}"$'\n\n'"$(cat PACKAGE_NOTES.md)"
+          fi
+
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            -f name="Tawreed $tag" \
+            -f body="$current_body" \
+            -F draft=false \
+            -F prerelease=false \
+            -f make_latest=true \
+            --silent

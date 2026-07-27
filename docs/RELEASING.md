@@ -4,28 +4,46 @@ Tawreed releases are built by GitHub Actions for Windows x64, Linux x64, and
 macOS Intel and Apple Silicon. Local binaries are never uploaded as release
 artifacts.
 
-## Version Preparation
+## Automated release flow
 
-1. Update `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`,
-   `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` to the same semantic
+Use Conventional Commit titles on merged pull requests:
+
+- `fix:` creates a patch release.
+- `feat:` creates a minor release.
+- A `BREAKING CHANGE:` footer or `type!:` creates a major release.
+- Other commit types can appear in generated notes but do not force a release.
+
+After a qualifying change reaches `main`, `.github/workflows/release-please.yml`
+creates or updates the Release Please pull request. The workflow explicitly
+dispatches CI for that bot-created branch, enables squash auto-merge behind the
+protected `Verify` check, and then:
+
+1. Updates `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`,
+   `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` to one semantic
    version.
-2. Update `CHANGELOG.md` and release documentation.
-3. Run `npm run verify:version`.
-4. Run the full local verification documented in `README.md`.
-5. Merge through a pull request with passing CI.
+2. Generates the matching `CHANGELOG.md` entry from merged GitHub pull requests.
+3. Creates the canonical `vX.Y.Z` tag and GitHub Release.
+4. Calls the reusable release workflow at the immutable release commit.
+5. Builds, tests, audits, signs or attests as configured, and uploads every
+   verified platform package.
 
-## Publish
+Release Please's manifest and configuration live in
+`.release-please-manifest.json` and `release-please-config.json`. Do not edit
+generated release versions by hand.
 
-Create and push the canonical tag:
+## Manual recovery
+
+The tag trigger remains available if the automation needs recovery. First update
+all version files and `CHANGELOG.md` through a reviewed pull request, then create
+and push an annotated or signed canonical tag:
 
 ```powershell
 git tag -s vX.Y.Z -m "Tawreed vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-If signed Git tags are not configured, use an annotated tag and rely on the
-GitHub Actions build provenance for artifact verification. The release workflow
-rejects tags that do not exactly match the manifest version.
+The reusable release workflow rejects tags that do not exactly match the
+manifest version. Never reuse or move a published version tag.
 
 The workflow builds and verifies fresh packages, generates checksums, attests
 all platform packages, and publishes:
