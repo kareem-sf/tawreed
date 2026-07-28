@@ -581,7 +581,8 @@ export async function inspectWorkbook(
 ): Promise<InspectionResult> {
   const wb = new ExcelJS.Workbook();
   try {
-    await wb.xlsx.load(bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes);
+    const workbookBytes = bytes instanceof Uint8Array ? Uint8Array.from(bytes).buffer : bytes;
+    await wb.xlsx.load(workbookBytes);
   } catch {
     // ExcelJS throws a cryptic "reading 'sheets'" on malformed xl/workbook.xml; surface a clear, actionable error.
     throw new WorkbookParseError('The standard Excel reader could not open this workbook. It may be corrupt or saved in an unsupported format.');
