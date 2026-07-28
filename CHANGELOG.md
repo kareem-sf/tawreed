@@ -3,6 +3,14 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.5.1 (2026-07-28)
+
+## What's Changed
+* fix: repair automated releases and TypeScript 5.9 by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/31
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.5.0...v0.5.1
+
 ## 0.5.0 (2026-07-27)
 
 ## What's Changed
