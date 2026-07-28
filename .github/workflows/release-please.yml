@@ -38,11 +38,24 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      - name: Resolve the release pull request
+        id: release-pr
+        if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
+        shell: bash
+        env:
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          pr_number="$(jq -er '.number | select(type == "number")' <<<"$RELEASE_PR")"
+          head_branch="$(jq -er '.headBranchName | select(type == "string" and length > 0)' <<<"$RELEASE_PR")"
+          echo "number=${pr_number}" >> "$GITHUB_OUTPUT"
+          echo "head_branch=${head_branch}" >> "$GITHUB_OUTPUT"
+
       - name: Check out the release pull request
         if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          ref: ${{ steps.release-pr.outputs.head_branch }}
           fetch-depth: 0
 
       - name: Synchronize desktop version manifests
@@ -53,7 +66,7 @@ jobs:
         if: steps.release.outputs.prs_created == 'true' && steps.release.outputs.release_created != 'true'
         shell: bash
         env:
-          HEAD_BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          HEAD_BRANCH: ${{ steps.release-pr.outputs.head_branch }}
         run: |
           set -euo pipefail
           if git diff --quiet; then
@@ -74,13 +87,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          RELEASE_PR_NUMBER: ${{ steps.release-pr.outputs.number }}
+          HEAD_BRANCH: ${{ steps.release-pr.outputs.head_branch }}
         run: |
           set -euo pipefail
-          pr_number="$(jq -r '.number' <<<"$RELEASE_PR")"
-          head_branch="$(jq -r '.headBranchName' <<<"$RELEASE_PR")"
+          pr_number="$RELEASE_PR_NUMBER"
+          head_branch="$HEAD_BRANCH"
           head_sha="$(git rev-parse HEAD)"
-          test "$pr_number" != "null"
+          test -n "$pr_number"
           test -n "$head_branch"
           test -n "$head_sha"
 

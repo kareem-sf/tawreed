@@ -285,6 +285,7 @@ struct CodexCandidate {
     source: &'static str,
 }
 
+#[cfg(any(windows, test))]
 fn npm_vendor_candidates(appdata: &Path) -> Vec<CodexCandidate> {
     let package = appdata.join(r"npm\node_modules\@openai\codex");
     [
