@@ -1,0 +1,45 @@
+name: Patch final controller runner assumptions
+
+on:
+  push:
+    branches:
+      - automation/final-cleanup-controller-20260817
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patch-final-controller-runner-assumptions
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    name: Remove redundant native host builds from generic runner
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out controller branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+
+      - name: Patch and self-delete
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('.github/workflows/final-cleanup-controller.yml')
+          lines=path.read_text().splitlines()
+          lines=[line for line in lines if 'npm run tauri -- build --no-bundle --ci -- --locked' not in line]
+          path.write_text('\n'.join(lines)+'\n')
+          PY
+          rm -f .github/workflows/patch-final-controller.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'ci: rely on protected native package matrix'
+          git push origin HEAD:automation/final-cleanup-controller-20260817
