@@ -3,6 +3,7 @@ import { Clock3, Maximize2, Minus, Settings2, Square, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTranslation } from 'react-i18next';
 import { isDesktop } from '../bridge';
+import { appendAccessibleStatus } from '../lib/accessibility';
 import Logo from './Logo';
 
 interface Props {
@@ -54,6 +55,11 @@ export default function TitleBar({ onSettings, onHistory, updateAvailable, modal
     void task.catch(() => undefined);
   };
 
+  const settingsLabel = appendAccessibleStatus(
+    t('settings'),
+    updateAvailable ? t('updateAvailableIndicator') : undefined,
+  );
+
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="flex items-center gap-2" data-tauri-drag-region>
@@ -65,12 +71,17 @@ export default function TitleBar({ onSettings, onHistory, updateAvailable, modal
         <button className="titlebar-nav" onClick={onHistory} aria-label={t('history')}>
           <Clock3 size={13} /> <span>{t('history')}</span>
         </button>
-        <button className="titlebar-nav relative" onClick={onSettings} aria-label={t('settings')}>
+        <button className="titlebar-nav relative" onClick={onSettings} aria-label={settingsLabel}>
           <Settings2 size={13} /> <span>{t('settings')}</span>
-          {updateAvailable && <span className="absolute end-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" />}
+          {updateAvailable && (
+            <span
+              aria-hidden="true"
+              className="absolute end-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500"
+            />
+          )}
         </button>
 
-        <div className="mx-1.5 h-3.5 w-px bg-gray-400/30" />
+        <div aria-hidden="true" className="mx-1.5 h-3.5 w-px bg-gray-400/30" />
 
         <button className="titlebar-btn" onClick={() => runWindowAction('minimize')} aria-label={t('minimize')}>
           <Minus size={14} />
