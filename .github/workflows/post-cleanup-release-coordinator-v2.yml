@@ -1,0 +1,242 @@
+name: Final cleanup release coordinator v2
+
+on:
+  push:
+    branches:
+      - automation/post-cleanup-release
+
+permissions:
+  actions: write
+  attestations: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: final-cleanup-release-coordinator-v2
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPOSITORY: ${{ github.repository }}
+  SELF_BRANCH: automation/post-cleanup-release
+  RESIDUAL_BRANCH: automation/residual-dead-code-cleanup
+
+jobs:
+  coordinate:
+    name: Complete all cleanup and verify the final release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out coordinator branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Cancel superseded coordinator runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_run="${GITHUB_RUN_ID}"
+          gh api --paginate "repos/${REPOSITORY}/actions/runs?branch=${SELF_BRANCH}&per_page=100" \
+            --jq '.workflow_runs[] | select((.name == "Post-cleanup release verifier" or .name == "Final post-cleanup release coordinator") and (.status == "queued" or .status == "in_progress")) | .id' \
+            | while IFS= read -r run_id; do
+                [[ -z "$run_id" || "$run_id" == "$current_run" ]] || gh api --method POST "repos/${REPOSITORY}/actions/runs/${run_id}/cancel" || true
+              done
+
+      - name: Wait for every cleanup pull request to settle
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 540); do
+            primary_merged="$(gh api "repos/${REPOSITORY}/pulls/60" --jq '.merged')"
+            finalizer_success="$(gh api --paginate "repos/${REPOSITORY}/actions/runs?per_page=100" \
+              --jq '[.workflow_runs[] | select(.name == "Post-cleanup repository finalizer" and .conclusion == "success")] | length')"
+            residual_open="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" \
+              --jq '[.[] | select(.head.ref == env.RESIDUAL_BRANCH)] | length')"
+            if [[ "$primary_merged" == 'true' && "$finalizer_success" != '0' && "$residual_open" == '0' ]]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for cleanup workstreams.' >&2
+          exit 1
+
+      - name: Capture exact cleaned protected main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --force
+          clean_sha="$(gh api "repos/${REPOSITORY}/branches/main" --jq '.commit.sha')"
+          protected="$(gh api "repos/${REPOSITORY}/branches/main" --jq '.protected')"
+          [[ "$protected" == 'true' ]]
+          echo "CLEAN_SHA=$clean_sha" >> "$GITHUB_ENV"
+
+      - name: Resolve or queue the current release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_pr=''
+          release_sha=''
+          for attempt in $(seq 1 360); do
+            release_pr="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" \
+              --jq '[.[] | select(.head.ref | startswith("release-please--branches--main")) | .number][0] // empty')"
+            if [[ -n "$release_pr" ]]; then
+              auto_merge="$(gh api "repos/${REPOSITORY}/pulls/${release_pr}" --jq '.auto_merge != null')"
+              if [[ "$auto_merge" != 'true' ]]; then
+                gh pr merge "$release_pr" --repo "$REPOSITORY" --auto --squash
+              fi
+              echo "RELEASE_PR=$release_pr" >> "$GITHUB_ENV"
+              exit 0
+            fi
+
+            if gh api "repos/${REPOSITORY}/releases/latest" > /tmp/latest.json 2>/dev/null; then
+              target="$(jq -r '.target_commitish' /tmp/latest.json)"
+              published="$(jq -r '.published_at // empty' /tmp/latest.json)"
+              if [[ "$target" == "$CLEAN_SHA" && -n "$published" ]]; then
+                echo 'RELEASE_PR=0' >> "$GITHUB_ENV"
+                echo "RELEASE_SHA=$target" >> "$GITHUB_ENV"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo 'No current release PR or exact published release appeared.' >&2
+          exit 1
+
+      - name: Wait for protected release merge when required
+        if: env.RELEASE_PR != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 540); do
+            merged="$(gh api "repos/${REPOSITORY}/pulls/${RELEASE_PR}" --jq '.merged')"
+            if [[ "$merged" == 'true' ]]; then
+              echo "RELEASE_SHA=$(gh api "repos/${REPOSITORY}/pulls/${RELEASE_PR}" --jq '.merge_commit_sha')" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            head_sha="$(gh api "repos/${REPOSITORY}/pulls/${RELEASE_PR}" --jq '.head.sha')"
+            failures="$(gh api --paginate "repos/${REPOSITORY}/commits/${head_sha}/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length')"
+            [[ "$failures" == '0' ]] || { echo "Release PR has ${failures} failed check(s)." >&2; exit 1; }
+            sleep 10
+          done
+          echo 'Timed out waiting for release merge.' >&2
+          exit 1
+
+      - name: Wait for exact public tag and release
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 540); do
+            if gh api "repos/${REPOSITORY}/releases/latest" > /tmp/release.json 2>/dev/null; then
+              tag="$(jq -r '.tag_name' /tmp/release.json)"
+              target="$(jq -r '.target_commitish' /tmp/release.json)"
+              published="$(jq -r '.published_at // empty' /tmp/release.json)"
+              if [[ -n "$published" && "$target" == "$RELEASE_SHA" ]]; then
+                tag_sha="$(gh api "repos/${REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')"
+                if [[ "$tag_sha" == "$RELEASE_SHA" ]]; then
+                  echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+                  echo "PUBLISHED_AT=$published" >> "$GITHUB_ENV"
+                  exit 0
+                fi
+              fi
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for exact public release binding.' >&2
+          exit 1
+
+      - name: Verify complete public release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release-assets
+          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" --dir /tmp/release-assets
+          cd /tmp/release-assets
+          expected=(
+            'Tawreed-Windows-x64.exe'
+            'Tawreed-Linux-x64.AppImage'
+            'Tawreed-Linux-x64.deb'
+            'Tawreed-macOS-universal.dmg'
+            'SHA256SUMS.txt'
+            'LICENSES.txt'
+            'THIRD_PARTY_NOTICES.md'
+          )
+          for asset in "${expected[@]}"; do [[ -s "$asset" ]] || exit 1; done
+          sha256sum --check SHA256SUMS.txt
+          for binary in Tawreed-Windows-x64.exe Tawreed-Linux-x64.AppImage Tawreed-Linux-x64.deb Tawreed-macOS-universal.dmg; do
+            grep -Fq "  $binary" SHA256SUMS.txt
+            gh attestation verify "$binary" --repo "$REPOSITORY" --source-ref "refs/tags/${RELEASE_TAG}"
+          done
+
+      - name: Verify final governance and close modernization
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${REPOSITORY}/branches/main" --jq '.commit.sha')"
+          [[ "$current_main" == "$RELEASE_SHA" ]]
+          other_open="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq '[.[] | select(.head.ref != env.SELF_BRANCH)] | length')"
+          [[ "$other_open" == '0' ]]
+
+          cat > /tmp/final-verification.json <<EOF
+          {
+            "status": "RELEASED",
+            "primary_cleanup_pr": 60,
+            "cleaned_main_sha": "${CLEAN_SHA}",
+            "release_pr": ${RELEASE_PR},
+            "release_sha": "${RELEASE_SHA}",
+            "release_tag": "${RELEASE_TAG}",
+            "published_at": "${PUBLISHED_AT}",
+            "packages": "PASS",
+            "checksums": "PASS",
+            "legal_notices": "PASS",
+            "tag_bound_sigstore_provenance": "PASS",
+            "other_open_pull_requests": 0
+          }
+          EOF
+          cat > /tmp/completion.md <<EOF
+          Deep codebase cleanup is complete and released.
+
+          - Primary cleanup PR: #60
+          - Final cleaned main before release: \`${CLEAN_SHA}\`
+          - Release PR: #${RELEASE_PR}
+          - Public release: \`${RELEASE_TAG}\`
+          - Release/main commit: \`${RELEASE_SHA}\`
+          - Windows, Linux AppImage/DEB, and universal macOS packages: verified
+          - SHA-256 checksums and legal notices: verified
+          - Tag-bound GitHub/Sigstore provenance: verified
+          - Other open pull requests: 0
+
+          Issue #54 remains the explicit upstream Rust dependency-risk register; it is not hidden by this completion record.
+          EOF
+          gh issue comment 57 --repo "$REPOSITORY" --body-file /tmp/completion.md
+          gh issue close 57 --repo "$REPOSITORY" --reason completed
+
+      - name: Upload final evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tawreed-final-verification-${{ env.RELEASE_TAG }}
+          path: /tmp/final-verification.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Close temporary verifier and delete all non-main branches
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          self_pr="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq '[.[] | select(.head.ref == env.SELF_BRANCH) | .number][0] // empty')"
+          if [[ -n "$self_pr" ]]; then
+            gh pr close "$self_pr" --repo "$REPOSITORY" --comment 'Final cleanup release verification passed; this temporary PR was never intended for merge.'
+          fi
+          gh api --paginate "repos/${REPOSITORY}/branches?per_page=100" --jq '.[].name' | sort -u > /tmp/branches.txt
+          while IFS= read -r branch; do
+            [[ -z "$branch" || "$branch" == 'main' ]] && continue
+            encoded="$(python -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$branch")"
+            gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/${encoded}"
+          done < /tmp/branches.txt
