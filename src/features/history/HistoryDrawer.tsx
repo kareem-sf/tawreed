@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { ActionIcon, ScrollArea, Table, Text, Tooltip } from '@mantine/core';
 import { FileSpreadsheet, FolderOpen, Sparkles, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { listRuns, openGeneratedFolder, openWorkbook } from '../bridge';
-import type { RunRecord } from '../../shared/types';
+import { listRuns, openGeneratedFolder, openWorkbook } from '../../bridge';
+import type { RunRecord } from '../../../shared/types';
 
 export default function HistoryDrawer({ opened }: { opened: boolean }) {
   const { t, i18n } = useTranslation();

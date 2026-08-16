@@ -1,43 +1,40 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-Only the latest stable release is supported with security fixes.
+Only the latest stable GitHub release receives security fixes. Older releases
+should be upgraded after verifying the current package checksum and provenance.
 
-| Version | Supported |
-| --- | --- |
-| 0.3.x | Yes |
-| Earlier versions | No |
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
-
-Do not disclose vulnerabilities in a public issue. Use the repository's
-private security advisory form:
+Do not disclose exploitable details in a public issue. Use GitHub private
+vulnerability reporting:
 
 https://github.com/kareem-sf/tawreed/security/advisories/new
 
-Include affected versions, reproduction steps, impact, and any suggested
-mitigation. Do not include customer BOQs, API keys, Codex credentials, or
-generated workbooks.
+Include affected versions, impact, minimal reproduction steps, and suggested
+mitigation. Do not include customer BOQs, generated workbooks, credentials,
+Codex authentication data, or unredacted logs.
 
-## Security Boundaries
+## Security boundaries
 
-- Tauri exposes only explicitly registered commands to the webview.
-- Input and generated-file commands canonicalize and constrain local paths.
-- Update checks are fixed to the official repository and exact package for the
-  running platform; release responses cannot provide arbitrary package URLs.
-- The webview CSP does not permit direct internet requests.
-- Anthropic keys are stored through the operating-system credential manager
-  (Windows Credential Manager, macOS Keychain, or Linux Secret Service). A
-  mode-`0600` `~/.tawreed/.env` fallback is used only when a native credential
-  service is unavailable.
-- Codex OAuth credentials remain managed by the official Codex CLI under
-  `~/.codex` and are not read by Tawreed.
-- Codex jobs use a fresh isolated working directory, a read-only sandbox,
-  ephemeral sessions, ignored user rules/configuration, constrained JSON
-  schemas, bounded output, cancellation, and a fixed timeout.
-- Managed Codex downloads are accepted only when the GitHub release asset has a
-  published SHA-256 digest matching the downloaded executable.
+- Tauri exposes an explicit command allowlist; Rust validates privileged input.
+- Local file operations canonicalize paths and constrain generated-output access.
+- The webview CSP blocks arbitrary direct internet access.
+- Updates are fixed to the official repository, canonical stable tags, and the
+  expected package name for the current platform.
+- Anthropic-compatible secrets use native credential storage where available;
+  a mode-`0600` local fallback is used only when the platform store is
+  unavailable.
+- Codex credentials remain owned by the official Codex CLI and are not read by
+  Tawreed.
+- Codex jobs use isolated temporary working directories, bounded output,
+  response schemas, cancellation, timeout, and read-only execution controls.
+- AI output can assign existing source items but cannot create commercial facts.
+- npm lifecycle scripts require exact reviewed approvals; GitHub Actions are
+  pinned to immutable commit SHAs.
+- Release packages include SHA-256 checksums, legal notices, and GitHub build
+  provenance.
 
-Release packages do not use commercial Windows or Apple signing certificates.
-Verify their published SHA-256 digests and GitHub provenance before execution.
+Current release packages are not commercially Authenticode-signed or Apple
+Developer ID notarized. Verify checksums and provenance before execution.

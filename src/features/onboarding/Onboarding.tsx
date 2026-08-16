@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Group, Text } from '@mantine/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Check, ChevronLeft, ChevronRight, Globe2, Minus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { isDesktop, setSetting } from '../bridge';
-import Logo from './Logo';
-import { ProviderSetup } from './SettingsModal';
+import { setSetting } from '../../bridge';
+import { currentDesktopWindow } from '../../platform/desktop/window';
+import Logo from '../../components/Logo';
+import { ProviderSetup } from '../settings/ProviderSetup';
 
 type OnboardingStep = 'language' | 'video' | 'connection';
 
@@ -31,7 +31,7 @@ export default function Onboarding({
   const { t, i18n } = useTranslation();
   const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [finishing, setFinishing] = useState(false);
-  const appWindow = useMemo(() => (isDesktop() ? getCurrentWindow() : null), []);
+  const appWindow = useMemo(() => currentDesktopWindow(), []);
   const ar = i18n.language === 'ar';
   const index = stepOrder.indexOf(step);
 

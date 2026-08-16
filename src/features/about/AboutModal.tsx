@@ -9,13 +9,9 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { openUrl, type UpdateInfo } from '../bridge';
-import Logo from './Logo';
-
-export type UpdateState =
-  | { status: 'idle' | 'checking' }
-  | { status: 'available' | 'current'; info: UpdateInfo }
-  | { status: 'error'; code: string };
+import { openUrl } from '../../bridge';
+import type { UpdateState } from '../../app/types';
+import Logo from '../../components/Logo';
 
 interface Props {
   version: string;

@@ -1,10 +1,9 @@
 import { FileSpreadsheet, UploadCloud } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTranslation } from 'react-i18next';
-import { isDesktop, readInputFile } from '../bridge';
-import Logo from './Logo';
+import { listenForInputFileDrop } from '../../../platform/desktop/window';
+import Logo from '../../../components/Logo';
 
 export default function FileUpload({ onFile }: { onFile: (file: File) => void }) {
   const { t } = useTranslation();
@@ -36,29 +35,14 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    if (isDesktop()) {
-      getCurrentWindow().onDragDropEvent(async (event) => {
-        if (event.payload.type === 'over') {
-          setDragging(true);
-          return;
-        }
-        if (event.payload.type === 'drop') {
-          setDragging(false);
-          const path = event.payload.paths[0];
-          if (!path) return;
-          try {
-            accept(await readInputFile(path));
-          } catch (err) {
-            reject(err instanceof Error ? err.message : String(err));
-          }
-          return;
-        }
-        setDragging(false);
-      }).then((stop) => {
-        if (disposed) stop();
-        else unlisten = stop;
-      });
-    }
+    void listenForInputFileDrop({
+      onHover: setDragging,
+      onFile: accept,
+      onError: (reason) => reject(reason instanceof Error ? reason.message : String(reason)),
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
     return () => {
       disposed = true;
       unlisten?.();

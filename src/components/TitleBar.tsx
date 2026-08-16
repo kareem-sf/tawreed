@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Clock3, Maximize2, Minus, Settings2, Square, X } from 'lucide-react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTranslation } from 'react-i18next';
-import { isDesktop } from '../bridge';
+import { currentDesktopWindow } from '../platform/desktop/window';
 import { appendAccessibleStatus } from '../lib/accessibility';
 import Logo from './Logo';
 
@@ -16,7 +15,7 @@ interface Props {
 export default function TitleBar({ onSettings, onHistory, updateAvailable, modalOpen }: Props) {
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
-  const appWindow = useMemo(() => (isDesktop() ? getCurrentWindow() : null), []);
+  const appWindow = useMemo(() => currentDesktopWindow(), []);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
