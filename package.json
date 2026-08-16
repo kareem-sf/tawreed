@@ -35,14 +35,14 @@
     "media:onboarding": "node scripts/generate-onboarding-media.mjs",
     "verify:version": "node scripts/verify-version.cjs",
     "sync:version": "node scripts/sync-release-version.cjs",
-    "check": "npm run verify:install-scripts && npm run lint && npm run typecheck && npm test && npm run build && npm run verify:assets && npm run verify:version",
-    "tauri": "tauri"
+    "check": "npm run verify:install-scripts && npm run verify:architecture && npm run verify:docs && npm run lint && npm run typecheck && npm test && npm run build && npm run verify:assets && npm run verify:version",
+    "tauri": "tauri",
+    "verify:architecture": "node scripts/verify-architecture.cjs",
+    "verify:docs": "node scripts/verify-docs.cjs"
   },
   "dependencies": {
-    "@base-ui/react": "^1.6.0",
     "@e965/xlsx": "^0.20.3",
     "@mantine/core": "^7.17.0",
-    "@number-flow/react": "^0.6.2",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2.5.0",
     "clsx": "^2.1.1",

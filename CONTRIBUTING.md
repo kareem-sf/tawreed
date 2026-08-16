@@ -1,58 +1,39 @@
 # Contributing
 
-## Before Opening a Change
+Use an issue for material behavior, architecture, security, or release changes.
+Never commit customer BOQs, generated workbooks, credentials, logs, or files
+copied from `~/.tawreed`.
 
-Use an issue for substantial behavior or architecture changes. Never commit
-real customer BOQs, generated workbooks, credentials, logs, or files from
-`~/.tawreed`.
+## Pull requests
 
-## Development Workflow
+- Branch from protected `main` and keep the branch short-lived.
+- Use focused Conventional Commit titles (`feat:`, `fix:`, `refactor:`,
+  `perf:`, `test:`, `docs:`, `build:`, `ci:`, or `chore:`).
+- Explain the problem, root cause, solution, user impact, tests, security/privacy
+  impact, migration, deployment, and rollback.
+- Add regression protection for fixed defects.
+- Run `npm run check` and applicable Rust commands before review.
+- Do not merge until the protected `Release gate` is green.
 
-1. Create a focused branch from `main`.
-2. Install dependencies with `npm ci`.
-3. Add or update deterministic tests for behavior changes.
-4. Run `npm run check`.
-5. Run the Rust formatting, Clippy, and test checks:
+The complete workflow and module rules are in
+[Development](docs/DEVELOPMENT.md) and [Architecture](docs/ARCHITECTURE.md).
 
-   ```sh
-   cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-   cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
-   cargo test --manifest-path src-tauri/Cargo.toml --locked
-   ```
+## Dependencies and copied methods
 
-6. Open a pull request using the repository template.
+Prefer existing project capability, platform APIs, and official framework
+support before adding a library. Record the current and selected versions,
+compatibility, security impact, license, migration, and rollback in the PR.
+Third-party code or techniques must have a compatible license and a clear
+technical fit; do not copy code based only on popularity.
 
-Keep changes small, preserve the local-first security boundary, and do not
-allow AI output to create source facts. New bundled assets require pinned
-provenance, checksums, and license notices.
+npm lifecycle scripts are fail-closed. When a locked dependency introduces a
+script, review the exact version and script, approve only that identity in
+`package.json#allowScripts`, then run:
 
-## Dependency Install Scripts
+```sh
+npm ci
+npm run verify:install-scripts
+npm run check
+```
 
-The repository enables npm's strict install-script policy. `npm ci` fails when
-a dependency adds a lifecycle script that is not covered by an exact reviewed
-entry in `package.json#allowScripts`.
-
-When a dependency update changes the scripted-package set:
-
-1. Run `npm approve-scripts --allow-scripts-pending` to inspect pending packages.
-2. Review the exact locked package version, lifecycle script, source,
-   maintainer, and why Tawreed requires it.
-3. Approve only that version with `npm approve-scripts <package>`; do not use a
-   name-only approval or `--dangerously-allow-all-scripts`.
-4. Run `npm ci`, `npm run verify:install-scripts`, and the full checks before
-   committing the updated policy and lockfile.
-
-Remove stale approvals when the corresponding package or script disappears.
-The policy verifier checks exact approvals against every scripted lockfile
-package, confirms project-level strict enforcement, and contains a negative
-regression check for incomplete approvals. A successful clean `npm ci` proves
-that the approved scripts required by Tawreed still execute correctly.
-
-## Commit and Pull Request Quality
-
-Use Conventional Commit titles because merged pull requests drive automated
-versioning and changelog generation: `feat:` for features, `fix:` for fixes,
-and `type!:` or a `BREAKING CHANGE:` footer for incompatible changes. Use
-`docs:`, `test:`, `refactor:`, `perf:`, `build:`, `ci:`, or `chore:` where
-appropriate. Pull requests must explain behavior, testing, privacy impact, and
-release impact. CI must pass before merge.
+Never use name-only approvals or `--dangerously-allow-all-scripts`.
