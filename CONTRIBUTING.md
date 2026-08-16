@@ -26,6 +26,28 @@ Keep changes small, preserve the local-first security boundary, and do not
 allow AI output to create source facts. New bundled assets require pinned
 provenance, checksums, and license notices.
 
+## Dependency Install Scripts
+
+The repository enables npm's strict install-script policy. `npm ci` fails when
+a dependency adds a lifecycle script that is not covered by an exact reviewed
+entry in `package.json#allowScripts`.
+
+When a dependency update changes the scripted-package set:
+
+1. Run `npm approve-scripts --allow-scripts-pending` to inspect pending packages.
+2. Review the exact locked package version, lifecycle script, source,
+   maintainer, and why Tawreed requires it.
+3. Approve only that version with `npm approve-scripts <package>`; do not use a
+   name-only approval or `--dangerously-allow-all-scripts`.
+4. Run `npm ci`, `npm run verify:install-scripts`, and the full checks before
+   committing the updated policy and lockfile.
+
+Remove stale approvals when the corresponding package or script disappears.
+The policy verifier checks exact approvals against every scripted lockfile
+package, confirms project-level strict enforcement, and contains a negative
+regression check for incomplete approvals. A successful clean `npm ci` proves
+that the approved scripts required by Tawreed still execute correctly.
+
 ## Commit and Pull Request Quality
 
 Use Conventional Commit titles because merged pull requests drive automated
