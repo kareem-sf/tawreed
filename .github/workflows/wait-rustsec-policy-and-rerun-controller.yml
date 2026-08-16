@@ -1,0 +1,77 @@
+name: Wait for RustSec policy and rerun final controller
+
+on:
+  push:
+    branches:
+      - automation/final-cleanup-controller-20260817
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: wait-rustsec-policy-and-rerun-controller
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPOSITORY: ${{ github.repository }}
+  CONTROLLER_BRANCH: automation/final-cleanup-controller-20260817
+  POLICY_BRANCH: automation/rustsec-policy-cleanup
+
+jobs:
+  barrier:
+    name: Trigger policy-complete controller run
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Wait for policy PR to merge or close as no-op
+        shell: bash
+        run: |
+          set -euo pipefail
+          policy_pr=''
+          for attempt in $(seq 1 720); do
+            policy_pr="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=all&per_page=100" \
+              --jq '[.[] | select(.head.ref == env.POLICY_BRANCH) | .number][0] // empty')"
+            if [[ -n "$policy_pr" ]]; then
+              state="$(gh api "repos/${REPOSITORY}/pulls/${policy_pr}" --jq '.state')"
+              merged="$(gh api "repos/${REPOSITORY}/pulls/${policy_pr}" --jq '.merged')"
+              if [[ "$merged" == 'true' || "$state" == 'closed' ]]; then
+                echo "POLICY_PR=$policy_pr" >> "$GITHUB_ENV"
+                echo "POLICY_MERGED=$merged" >> "$GITHUB_ENV"
+                exit 0
+              fi
+              head_sha="$(gh api "repos/${REPOSITORY}/pulls/${policy_pr}" --jq '.head.sha')"
+              failures="$(gh api --paginate "repos/${REPOSITORY}/commits/${head_sha}/check-runs?per_page=100" \
+                --jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length')"
+              [[ "$failures" == '0' ]] || { echo "Policy PR has ${failures} failed check(s)." >&2; exit 1; }
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for RustSec policy PR.' >&2
+          exit 1
+
+      - name: Update controller marker after policy completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          controller_encoded="$(python -c 'import urllib.parse; print(urllib.parse.quote("automation/final-cleanup-controller-20260817", safe=""))')"
+          gh api "repos/${REPOSITORY}/git/ref/heads/${controller_encoded}" >/dev/null
+          main_sha="$(gh api "repos/${REPOSITORY}/branches/main" --jq '.commit.sha')"
+          path='.github/controller/policy-ready.json'
+          current_sha="$(gh api "repos/${REPOSITORY}/contents/${path}?ref=${controller_encoded}" --jq '.sha' 2>/dev/null || true)"
+          payload="$(printf '{"policy_pr":%s,"merged":%s,"main_sha":"%s"}\n' "$POLICY_PR" "$POLICY_MERGED" "$main_sha")"
+          encoded_content="$(printf '%s' "$payload" | base64 -w0)"
+          if [[ -n "$current_sha" ]]; then
+            jq -n --arg message 'ci: rerun final controller after RustSec policy' --arg content "$encoded_content" \
+              --arg branch "$CONTROLLER_BRANCH" --arg sha "$current_sha" \
+              '{message:$message,content:$content,branch:$branch,sha:$sha}' \
+              | gh api --method PUT "repos/${REPOSITORY}/contents/${path}" --input - >/dev/null
+          else
+            jq -n --arg message 'ci: rerun final controller after RustSec policy' --arg content "$encoded_content" \
+              --arg branch "$CONTROLLER_BRANCH" \
+              '{message:$message,content:$content,branch:$branch}' \
+              | gh api --method PUT "repos/${REPOSITORY}/contents/${path}" --input - >/dev/null
+          fi
