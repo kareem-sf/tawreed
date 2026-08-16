@@ -1,0 +1,86 @@
+name: Apply deep codebase cleanup
+
+on:
+  push:
+    branches:
+      - refactor/deep-codebase-cleanup-final-v10
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deep-codebase-cleanup
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Generate and validate cleanup commit
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up reviewed Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup default 1.97.0
+
+      - name: Apply deterministic source cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/cleanup/apply_cleanup.py /tmp/apply_cleanup.py
+          cp .github/cleanup/split_rust.py /tmp/split_rust.py
+          python /tmp/apply_cleanup.py
+          python /tmp/split_rust.py
+          npm install --package-lock-only --ignore-scripts --no-audit
+          npm ci
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+
+      - name: Remove temporary transport surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/cleanup
+          rm -f .github/workflows/apply-deep-cleanup.yml
+          rm -f .deep-cleanup-report.json .deep-rust-split-report.json
+
+      - name: Validate complete cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+          npm audit --audit-level=high --omit=dev
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+          git diff --check
+          test -z "$(git ls-files --others --exclude-standard)"
+          if git diff --quiet; then
+            echo 'Cleanup generated no reviewable changes.' >&2
+            exit 1
+          fi
+
+      - name: Commit validated cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: remove legacy and redundant codebase surface'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
