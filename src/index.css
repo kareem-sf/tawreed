@@ -144,6 +144,13 @@ body {
   background: rgba(128, 128, 128, 0.12);
 }
 
+.titlebar-btn:focus-visible,
+.titlebar-nav:focus-visible {
+  opacity: 1;
+  outline: 2px solid #9a6700;
+  outline-offset: 2px;
+}
+
 /* Magic UI — ShimmerButton keyframes */
 @keyframes shimmer-slide {
   to {
@@ -180,6 +187,26 @@ body {
 @keyframes shiny-sweep {
   from { background-position: 0 0; }
   to { background-position: calc(-1 * var(--shiny-width, 120px)) 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer-slide,
+  .animate-spin-around,
+  .shiny-text {
+    animation: none;
+  }
+
+  .titlebar-btn,
+  .titlebar-nav {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .titlebar-btn:focus-visible,
+  .titlebar-nav:focus-visible {
+    outline-color: Highlight;
+  }
 }
 
 :root {
