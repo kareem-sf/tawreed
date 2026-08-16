@@ -1,0 +1,142 @@
+name: Apply deep cleanup
+
+on:
+  push:
+    branches:
+      - refactor/deep-codebase-cleanup-final
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-deep-cleanup
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Apply and validate final cleanup diff
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: true
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            xvfb
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # v1
+        with:
+          toolchain: 1.97.0
+          targets: x86_64-unknown-linux-gnu
+          components: clippy,rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Reconstruct and apply cleanup patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/cleanup/deep-cleanup.* | base64 --decode | gzip --decompress > /tmp/deep-cleanup.patch
+          git apply --binary /tmp/deep-cleanup.patch
+          rm -rf \
+            src-tauri/icons/android \
+            src-tauri/icons/ios \
+            src-tauri/icons/64x64.png \
+            src-tauri/icons/icon.png \
+            src-tauri/icons/Square30x30Logo.png \
+            src-tauri/icons/Square44x44Logo.png \
+            src-tauri/icons/Square71x71Logo.png \
+            src-tauri/icons/Square89x89Logo.png \
+            src-tauri/icons/Square107x107Logo.png \
+            src-tauri/icons/Square142x142Logo.png \
+            src-tauri/icons/Square150x150Logo.png \
+            src-tauri/icons/Square284x284Logo.png \
+            src-tauri/icons/Square310x310Logo.png \
+            src-tauri/icons/StoreLogo.png
+
+      - name: Regenerate deterministic npm lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Install reviewed frontend dependencies
+        run: npm ci
+
+      - name: Format Rust modules
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
+
+      - name: Verify frontend, architecture, documentation, tests, and build
+        run: npm run check
+
+      - name: Audit npm production dependencies
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Verify Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-audit
+
+      - name: Audit Rust dependency graph
+        run: cargo audit -f src-tauri/Cargo.lock
+
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build Linux desktop binary
+        run: npm run tauri -- build --no-bundle --ci -- --locked
+
+      - name: Verify final diff and remove transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/cleanup .github/workflows/apply-deep-cleanup.yml
+          git diff --check
+          test ! -e src/boq-worker.ts
+          test ! -e engine/pipeline.ts
+          test ! -e scripts/make-icon.cjs
+          test ! -e src-tauri/src/commands.rs
+          test ! -e src-tauri/src/store.rs
+          test ! -e src-tauri/icons/android
+          test ! -e src-tauri/icons/ios
+          test ! -e src-tauri/icons/StoreLogo.png
+          test ! -e .github/cleanup
+          test ! -e .github/workflows/apply-deep-cleanup.yml
+
+      - name: Commit clean reviewable source diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: remove legacy code and split host capabilities'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
