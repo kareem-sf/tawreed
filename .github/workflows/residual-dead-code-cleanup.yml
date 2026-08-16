@@ -1,0 +1,165 @@
+name: Residual dead-code cleanup
+
+on:
+  push:
+    branches:
+      - automation/residual-dead-code-cleanup
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: residual-dead-code-cleanup
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPOSITORY: ${{ github.repository }}
+  SELF_BRANCH: automation/residual-dead-code-cleanup
+
+jobs:
+  clean:
+    name: Remove residual unused source and dependencies
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Check out residual-cleanup branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Wait for primary cleanup and repository finalizer
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 360); do
+            merged="$(gh api "repos/${REPOSITORY}/pulls/60" --jq '.merged')"
+            finalizer_success="$(gh api --paginate "repos/${REPOSITORY}/actions/runs?per_page=100" \
+              --jq '[.workflow_runs[] | select(.name == "Post-cleanup repository finalizer" and .conclusion == "success")] | length')"
+            if [[ "$merged" == 'true' && "$finalizer_success" != '0' ]]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for primary cleanup completion.' >&2
+          exit 1
+
+      - name: Reset branch to exact protected main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --force
+          git checkout -B "$SELF_BRANCH" origin/main
+          main_sha="$(git rev-parse HEAD)"
+          api_main_sha="$(gh api "repos/${REPOSITORY}/branches/main" --jq '.commit.sha')"
+          [[ "$main_sha" == "$api_main_sha" ]]
+          echo "STARTING_MAIN_SHA=$main_sha" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up reviewed Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup default 1.97.0
+
+      - name: Install locked project dependencies
+        run: npm ci
+
+      - name: Remove residual unused TypeScript surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          knip_version="$(npm view knip version)"
+          echo "KNIP_VERSION=$knip_version" >> "$GITHUB_ENV"
+          npx --yes "knip@${knip_version}" --fix --allow-remove-files
+
+      - name: Remove residual unused Rust manifest entries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-machete --locked
+          machete_version="$(cargo machete --version | awk '{print $2}')"
+          echo "CARGO_MACHETE_VERSION=$machete_version" >> "$GITHUB_ENV"
+          cargo machete --with-metadata --fix --manifest-path src-tauri/Cargo.toml
+          cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Refresh deterministic lockfiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit
+          npm ci
+          cargo check --manifest-path src-tauri/Cargo.toml --locked
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+
+      - name: Detect no-op cleanup
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+            git diff --check
+          fi
+
+      - name: Close no-op cleanup request
+        if: steps.diff.outputs.changed == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          self_pr="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq '[.[] | select(.head.ref == env.SELF_BRANCH) | .number][0] // empty')"
+          gh issue comment 57 --repo "$REPOSITORY" --body "Residual analysis completed against protected main ${STARTING_MAIN_SHA}: Knip ${KNIP_VERSION} and Cargo Machete ${CARGO_MACHETE_VERSION} found no further safe source or manifest deletions."
+          if [[ -n "$self_pr" ]]; then
+            gh pr close "$self_pr" --repo "$REPOSITORY" --comment 'No residual unused source or dependency entries remained; this temporary PR is closed without merge.'
+          fi
+          encoded="$(python -c 'import urllib.parse; print(urllib.parse.quote("automation/residual-dead-code-cleanup", safe=""))')"
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/${encoded}"
+
+      - name: Validate residual cleanup
+        if: steps.diff.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+          npm audit --audit-level=high --omit=dev
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+          npm run tauri -- build --no-bundle --ci -- --locked
+
+      - name: Commit validated residual cleanup
+        if: steps.diff.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: remove residual unused exports and dependencies'
+          git push --force-with-lease origin "$SELF_BRANCH"
+
+      - name: Promote protected residual cleanup pull request
+        if: steps.diff.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          self_pr="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq '[.[] | select(.head.ref == env.SELF_BRANCH) | .number][0]')"
+          gh pr comment "$self_pr" --repo "$REPOSITORY" --body "Generated from protected main ${STARTING_MAIN_SHA}. Knip ${KNIP_VERSION} and Cargo Machete ${CARGO_MACHETE_VERSION} produced only changes that passed the complete local Node/Rust/native-host gate. The independent protected platform matrix is now required."
+          gh pr ready "$self_pr" --repo "$REPOSITORY"
+          gh pr merge "$self_pr" --repo "$REPOSITORY" --auto --squash
