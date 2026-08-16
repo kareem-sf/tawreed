@@ -15,9 +15,24 @@ function packageNameFromLockPath(lockPath) {
   return lockPath.split('node_modules/').at(-1);
 }
 
+function scriptedIdentitiesFromLock(packageLock) {
+  return new Set(
+    Object.entries(packageLock.packages ?? {})
+      .filter(([lockPath, metadata]) => lockPath && metadata?.hasInstallScript === true)
+      .map(([lockPath, metadata]) => {
+        const name = packageNameFromLockPath(lockPath);
+        if (!name || typeof metadata.version !== 'string' || !metadata.version) {
+          fail(`Scripted lockfile entry ${lockPath} is missing a package name or exact version.`);
+        }
+        return `${name}@${metadata.version}`;
+      }),
+  );
+}
+
 function validatePolicy(packageJson, packageLock) {
   const approvals = packageJson.allowScripts ?? {};
   const approvedIdentities = new Set(Object.keys(approvals));
+  const scriptedIdentities = scriptedIdentitiesFromLock(packageLock);
 
   if (approvedIdentities.size === 0) {
     fail('package.json must contain at least one reviewed install-script approval.');
@@ -32,20 +47,7 @@ function validatePolicy(packageJson, packageLock) {
     if (separator <= 0 || separator === identity.length - 1) {
       fail(`Install-script approval ${identity} must pin an exact package version.`);
     }
-
-    const name = identity.slice(0, separator);
-    const version = identity.slice(separator + 1);
-    const locked = packageLock.packages?.[`node_modules/${name}`];
-    if (!locked || locked.version !== version || locked.hasInstallScript !== true) {
-      fail(`Install-script approval ${identity} does not match a scripted package in package-lock.json.`);
-    }
   }
-
-  const scriptedIdentities = new Set(
-    Object.entries(packageLock.packages ?? {})
-      .filter(([lockPath, metadata]) => lockPath && metadata?.hasInstallScript === true)
-      .map(([lockPath, metadata]) => `${packageNameFromLockPath(lockPath)}@${metadata.version}`),
-  );
 
   const missing = [...scriptedIdentities].filter((identity) => !approvedIdentities.has(identity));
   const stale = [...approvedIdentities].filter((identity) => !scriptedIdentities.has(identity));
@@ -54,6 +56,15 @@ function validatePolicy(packageJson, packageLock) {
       `Install-script policy does not match package-lock.json. Missing: ${missing.join(', ') || 'none'}. Stale: ${stale.join(', ') || 'none'}.`,
     );
   }
+}
+
+function expectPolicyRejection(packageJson, packageLock, message) {
+  try {
+    validatePolicy(packageJson, packageLock);
+  } catch {
+    return;
+  }
+  fail(message);
 }
 
 function verifyProjectNpmConfiguration() {
@@ -73,17 +84,40 @@ const packageLock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 
 validatePolicy(packageJson, packageLock);
 verifyProjectNpmConfiguration();
 
-const negativeFixture = structuredClone(packageJson);
-negativeFixture.allowScripts = { ...negativeFixture.allowScripts };
-delete negativeFixture.allowScripts[Object.keys(negativeFixture.allowScripts)[0]];
-let rejected = false;
-try {
-  validatePolicy(negativeFixture, packageLock);
-} catch {
-  rejected = true;
-}
-if (!rejected) {
-  fail('The policy validator accepted an intentionally incomplete approval set.');
-}
+const incompletePolicy = structuredClone(packageJson);
+incompletePolicy.allowScripts = { ...incompletePolicy.allowScripts };
+delete incompletePolicy.allowScripts[Object.keys(incompletePolicy.allowScripts)[0]];
+expectPolicyRejection(
+  incompletePolicy,
+  packageLock,
+  'The policy validator accepted an intentionally incomplete approval set.',
+);
+
+expectPolicyRejection(
+  { allowScripts: { esbuild: true } },
+  packageLock,
+  'The policy validator accepted a non-versioned package approval.',
+);
+
+validatePolicy(
+  {
+    allowScripts: {
+      'nested-script@1.2.3': true,
+      '@scope/scoped-script@4.5.6': true,
+    },
+  },
+  {
+    packages: {
+      'node_modules/parent/node_modules/nested-script': {
+        version: '1.2.3',
+        hasInstallScript: true,
+      },
+      'node_modules/parent/node_modules/@scope/scoped-script': {
+        version: '4.5.6',
+        hasInstallScript: true,
+      },
+    },
+  },
+);
 
 console.log('Verified exact npm install-script approvals and strict project enforcement.');
