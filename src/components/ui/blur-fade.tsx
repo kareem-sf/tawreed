@@ -1,5 +1,5 @@
 // Ported from Magic UI (MIT, magicui.design) — blur+fade+y entrance, transitions only.
-import { motion, type Variants } from 'motion/react';
+import { motion, useReducedMotion, type Variants } from 'motion/react';
 import { cn } from '../../lib/utils';
 
 interface BlurFadeProps {
@@ -11,17 +11,20 @@ interface BlurFadeProps {
 }
 
 export function BlurFade({ children, className, delay = 0, yOffset = 8, blur = '6px' }: BlurFadeProps) {
+  const reduceMotion = useReducedMotion();
   const variants: Variants = {
     hidden: { opacity: 0, filter: `blur(${blur})`, y: yOffset },
     visible: { opacity: 1, filter: 'blur(0px)', y: 0 },
   };
   return (
     <motion.div
-      initial="hidden"
+      initial={reduceMotion ? false : 'hidden'}
       animate="visible"
-      exit="hidden"
+      exit={reduceMotion ? undefined : 'hidden'}
       variants={variants}
-      transition={{ duration: 0.3, delay, ease: [0.22, 0.61, 0.36, 1] }}
+      transition={reduceMotion
+        ? { duration: 0 }
+        : { duration: 0.3, delay, ease: [0.22, 0.61, 0.36, 1] }}
       className={cn(className)}
     >
       {children}
