@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - refactor/deep-codebase-cleanup-final
+    paths:
+      - .github/cleanup-v2/READY
 
 permissions:
   contents: write
@@ -62,21 +64,23 @@ jobs:
         run: |
           set -euo pipefail
           cat <<'CHECKSUMS' | sha256sum --check --strict
-          3c5a63dab055fbc567509990d7c6013e7ad9ca80f056d97d977adbffe5768d81  .github/cleanup/deep-cleanup.00
-          5f5726d2af4646c291318eb40452dd79ad2cbed0b0ed1700a87133a492cb8d9c  .github/cleanup/deep-cleanup.01
-          6280d9a1da8a526d794d622b59d95d9238419434e66825011c789919d2675d38  .github/cleanup/deep-cleanup.02
-          b4f6f0dfd55a2d6b2e8afc4eca08ef47fe679bad2fb63b7760a17a6ec3653baf  .github/cleanup/deep-cleanup.03
+          0cd3a49db29929bcae9107a9da50ef5cc6c6905d045e52cedc6a356bd9b6a108  .github/cleanup-v2/segment.000
+          b26d8a897f5523f7aa0d971fb5d01ea67165ff70a9239f62d9888875f59b2203  .github/cleanup-v2/segment.001
+          980aef4a9848ee15aa28a0c46766d1fae4d2808065428d2c726f2f479bbd3f15  .github/cleanup-v2/segment.002
+          31a8cdce0a545358277712f21e57d8ec182dc4d4fe39622a8ffd6e54a1fab7d4  .github/cleanup-v2/segment.003
+          4d1b7e1443bee1b36a6422e15fe7f777137e6e213f35a70f5454cc2ab019c1c0  .github/cleanup-v2/segment.004
+          c6984201d42d77b8d14ee6809ecc636649bf4cf8ba001afd03a35adf084c9533  .github/cleanup-v2/segment.005
+          072d9164eba2f9f3f100ecffaef4c0527538b6b45239aafb10f8dcf279f2f994  .github/cleanup-v2/segment.006
+          0c7bb87ff74d7baab8768131f66055161468f2eaa746c276891e49c789b2c743  .github/cleanup-v2/segment.007
+          580940c0a1a09885de280dadbf4170c17ec19801dcec3f15d1d31936eca854fc  .github/cleanup-v2/segment.008
+          c6ad7e280844874f595e68e2c150e9dd07adff39e10a5e8d55c872b65b413bd0  .github/cleanup-v2/segment.009
           CHECKSUMS
 
       - name: Reconstruct and apply cleanup patch
         shell: bash
         run: |
           set -euo pipefail
-          cat \
-            .github/cleanup/deep-cleanup.00 \
-            .github/cleanup/deep-cleanup.01 \
-            .github/cleanup/deep-cleanup.02 \
-            .github/cleanup/deep-cleanup.03 \
+          cat .github/cleanup-v2/segment.* \
             | base64 --decode \
             | gzip --decompress > /tmp/deep-cleanup.patch
           git apply --binary /tmp/deep-cleanup.patch
@@ -135,7 +139,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .github/cleanup .github/workflows/apply-deep-cleanup.yml
+          rm -rf \
+            .github/cleanup \
+            .github/cleanup-v2 \
+            .github/workflows/apply-deep-cleanup.yml
           git diff --check
           test ! -e src/boq-worker.ts
           test ! -e engine/pipeline.ts
@@ -146,6 +153,7 @@ jobs:
           test ! -e src-tauri/icons/ios
           test ! -e src-tauri/icons/StoreLogo.png
           test ! -e .github/cleanup
+          test ! -e .github/cleanup-v2
           test ! -e .github/workflows/apply-deep-cleanup.yml
 
       - name: Commit clean reviewable source diff
