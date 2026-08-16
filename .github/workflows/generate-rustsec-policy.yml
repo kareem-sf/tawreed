@@ -1,0 +1,288 @@
+name: Generate exact RustSec policy
+
+on:
+  push:
+    branches:
+      - automation/rustsec-policy-cleanup
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: generate-exact-rustsec-policy
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPOSITORY: ${{ github.repository }}
+  SELF_BRANCH: automation/rustsec-policy-cleanup
+
+jobs:
+  generate:
+    name: Generate and validate exact advisory policy
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out policy branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Wait for structural and residual cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 540); do
+            primary="$(gh api "repos/${REPOSITORY}/pulls/60" --jq '.merged')"
+            residual="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" \
+              --jq '[.[] | select(.head.ref == "refactor/residual-dead-code-final" or .head.ref == "automation/residual-dead-code-cleanup")] | length')"
+            if [[ "$primary" == 'true' && "$residual" == '0' ]]; then exit 0; fi
+            sleep 10
+          done
+          echo 'Timed out waiting for prerequisite cleanup.' >&2
+          exit 1
+
+      - name: Reset to exact protected main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --force
+          git checkout -B "$SELF_BRANCH" origin/main
+          echo "STARTING_MAIN_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up reviewed Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup default 1.97.0
+          cargo install cargo-audit --locked
+
+      - name: Inspect exact locked advisory set
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          cargo audit --json -f src-tauri/Cargo.lock > /tmp/rust-audit.json || audit_status=$?
+          echo "AUDIT_STATUS=${audit_status:-0}" >> "$GITHUB_ENV"
+
+      - name: Generate checked-in policy, verifier, docs, and required CI job
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime, json, pathlib, re
+
+          root=pathlib.Path('.')
+          audit=json.loads(pathlib.Path('/tmp/rust-audit.json').read_text())
+          observed=set()
+          def walk(value):
+              if isinstance(value, dict):
+                  for item in value.values(): walk(item)
+              elif isinstance(value, list):
+                  for item in value: walk(item)
+              elif isinstance(value, str):
+                  observed.update(re.findall(r'RUSTSEC-\d{4}-\d{4}', value))
+          walk(audit)
+
+          known={
+              'RUSTSEC-2026-0221', 'RUSTSEC-2024-0429', 'RUSTSEC-2024-0370',
+              *{f'RUSTSEC-2024-{number:04d}' for number in range(411,421)},
+              'RUSTSEC-2025-0075','RUSTSEC-2025-0080','RUSTSEC-2025-0081','RUSTSEC-2025-0098','RUSTSEC-2025-0100',
+          }
+          unknown=sorted(observed-known)
+          if unknown:
+              raise SystemExit(f'Unreviewed RustSec IDs require separate remediation: {unknown}')
+          vulnerabilities=audit.get('vulnerabilities',{}).get('list',[])
+          if vulnerabilities:
+              raise SystemExit(f'Cargo audit reports {len(vulnerabilities)} vulnerability item(s); policy generation refuses to accept them.')
+
+          def metadata(identifier):
+              if identifier == 'RUSTSEC-2026-0221':
+                  return ('unsoundness','cross-platform transitive async runtime','Upstream event-listener path; no direct Tawreed API use. Retained only until the supported upstream graph removes it.')
+              if identifier == 'RUSTSEC-2024-0429':
+                  return ('unsoundness','Linux GTK/WebKit runtime','Transitive GLib binding required by the supported Tauri Linux stack; affected iterator API is not called directly by Tawreed.')
+              if identifier.startswith('RUSTSEC-2024-04'):
+                  return ('unmaintained','Linux GTK3/WebKit runtime','Unmaintained GTK3-family binding required transitively by the supported Tauri/WebKitGTK platform stack; replacement depends on upstream migration.')
+              if identifier == 'RUSTSEC-2024-0370':
+                  return ('unmaintained','build-time proc macro','Transitive build-time macro dependency; no runtime exposure and removal depends on upstream crates.')
+              return ('unmaintained','cross-platform transitive Unicode support','Legacy UNIC crate retained only through upstream transitive dependencies; Tawreed does not call it directly.')
+
+          reviewed='2026-08-17'
+          review_by='2026-11-17'
+          entries=[]
+          for identifier in sorted(observed):
+              category, scope, rationale=metadata(identifier)
+              entries.append({
+                  'id':identifier,
+                  'category':category,
+                  'platformScope':scope,
+                  'disposition':'temporarily-accepted-upstream',
+                  'owner':'repository maintainer',
+                  'reviewedAt':reviewed,
+                  'reviewBy':review_by,
+                  'rationale':rationale,
+              })
+          policy={
+              'schemaVersion':1,
+              'purpose':'Exact allowlist for informational RustSec warnings only. Vulnerabilities are never accepted.',
+              'advisories':entries,
+          }
+          security=root/'security'
+          security.mkdir(exist_ok=True)
+          (security/'rustsec-policy.json').write_text(json.dumps(policy,indent=2)+'\n')
+
+          docs=root/'docs'/'security'
+          docs.mkdir(parents=True,exist_ok=True)
+          lines=['# RustSec advisory policy','',
+                 'Tawreed fails CI when Cargo Audit reports a vulnerability, a new informational advisory, or when a checked-in advisory disappears without its policy entry being removed.','',
+                 f'Last reviewed: {reviewed}  ',f'Next review: {review_by}','',
+                 '| Advisory | Category | Scope | Disposition |','|---|---|---|---|']
+          for entry in entries:
+              lines.append(f"| `{entry['id']}` | {entry['category']} | {entry['platformScope']} | {entry['rationale']} |")
+          lines += ['', 'The policy is intentionally exact. New IDs are release blockers until investigated; stale entries are also rejected so the allowlist shrinks as upstream dependencies improve.', '']
+          (docs/'RUSTSEC_POLICY.md').write_text('\n'.join(lines))
+
+          verifier=r'''const { readFileSync } = require('node:fs');
+const policy = JSON.parse(readFileSync('security/rustsec-policy.json', 'utf8'));
+const fail = (message) => { throw new Error(`RustSec policy validation failed: ${message}`); };
+if (policy.schemaVersion !== 1 || !Array.isArray(policy.advisories)) fail('invalid schema');
+const ids = policy.advisories.map((entry) => entry.id);
+if (new Set(ids).size !== ids.length) fail('duplicate advisory ID');
+const today = new Date().toISOString().slice(0, 10);
+for (const entry of policy.advisories) {
+  if (!/^RUSTSEC-\d{4}-\d{4}$/.test(entry.id)) fail(`invalid ID ${entry.id}`);
+  for (const field of ['category','platformScope','disposition','owner','reviewedAt','reviewBy','rationale']) {
+    if (typeof entry[field] !== 'string' || !entry[field].trim()) fail(`${entry.id} missing ${field}`);
+  }
+  if (entry.reviewBy < today) fail(`${entry.id} review expired on ${entry.reviewBy}`);
+}
+if (process.env.CARGO_AUDIT_JSON) {
+  const audit = JSON.parse(readFileSync(process.env.CARGO_AUDIT_JSON, 'utf8'));
+  const observed = new Set();
+  const walk = (value) => {
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (value && typeof value === 'object') return Object.values(value).forEach(walk);
+    if (typeof value === 'string') for (const match of value.matchAll(/RUSTSEC-\d{4}-\d{4}/g)) observed.add(match[0]);
+  };
+  walk(audit);
+  const expected = new Set(ids);
+  const missing = [...observed].filter((id) => !expected.has(id));
+  const stale = [...expected].filter((id) => !observed.has(id));
+  if (missing.length || stale.length) fail(`exact set mismatch; missing=${missing.join(',') || 'none'} stale=${stale.join(',') || 'none'}`);
+  const vulnerabilities = audit.vulnerabilities?.list ?? [];
+  if (vulnerabilities.length) fail(`${vulnerabilities.length} vulnerability item(s) reported`);
+}
+console.log(`Verified exact RustSec policy for ${ids.length} informational advisory ID(s).`);
+'''
+          (root/'scripts'/'verify-rustsec-policy.cjs').write_text(verifier)
+
+          package_path=root/'package.json'
+          package=json.loads(package_path.read_text())
+          package.setdefault('scripts',{})['verify:rustsec-policy']='node scripts/verify-rustsec-policy.cjs'
+          check=package['scripts'].get('check','')
+          if 'npm run verify:rustsec-policy' not in check:
+              package['scripts']['check']='npm run verify:rustsec-policy && '+check
+          package_path.write_text(json.dumps(package,indent=2)+'\n')
+
+          ci_path=root/'.github'/'workflows'/'ci.yml'
+          ci=ci_path.read_text()
+          if '\n  rustsec-policy:\n' not in ci:
+              job='''\n  rustsec-policy:\n    name: RustSec policy\n    runs-on: ubuntu-24.04\n    timeout-minutes: 25\n    steps:\n      - name: Check out source\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          persist-credentials: false\n      - name: Set up Node.js\n        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: 24\n      - name: Set up Rust\n        shell: bash\n        run: |\n          rustup toolchain install 1.97.0 --profile minimal\n          rustup default 1.97.0\n          cargo install cargo-audit --locked\n      - name: Enforce exact RustSec warning policy\n        shell: bash\n        run: |\n          set +e\n          cargo audit --json -f src-tauri/Cargo.lock > /tmp/rust-audit.json\n          audit_status=$?\n          set -e\n          CARGO_AUDIT_JSON=/tmp/rust-audit.json node scripts/verify-rustsec-policy.cjs\n          test "$audit_status" -eq 0\n'''
+              ci=ci.rstrip()+job+'\n'
+
+          lines=ci.splitlines()
+          job_starts=[i for i,line in enumerate(lines) if re.match(r'^  [A-Za-z0-9_-]+:\s*$',line)]
+          release_start=None
+          release_end=None
+          for index,start in enumerate(job_starts):
+              end=job_starts[index+1] if index+1<len(job_starts) else len(lines)
+              block='\n'.join(lines[start:end])
+              if re.search(r'^    name:\s*Release gate\s*$',block,re.M):
+                  release_start,release_end=start,end
+                  break
+          if release_start is None:
+              raise SystemExit('Could not locate protected Release gate job')
+          block=lines[release_start:release_end]
+          if not any('rustsec-policy' in line for line in block):
+              needs_index=next((i for i,line in enumerate(block) if re.match(r'^    needs:',line)),None)
+              if needs_index is None:
+                  name_index=next(i for i,line in enumerate(block) if re.match(r'^    name:',line))
+                  block.insert(name_index+1,'    needs: [rustsec-policy]')
+              else:
+                  line=block[needs_index]
+                  if '[' in line:
+                      prefix,rest=line.split('[',1)
+                      values=rest.rsplit(']',1)[0].strip()
+                      block[needs_index]=prefix+'['+(values+', ' if values else '')+'rustsec-policy]'
+                  elif re.match(r'^    needs:\s*$',line):
+                      insert=needs_index+1
+                      while insert<len(block) and re.match(r'^      - ',block[insert]): insert+=1
+                      block.insert(insert,'      - rustsec-policy')
+                  else:
+                      value=line.split(':',1)[1].strip()
+                      block[needs_index:needs_index+1]=['    needs:',f'      - {value}','      - rustsec-policy']
+              lines[release_start:release_end]=block
+              ci='\n'.join(lines)+'\n'
+          ci_path.write_text(ci)
+          PY
+
+      - name: Remove branch-only generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/rustsec-policy
+          rm -f .github/workflows/generate-rustsec-policy.yml
+          npm install --package-lock-only --ignore-scripts --no-audit
+          npm ci
+
+      - name: Validate generated policy and complete project
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify:rustsec-policy
+          CARGO_AUDIT_JSON=/tmp/rust-audit.json node scripts/verify-rustsec-policy.cjs
+          test "$AUDIT_STATUS" -eq 0
+          npm run check
+          npm audit --audit-level=high --omit=dev
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+          git diff --check
+
+      - name: Commit exact policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            self_pr="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | select(.head.ref == env.SELF_BRANCH) | .number][0] // empty')"
+            [[ -z "$self_pr" ]] || gh pr close "$self_pr" --repo "$REPOSITORY" --comment 'The exact RustSec policy was already present and current; no merge is required.'
+            encoded="$(python -c 'import urllib.parse; print(urllib.parse.quote("automation/rustsec-policy-cleanup", safe=""))')"
+            gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/${encoded}" || true
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'security: enforce exact RustSec advisory policy'
+          git push --force-with-lease origin "$SELF_BRANCH"
+
+      - name: Promote protected policy pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          self_pr="$(gh api --paginate "repos/${REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | select(.head.ref == env.SELF_BRANCH) | .number][0]')"
+          gh pr comment "$self_pr" --repo "$REPOSITORY" --body "Generated from protected main ${STARTING_MAIN_SHA}. Cargo Audit reported no vulnerability. Only the already-reviewed warning IDs are allowlisted; the new required CI job rejects new or stale IDs."
+          gh pr ready "$self_pr" --repo "$REPOSITORY"
+          gh pr merge "$self_pr" --repo "$REPOSITORY" --auto --squash
