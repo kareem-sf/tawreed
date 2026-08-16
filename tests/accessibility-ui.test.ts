@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { appendAccessibleStatus } from '../src/lib/accessibility';
-import titleBarSource from '../src/components/TitleBar.tsx?raw';
-import blurFadeSource from '../src/components/ui/blur-fade.tsx?raw';
-import appCss from '../src/index.css?raw';
+
+function readSource(path: string): string {
+  return readFileSync(new URL(path, import.meta.url), 'utf8');
+}
 
 describe('accessible UI contracts', () => {
   it('adds translated status text only when the state is active', () => {
@@ -14,22 +16,26 @@ describe('accessible UI contracts', () => {
   });
 
   it('keeps custom title-bar controls visibly focused', () => {
-    expect(appCss).toContain('.titlebar-btn:focus-visible,\n.titlebar-nav:focus-visible');
-    expect(appCss).toMatch(/outline:\s*2px solid #9a6700/);
-    expect(appCss).toContain('@media (forced-colors: active)');
+    const css = readSource('../src/index.css');
+    expect(css).toContain('.titlebar-btn:focus-visible,\n.titlebar-nav:focus-visible');
+    expect(css).toMatch(/outline:\s*2px solid #9a6700/);
+    expect(css).toContain('@media (forced-colors: active)');
   });
 
   it('honors the operating-system reduced-motion preference', () => {
-    expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
-    expect(appCss).toContain('.animate-shimmer-slide,');
-    expect(blurFadeSource).toContain('useReducedMotion');
-    expect(blurFadeSource).toContain("initial={reduceMotion ? false : 'hidden'}");
-    expect(blurFadeSource).toContain("exit={reduceMotion ? undefined : 'hidden'}");
+    const css = readSource('../src/index.css');
+    const blurFade = readSource('../src/components/ui/blur-fade.tsx');
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(css).toContain('.animate-shimmer-slide,');
+    expect(blurFade).toContain('useReducedMotion');
+    expect(blurFade).toContain("initial={reduceMotion ? false : 'hidden'}");
+    expect(blurFade).toContain("exit={reduceMotion ? undefined : 'hidden'}");
   });
 
   it('announces update availability without exposing the decorative dot', () => {
-    expect(titleBarSource).toContain("t('updateAvailableIndicator')");
-    expect(titleBarSource).toContain('aria-label={settingsLabel}');
-    expect(titleBarSource).toContain('aria-hidden="true"');
+    const titleBar = readSource('../src/components/TitleBar.tsx');
+    expect(titleBar).toContain("t('updateAvailableIndicator')");
+    expect(titleBar).toContain('aria-label={settingsLabel}');
+    expect(titleBar).toContain('aria-hidden="true"');
   });
 });
