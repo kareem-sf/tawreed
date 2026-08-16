@@ -3,6 +3,14 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.5.5 (2026-08-16)
+
+## What's Changed
+* refactor(frontend): establish feature architecture and repository quality gates by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/58
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.5.4...v0.5.5
+
 ## 0.5.4 (2026-08-16)
 
 ## What's Changed
