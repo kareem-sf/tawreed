@@ -43,8 +43,9 @@ When a dependency update changes the pending-script set:
    committing the updated policy and lockfile.
 
 Remove stale approvals when the corresponding package or script disappears.
-The policy verification command also proves in an isolated local fixture that
-unreviewed scripts fail closed and exact reviewed scripts remain functional.
+The policy verifier checks the allowlist against the lockfile and proves in an
+isolated fixture that unreviewed scripts fail closed. A successful clean
+`npm ci` proves that the exact reviewed scripts required by Tawreed still run.
 
 ## Commit and Pull Request Quality
 
