@@ -3,6 +3,14 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.5.6 (2026-08-16)
+
+## What's Changed
+* refactor: remove legacy and redundant codebase surface by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/60
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.5.5...v0.5.6
+
 ## 0.5.5 (2026-08-16)
 
 ## What's Changed
