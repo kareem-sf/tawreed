@@ -1,0 +1,48 @@
+name: Patch final controller concurrency
+
+on:
+  push:
+    branches:
+      - automation/final-cleanup-controller-20260817
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patch-final-controller-concurrency
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    name: Keep only the newest controller run
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out controller branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+
+      - name: Patch and self-delete
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('.github/workflows/final-cleanup-controller.yml')
+          text=path.read_text()
+          old='  group: final-deep-cleanup-controller\n  cancel-in-progress: false'
+          new='  group: final-deep-cleanup-controller\n  cancel-in-progress: true'
+          if old not in text:
+              raise SystemExit('Expected controller concurrency block not found')
+          path.write_text(text.replace(old,new,1))
+          PY
+          rm -f .github/workflows/patch-final-controller-concurrency.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'ci: keep only the newest cleanup controller run'
+          git push origin HEAD:automation/final-cleanup-controller-20260817
