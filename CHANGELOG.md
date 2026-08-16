@@ -3,6 +3,14 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.5.4 (2026-08-16)
+
+## What's Changed
+* build(security): enforce reviewed npm install scripts by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/55
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.5.3...v0.5.4
+
 ## 0.5.3 (2026-08-16)
 
 ## What's Changed
