@@ -57,11 +57,28 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Verify cleanup transport integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat <<'CHECKSUMS' | sha256sum --check --strict
+          3c5a63dab055fbc567509990d7c6013e7ad9ca80f056d97d977adbffe5768d81  .github/cleanup/deep-cleanup.00
+          5f5726d2af4646c291318eb40452dd79ad2cbed0b0ed1700a87133a492cb8d9c  .github/cleanup/deep-cleanup.01
+          6280d9a1da8a526d794d622b59d95d9238419434e66825011c789919d2675d38  .github/cleanup/deep-cleanup.02
+          b4f6f0dfd55a2d6b2e8afc4eca08ef47fe679bad2fb63b7760a17a6ec3653baf  .github/cleanup/deep-cleanup.03
+          CHECKSUMS
+
       - name: Reconstruct and apply cleanup patch
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/cleanup/deep-cleanup.* | base64 --decode | gzip --decompress > /tmp/deep-cleanup.patch
+          cat \
+            .github/cleanup/deep-cleanup.00 \
+            .github/cleanup/deep-cleanup.01 \
+            .github/cleanup/deep-cleanup.02 \
+            .github/cleanup/deep-cleanup.03 \
+            | base64 --decode \
+            | gzip --decompress > /tmp/deep-cleanup.patch
           git apply --binary /tmp/deep-cleanup.patch
           rm -rf \
             src-tauri/icons/android \
