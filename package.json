@@ -17,6 +17,11 @@
   "engines": {
     "node": ">=24"
   },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.3": true,
+    "tesseract.js@7.0.0": true
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/embed-legal.cjs",
@@ -26,10 +31,11 @@
     "lint": "eslint \"{engine,shared,src,tests}/**/*.{ts,tsx}\" vite.config.ts",
     "typecheck": "tsc --noEmit --incremental false",
     "verify:assets": "node scripts/verify-vendor-assets.cjs",
+    "verify:install-scripts": "node scripts/verify-install-script-policy.cjs",
     "media:onboarding": "node scripts/generate-onboarding-media.mjs",
     "verify:version": "node scripts/verify-version.cjs",
     "sync:version": "node scripts/sync-release-version.cjs",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run verify:assets && npm run verify:version",
+    "check": "npm run verify:install-scripts && npm run lint && npm run typecheck && npm test && npm run build && npm run verify:assets && npm run verify:version",
     "tauri": "tauri"
   },
   "dependencies": {
