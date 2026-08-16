@@ -3,6 +3,14 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.5.3 (2026-08-16)
+
+## What's Changed
+* fix(a11y): honor focus and reduced-motion preferences by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/50
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.5.2...v0.5.3
+
 ## 0.5.2 (2026-08-16)
 
 ## What's Changed
