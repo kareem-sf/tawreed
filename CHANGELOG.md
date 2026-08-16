@@ -3,6 +3,14 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.5.2 (2026-08-16)
+
+## What's Changed
+* fix(security): remediate production dependency advisories by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/44
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.5.1...v0.5.2
+
 ## 0.5.1 (2026-07-28)
 
 ## What's Changed
