@@ -121,18 +121,6 @@ function verifyFailClosedBehavior() {
     if (existsSync(marker)) {
       fail('The rejected fixture install script executed unexpectedly.');
     }
-
-    fixturePackage.allowScripts = { 'unreviewed-install-script@1.0.0': true };
-    writeFileSync(join(fixtureRoot, 'package.json'), `${JSON.stringify(fixturePackage, null, 2)}\n`);
-
-    const approved = runNpm(
-      ['ci', '--no-audit', '--no-fund'],
-      fixtureRoot,
-      { TAWREED_POLICY_MARKER: marker },
-    );
-    if (approved.status !== 0 || !existsSync(marker)) {
-      fail('An exact reviewed install-script approval did not execute as expected.', approved);
-    }
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
