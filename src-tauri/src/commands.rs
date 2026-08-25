@@ -817,11 +817,16 @@ pub fn read_input_file(path: String) -> Result<Value, String> {
 
 #[tauri::command]
 pub fn record_run(entry: Value) -> Result<i64, String> {
+    let layout = crate::storage::DataLayout::discover()?;
+    record_run_in(&layout, entry)
+}
+
+fn record_run_in(layout: &crate::storage::DataLayout, entry: Value) -> Result<i64, String> {
     let provider = entry
         .get("provider")
         .and_then(Value::as_str)
         .unwrap_or("offline");
-    if !matches!(provider, "offline" | "codex" | "anthropic") {
+    if !matches!(provider, "offline" | "codex" | "anthropic" | "compatible") {
         return Err("Invalid run provider".into());
     }
     let model = entry.get("model").and_then(Value::as_str).unwrap_or("");
@@ -829,131 +834,60 @@ pub fn record_run(entry: Value) -> Result<i64, String> {
         return Err("Run model identifier is too long".into());
     }
     let empty_trace = json!([]);
-    let trace_json = serde_json::to_string(
-        entry
-            .get("trace")
-            .filter(|trace| trace.is_array())
-            .unwrap_or(&empty_trace),
-    )
-    .map_err(|e| format!("serialize run trace: {e}"))?;
+    let trace = entry
+        .get("trace")
+        .filter(|trace| trace.is_array())
+        .unwrap_or(&empty_trace);
+    let trace_json = serde_json::to_vec(trace).map_err(|e| format!("serialize run trace: {e}"))?;
     if trace_json.len() > 256 * 1024 {
         return Err("Run trace exceeds the 256 KB limit".into());
     }
-    let conn = store::open_db()?;
-    conn.execute(
-        "INSERT INTO runs (started_at, file_name, file_hash, item_count, package_count,
-                           error_count, warning_count, output_file, duration_ms, llm_used,
-                           project_name, revision, package_folder, source_kind, ocr_used,
-                           provider, model, trace_json, memory_applied)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
-        rusqlite::params![
-            entry.get("startedAt").and_then(Value::as_str).unwrap_or(""),
-            entry.get("fileName").and_then(Value::as_str).unwrap_or(""),
-            entry.get("fileHash").and_then(Value::as_str).unwrap_or(""),
-            entry.get("itemCount").and_then(Value::as_i64).unwrap_or(0),
-            entry
-                .get("packageCount")
-                .and_then(Value::as_i64)
-                .unwrap_or(0),
-            entry.get("errorCount").and_then(Value::as_i64).unwrap_or(0),
-            entry
-                .get("warningCount")
-                .and_then(Value::as_i64)
-                .unwrap_or(0),
-            entry
-                .get("outputFile")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-            entry.get("durationMs").and_then(Value::as_i64).unwrap_or(0),
-            entry
-                .get("llmUsed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false) as i64,
-            entry
-                .get("projectName")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-            entry.get("revision").and_then(Value::as_i64).unwrap_or(0),
-            entry
-                .get("packageFolder")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-            entry
-                .get("sourceKind")
-                .and_then(Value::as_str)
-                .unwrap_or("xlsx"),
-            entry
-                .get("ocrUsed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false) as i64,
-            provider,
-            model,
-            trace_json,
-            entry
-                .get("memoryApplied")
-                .and_then(Value::as_i64)
-                .unwrap_or(0),
-        ],
-    )
-    .map_err(|e| format!("insert run: {e}"))?;
-    Ok(conn.last_insert_rowid())
+    let id = entry.get("id").and_then(Value::as_i64).unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0)
+    });
+    let record = json!({
+        "id": id,
+        "startedAt": entry.get("startedAt").and_then(Value::as_str).unwrap_or(""),
+        "fileName": entry.get("fileName").and_then(Value::as_str).unwrap_or(""),
+        "fileHash": entry.get("fileHash").and_then(Value::as_str).unwrap_or(""),
+        "itemCount": entry.get("itemCount").and_then(Value::as_i64).unwrap_or(0),
+        "packageCount": entry.get("packageCount").and_then(Value::as_i64).unwrap_or(0),
+        "errorCount": entry.get("errorCount").and_then(Value::as_i64).unwrap_or(0),
+        "warningCount": entry.get("warningCount").and_then(Value::as_i64).unwrap_or(0),
+        "outputFile": entry.get("outputFile").and_then(Value::as_str).unwrap_or(""),
+        "durationMs": entry.get("durationMs").and_then(Value::as_i64).unwrap_or(0),
+        "llmUsed": entry.get("llmUsed").and_then(Value::as_bool).unwrap_or(false),
+        "projectName": entry.get("projectName").and_then(Value::as_str).unwrap_or(""),
+        "revision": entry.get("revision").and_then(Value::as_i64).unwrap_or(0),
+        "packageFolder": entry.get("packageFolder").and_then(Value::as_str).unwrap_or(""),
+        "sourceKind": entry.get("sourceKind").and_then(Value::as_str).unwrap_or("xlsx"),
+        "ocrUsed": entry.get("ocrUsed").and_then(Value::as_bool).unwrap_or(false),
+        "provider": provider,
+        "model": model,
+        "trace": trace,
+        "memoryApplied": entry.get("memoryApplied").and_then(Value::as_i64).unwrap_or(0),
+    });
+    crate::storage::history::HistoryStore::new(layout.root.join("history").join("runs.jsonl"))
+        .record(&record)?;
+    Ok(id)
 }
 
 #[tauri::command]
 pub fn list_runs() -> Result<Vec<Value>, String> {
-    let conn = store::open_db()?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, started_at, file_name, file_hash, item_count, package_count,
-                    error_count, warning_count, output_file, duration_ms, llm_used,
-                    project_name, revision, package_folder, source_kind, ocr_used,
-                    provider, model, trace_json, memory_applied
-             FROM runs ORDER BY id DESC LIMIT 100",
-        )
-        .map_err(|e| format!("prepare: {e}"))?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "startedAt": r.get::<_, String>(1)?,
-                "fileName": r.get::<_, String>(2)?,
-                "fileHash": r.get::<_, String>(3)?,
-                "itemCount": r.get::<_, i64>(4)?,
-                "packageCount": r.get::<_, i64>(5)?,
-                "errorCount": r.get::<_, i64>(6)?,
-                "warningCount": r.get::<_, i64>(7)?,
-                "outputFile": r.get::<_, String>(8)?,
-                "durationMs": r.get::<_, i64>(9)?,
-                "llmUsed": r.get::<_, i64>(10)? == 1,
-                "projectName": r.get::<_, String>(11)?,
-                "revision": r.get::<_, i64>(12)?,
-                "packageFolder": r.get::<_, String>(13)?,
-                "sourceKind": r.get::<_, String>(14)?,
-                "ocrUsed": r.get::<_, i64>(15)? == 1,
-                "provider": r.get::<_, String>(16)?,
-                "model": r.get::<_, String>(17)?,
-                "trace": serde_json::from_str::<Value>(&r.get::<_, String>(18)?)
-                    .unwrap_or_else(|_| json!([])),
-                "memoryApplied": r.get::<_, i64>(19)?,
-            }))
-        })
-        .map_err(|e| format!("query runs: {e}"))?;
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| format!("row: {e}"))?);
-    }
-    Ok(out)
+    let layout = crate::storage::DataLayout::discover()?;
+    list_runs_in(&layout)
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClassificationMemoryEntry {
-    description_key: String,
-    package_code: String,
-    package_name_en: String,
-    package_name_ar: String,
-    updated_at: String,
+fn list_runs_in(layout: &crate::storage::DataLayout) -> Result<Vec<Value>, String> {
+    crate::storage::history::HistoryStore::new(layout.root.join("history").join("runs.jsonl"))
+        .list()
+        .map(|records| records.into_iter().take(100).collect())
 }
+
+pub use crate::storage::classification_memory::ClassificationMemoryEntry;
 
 fn valid_package_code(code: &str) -> bool {
     !code.is_empty()
@@ -968,15 +902,20 @@ pub fn save_classification_memory(
     project_name: String,
     entries: Vec<ClassificationMemoryEntry>,
 ) -> Result<usize, String> {
+    let layout = crate::storage::DataLayout::discover()?;
+    save_classification_memory_in(&layout, project_name, entries)
+}
+
+fn save_classification_memory_in(
+    layout: &crate::storage::DataLayout,
+    project_name: String,
+    entries: Vec<ClassificationMemoryEntry>,
+) -> Result<usize, String> {
     let project_name = safe_component(&project_name, 100);
     if entries.len() > 20_000 {
         return Err("Too many classification memory entries".into());
     }
-    let mut conn = store::open_db()?;
-    let transaction = conn
-        .transaction()
-        .map_err(|e| format!("start memory transaction: {e}"))?;
-    let mut saved = 0usize;
+    let mut normalized = Vec::with_capacity(entries.len());
     for entry in entries {
         let description_key = entry.description_key.trim();
         if description_key.is_empty()
@@ -990,64 +929,33 @@ pub fn save_classification_memory(
         {
             return Err("Invalid classification memory entry".into());
         }
-        transaction
-            .execute(
-                "INSERT INTO classification_memory (
-                    project_name, description_key, package_code, package_name_en,
-                    package_name_ar, updated_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6)
-                 ON CONFLICT(project_name, description_key) DO UPDATE SET
-                    package_code=excluded.package_code,
-                    package_name_en=excluded.package_name_en,
-                    package_name_ar=excluded.package_name_ar,
-                    updated_at=excluded.updated_at",
-                rusqlite::params![
-                    &project_name,
-                    description_key,
-                    entry.package_code.trim(),
-                    entry.package_name_en.trim(),
-                    entry.package_name_ar.trim(),
-                    entry.updated_at,
-                ],
-            )
-            .map_err(|e| format!("save classification memory: {e}"))?;
-        saved += 1;
+        normalized.push(ClassificationMemoryEntry {
+            description_key: description_key.to_string(),
+            package_code: entry.package_code.trim().to_string(),
+            package_name_en: entry.package_name_en.trim().to_string(),
+            package_name_ar: entry.package_name_ar.trim().to_string(),
+            updated_at: entry.updated_at,
+        });
     }
-    transaction
-        .commit()
-        .map_err(|e| format!("commit classification memory: {e}"))?;
-    Ok(saved)
+    crate::storage::classification_memory::ClassificationMemoryStore::new(layout.rules.clone())
+        .save(&project_name, &normalized)
 }
 
 #[tauri::command]
 pub fn list_classification_memory(
     project_name: String,
 ) -> Result<Vec<ClassificationMemoryEntry>, String> {
+    let layout = crate::storage::DataLayout::discover()?;
+    list_classification_memory_in(&layout, project_name)
+}
+
+fn list_classification_memory_in(
+    layout: &crate::storage::DataLayout,
+    project_name: String,
+) -> Result<Vec<ClassificationMemoryEntry>, String> {
     let project_name = safe_component(&project_name, 100);
-    let conn = store::open_db()?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT description_key, package_code, package_name_en, package_name_ar, updated_at
-             FROM classification_memory
-             WHERE project_name = ?1
-             ORDER BY updated_at DESC
-             LIMIT 20000",
-        )
-        .map_err(|e| format!("prepare classification memory: {e}"))?;
-    let entries = stmt
-        .query_map([project_name], |row| {
-            Ok(ClassificationMemoryEntry {
-                description_key: row.get(0)?,
-                package_code: row.get(1)?,
-                package_name_en: row.get(2)?,
-                package_name_ar: row.get(3)?,
-                updated_at: row.get(4)?,
-            })
-        })
-        .map_err(|e| format!("read classification memory: {e}"))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("read classification memory: {e}"))?;
-    Ok(entries)
+    crate::storage::classification_memory::ClassificationMemoryStore::new(layout.rules.clone())
+        .list(&project_name)
 }
 
 #[tauri::command]
@@ -1301,4 +1209,75 @@ pub fn get_settings() -> Value {
 #[tauri::command]
 pub fn set_setting(key: String, value: Value) -> Result<(), String> {
     store::set_setting(&key, value)
+}
+
+#[cfg(test)]
+mod history_storage_tests {
+    use super::{list_runs_in, record_run_in};
+    use crate::storage::DataLayout;
+    use serde_json::json;
+
+    #[test]
+    fn records_and_lists_runs_without_creating_a_sqlite_database() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+
+        let id = record_run_in(
+            &layout,
+            json!({
+                "id": 42,
+                "startedAt": "2026-01-03",
+                "fileName": "tower.xlsx",
+                "provider": "offline"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(id, 42);
+        let records = list_runs_in(&layout).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["id"], 42);
+        assert_eq!(records[0]["fileName"], "tower.xlsx");
+        assert!(layout.root.join("history/runs.jsonl").exists());
+        assert!(!layout.root.join("history.sqlite").exists());
+    }
+}
+
+#[cfg(test)]
+mod classification_memory_storage_tests {
+    use super::{
+        list_classification_memory_in, save_classification_memory_in, ClassificationMemoryEntry,
+    };
+    use crate::storage::DataLayout;
+
+    #[test]
+    fn saves_and_lists_memory_without_creating_a_sqlite_database() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+
+        let saved = save_classification_memory_in(
+            &layout,
+            "Tower".into(),
+            vec![ClassificationMemoryEntry {
+                description_key: "reinforced concrete".into(),
+                package_code: "CONC".into(),
+                package_name_en: "Concrete".into(),
+                package_name_ar: "خرسانة".into(),
+                updated_at: "2026-01-04".into(),
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(saved, 1);
+        let entries = list_classification_memory_in(&layout, "Tower".into()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&entries[0]).unwrap()["descriptionKey"],
+            "reinforced concrete"
+        );
+        assert!(layout.rules.join("classification-memory.jsonl").exists());
+        assert!(!layout.root.join("history.sqlite").exists());
+    }
 }

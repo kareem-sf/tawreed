@@ -1,9 +1,10 @@
 // Local state: ~/.tawreed — created on first run, reused forever after.
 // Layout:
 //   ~/.tawreed/connections.json plaintext provider connections
-//   ~/.tawreed/.env            legacy configuration (migration is handled separately)
+//   ~/.tawreed/.env            read-only legacy migration input when present
 //   ~/.tawreed/settings.json   non-secret app settings
-//   ~/.tawreed/history.sqlite  run history
+//   ~/.tawreed/history/        JSONL run history
+//   ~/.tawreed/rules/          text classification memory
 //   ~/.tawreed/output/         generated work-package workbooks
 //   ~/.tawreed/logs/app.log    diagnostic log
 use serde::Serialize;
@@ -36,19 +37,25 @@ pub fn output_dir() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("output"))
 }
 
-fn db_path() -> Result<PathBuf, String> {
-    Ok(data_dir()?.join("history.sqlite"))
-}
-
 fn log_path() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("logs").join("app.log"))
+}
+
+fn initialize_storage(layout: &crate::storage::DataLayout) -> Result<i64, String> {
+    layout.ensure()?;
+    fs::create_dir_all(layout.root.join("output"))
+        .map_err(|error| format!("create output dir: {error}"))?;
+    crate::storage::migration::migrate_legacy_state(layout)?;
+    crate::storage::history::HistoryStore::new(layout.root.join("history").join("runs.jsonl"))
+        .list()
+        .map(|records| records.len() as i64)
 }
 
 pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
     let dir = data_dir()?;
     let data_dir_existed = dir.exists();
-    fs::create_dir_all(dir.join("output")).map_err(|e| format!("create output dir: {e}"))?;
-    fs::create_dir_all(dir.join("logs")).map_err(|e| format!("create logs dir: {e}"))?;
+    let layout = crate::storage::DataLayout::from_root(dir.clone());
+    let run_count = initialize_storage(&layout)?;
     // Interrupted generations remain hidden temp directories; remove them on the next launch.
     if let Ok(projects) = fs::read_dir(dir.join("output")) {
         for project in projects.flatten().filter(|entry| entry.path().is_dir()) {
@@ -66,19 +73,6 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
         }
     }
 
-    let env_file = dir.join(".env");
-    if !env_file.exists() {
-        fs::write(
-            &env_file,
-            "# Tawreed local fallback configuration — this file stays on your machine.\n\
-             # Keys saved in Settings use the operating system credential store when available.\n\
-             # A manually supplied or compatibility fallback key can be placed here:\n\
-             ANTHROPIC_API_KEY=\n",
-        )
-        .map_err(|e| format!("create .env template: {e}"))?;
-        #[cfg(unix)]
-        set_private_permissions(&env_file);
-    }
     let settings = dir.join("settings.json");
     let settings_existed = settings.exists();
     let current_settings = fs::read_to_string(&settings)
@@ -90,11 +84,6 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
         write_settings(&settings, &migrated_settings)
             .map_err(|e| format!("create or migrate settings: {e}"))?;
     }
-
-    let conn = open_db()?;
-    let run_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM runs", [], |r| r.get(0))
-        .unwrap_or(0);
 
     let codex = crate::codex::detect(false);
     let has_key = api_key().is_some();
@@ -204,103 +193,6 @@ fn write_settings(path: &std::path::Path, settings: &serde_json::Value) -> Resul
     let tmp = path.with_file_name("settings.json.tmp");
     std::fs::write(&tmp, serialized).map_err(|e| format!("write settings: {e}"))?;
     replace_file(&tmp, path).map_err(|e| format!("replace settings: {e}"))
-}
-
-pub fn open_db() -> Result<rusqlite::Connection, String> {
-    let conn =
-        rusqlite::Connection::open(db_path()?).map_err(|e| format!("open history db: {e}"))?;
-    // A fresh connection is opened per call — wait on locks instead of surfacing
-    // SQLITE_BUSY under concurrent commands, and let readers proceed during a write.
-    conn.execute_batch("PRAGMA busy_timeout = 3000; PRAGMA journal_mode = WAL;")
-        .map_err(|e| format!("configure history db: {e}"))?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            started_at TEXT NOT NULL,
-            file_name TEXT NOT NULL,
-            file_hash TEXT NOT NULL,
-            item_count INTEGER NOT NULL,
-            package_count INTEGER NOT NULL,
-            error_count INTEGER NOT NULL,
-            warning_count INTEGER NOT NULL,
-            output_file TEXT NOT NULL,
-            duration_ms INTEGER NOT NULL,
-            llm_used INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS classification_memory (
-            project_name TEXT NOT NULL,
-            description_key TEXT NOT NULL,
-            package_code TEXT NOT NULL,
-            package_name_en TEXT NOT NULL,
-            package_name_ar TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (project_name, description_key)
-        );",
-    )
-    .map_err(|e| format!("init history db: {e}"))?;
-    migrate_runs_table(&conn)?;
-    Ok(conn)
-}
-
-/// Additive migrations for installations created before project revisions and PDF support.
-/// Inspect the schema itself instead of matching ALTER TABLE error strings — a genuine
-/// failure must surface here, not be logged away while later INSERTs break opaquely.
-fn migrate_runs_table(conn: &rusqlite::Connection) -> Result<(), String> {
-    let existing: std::collections::HashSet<String> = {
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(runs)")
-            .map_err(|e| format!("inspect history db schema: {e}"))?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .map_err(|e| format!("inspect history db schema: {e}"))?
-            .collect::<Result<_, _>>()
-            .map_err(|e| format!("inspect history db schema: {e}"))?;
-        rows
-    };
-    for (column, migration) in [
-        (
-            "project_name",
-            "ALTER TABLE runs ADD COLUMN project_name TEXT NOT NULL DEFAULT ''",
-        ),
-        (
-            "revision",
-            "ALTER TABLE runs ADD COLUMN revision INTEGER NOT NULL DEFAULT 0",
-        ),
-        (
-            "package_folder",
-            "ALTER TABLE runs ADD COLUMN package_folder TEXT NOT NULL DEFAULT ''",
-        ),
-        (
-            "source_kind",
-            "ALTER TABLE runs ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'xlsx'",
-        ),
-        (
-            "ocr_used",
-            "ALTER TABLE runs ADD COLUMN ocr_used INTEGER NOT NULL DEFAULT 0",
-        ),
-        (
-            "provider",
-            "ALTER TABLE runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'offline'",
-        ),
-        (
-            "model",
-            "ALTER TABLE runs ADD COLUMN model TEXT NOT NULL DEFAULT ''",
-        ),
-        (
-            "trace_json",
-            "ALTER TABLE runs ADD COLUMN trace_json TEXT NOT NULL DEFAULT '[]'",
-        ),
-        (
-            "memory_applied",
-            "ALTER TABLE runs ADD COLUMN memory_applied INTEGER NOT NULL DEFAULT 0",
-        ),
-    ] {
-        if !existing.contains(column) {
-            conn.execute(migration, [])
-                .map_err(|e| format!("migrate history db ({column}): {e}"))?;
-        }
-    }
-    Ok(())
 }
 
 pub fn api_key() -> Option<String> {
@@ -419,14 +311,6 @@ pub fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Re
     }
 }
 
-/// The .env holds the API key — it must be owner-only on Unix. `OpenOptions::mode` only
-/// applies when a file is first created, so permissions are (re)applied explicitly here.
-#[cfg(unix)]
-fn set_private_permissions(path: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-}
-
 pub fn write_env_key(value: Option<&str>) -> Result<(), String> {
     let layout = crate::storage::DataLayout::discover()?;
     let store = crate::storage::connections::ConnectionStore::new(layout.connections);
@@ -482,30 +366,21 @@ pub fn log_line(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate_runs_table, migrate_settings};
+    use super::{initialize_storage, migrate_settings};
+    use crate::storage::DataLayout;
 
     #[test]
-    fn migrations_add_only_missing_columns_and_are_idempotent() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                started_at TEXT NOT NULL
-            );",
-        )
-        .unwrap();
-        migrate_runs_table(&conn).unwrap();
-        // A second run must not trip over the columns it added the first time.
-        migrate_runs_table(&conn).unwrap();
-        let has_revision: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('runs') WHERE name = 'revision'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|count| count == 1)
-            .unwrap();
-        assert!(has_revision);
+    fn initializes_text_storage_without_creating_legacy_files() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+
+        let run_count = initialize_storage(&layout).unwrap();
+
+        assert_eq!(run_count, 0);
+        assert!(layout.root.join("output").is_dir());
+        assert!(layout.root.join("migrations.json").is_file());
+        assert!(!layout.root.join(".env").exists());
+        assert!(!layout.root.join("history.sqlite").exists());
     }
 
     #[test]
