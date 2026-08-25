@@ -7,7 +7,9 @@ const LOCALE_STORAGE_KEY = 'tawreed-locale';
 
 function storedLocale(): 'en' | 'ar' {
   try {
-    const saved = localStorage.getItem(LOCALE_STORAGE_KEY);
+    const saved = typeof window === 'undefined'
+      ? null
+      : window.localStorage.getItem(LOCALE_STORAGE_KEY);
     return saved === 'ar' ? 'ar' : 'en';
   } catch {
     return 'en';
@@ -26,7 +28,9 @@ i18n.use(initReactI18next).init({
 
 i18n.on('languageChanged', (language) => {
   try {
-    localStorage.setItem(LOCALE_STORAGE_KEY, language);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, language);
+    }
   } catch {
     // Persistence is an optional enhancement in restricted/test contexts.
   }
