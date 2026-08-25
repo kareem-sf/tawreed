@@ -5,7 +5,7 @@ mod json;
 mod layout;
 pub mod migration;
 pub mod projects;
-mod secure_dir;
+pub(crate) mod secure_dir;
 
 pub use json::{append_jsonl, atomic_write_json};
 pub use layout::DataLayout;

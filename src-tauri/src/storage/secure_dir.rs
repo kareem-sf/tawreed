@@ -24,10 +24,22 @@ impl SecureDir {
         })
     }
 
+    pub(crate) fn open_private_root(path: &Path) -> std::io::Result<Self> {
+        let directory = Self::open_root(path)?;
+        directory.restrict_private_directory()?;
+        Ok(directory)
+    }
+
     pub(crate) fn open_dir(&self, name: &str) -> std::io::Result<Self> {
         Ok(Self {
             inner: self.inner.open_dir_nofollow(name)?,
         })
+    }
+
+    pub(crate) fn open_private_dir(&self, name: &str) -> std::io::Result<Self> {
+        let directory = self.open_dir(name)?;
+        directory.restrict_private_directory()?;
+        Ok(directory)
     }
 
     pub(crate) fn open_or_create_dir(&self, name: &str) -> std::io::Result<Self> {
@@ -44,6 +56,18 @@ impl SecureDir {
             }
             Err(error) => Err(error),
         }
+    }
+
+    pub(crate) fn open_or_create_private_dir(&self, name: &str) -> std::io::Result<Self> {
+        let directory = self.open_or_create_dir(name)?;
+        directory.restrict_private_directory()?;
+        Ok(directory)
+    }
+
+    pub(crate) fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self {
+            inner: self.inner.try_clone()?,
+        })
     }
 
     pub(crate) fn create_dir(&self, name: &str) -> std::io::Result<()> {
@@ -72,6 +96,106 @@ impl SecureDir {
         Ok(bytes)
     }
 
+    pub(crate) fn read_bytes_limited(&self, name: &str, maximum: u64) -> std::io::Result<Vec<u8>> {
+        let file = self.open_private_read(name)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.len() > maximum {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "bounded private file is invalid",
+            ));
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(maximum + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > maximum {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "bounded private file is too large",
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub(crate) fn open_private_read(&self, name: &str) -> std::io::Result<cap_std::fs::File> {
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        #[cfg(windows)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+            options.share_mode(FILE_SHARE_READ);
+        }
+        let file = self.inner.open_with(name, &options)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a regular private file",
+            ));
+        }
+        Ok(file)
+    }
+
+    pub(crate) fn open_or_create_private_rw(
+        &self,
+        name: &str,
+    ) -> std::io::Result<cap_std::fs::File> {
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .write(true)
+            .create(true)
+            .follow(FollowSymlinks::No);
+        configure_private_file_options(&mut options, 0o600);
+        let file = self.inner.open_with(name, &options)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a regular private file",
+            ));
+        }
+        restrict_private_file(&file, 0o600)?;
+        Ok(file)
+    }
+
+    pub(crate) fn create_private_file(
+        &self,
+        name: &str,
+        executable: bool,
+    ) -> std::io::Result<cap_std::fs::File> {
+        let mode = if executable { 0o700 } else { 0o600 };
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No);
+        configure_private_file_options(&mut options, mode);
+        let file = self.inner.open_with(name, &options)?;
+        restrict_private_file(&file, mode)?;
+        Ok(file)
+    }
+
+    pub(crate) fn remove_file_or_symlink(&self, name: &str) -> std::io::Result<()> {
+        self.inner.remove_file_or_symlink(name)
+    }
+
+    pub(crate) fn remove_dir_all(&self, name: &str) -> std::io::Result<()> {
+        self.inner.remove_dir_all(name)
+    }
+
+    pub(crate) fn rename_to(
+        &self,
+        from: &str,
+        destination: &SecureDir,
+        to: &str,
+    ) -> std::io::Result<()> {
+        self.inner.rename(from, &destination.inner, to)
+    }
+
+    pub(crate) fn symlink_metadata(&self, name: &str) -> std::io::Result<cap_std::fs::Metadata> {
+        self.inner.symlink_metadata(name)
+    }
+
     pub(crate) fn atomic_write_json<T: serde::Serialize>(
         &self,
         name: &str,
@@ -88,12 +212,7 @@ impl SecureDir {
                 .write(true)
                 .create_new(true)
                 .follow(FollowSymlinks::No);
-            #[cfg(unix)]
-            {
-                use cap_std::fs::OpenOptionsExt;
-
-                options.mode(0o600);
-            }
+            configure_private_file_options(&mut options, 0o600);
             let mut file = match self.inner.open_with(&temporary_name, &options) {
                 Ok(file) => file,
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -121,4 +240,43 @@ impl SecureDir {
 
         Err("temporary json collision".into())
     }
+
+    fn restrict_private_directory(&self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            use cap_std::fs::PermissionsExt;
+
+            self.inner
+                .set_permissions(".", cap_std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(())
+    }
+}
+
+fn configure_private_file_options(options: &mut OpenOptions, mode: u32) {
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+
+        options.mode(mode);
+    }
+    #[cfg(windows)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+
+        let _ = mode;
+        options.share_mode(0);
+    }
+}
+
+fn restrict_private_file(file: &cap_std::fs::File, mode: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use cap_std::fs::PermissionsExt;
+
+        file.set_permissions(cap_std::fs::Permissions::from_mode(mode))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (file, mode);
+    Ok(())
 }

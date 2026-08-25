@@ -112,7 +112,8 @@ pub fn validate_manifest(manifest: &RuntimeManifest) -> Result<(), String> {
 pub fn validate_asset(asset: &RuntimeAsset) -> Result<(), String> {
     let version = stable_canonical_version(&asset.version)
         .ok_or_else(|| "invalid_runtime_asset".to_string())?;
-    if version.to_string() != asset.version
+    if asset.version.len() > 40
+        || version.to_string() != asset.version
         || !valid_official_release_url(asset, &version)
         || asset.sha256.len() != 64
         || !asset
@@ -203,7 +204,10 @@ fn valid_entrypoint_component(component: &str) -> bool {
 
     let stem = component.split('.').next().unwrap_or_default();
     let upper_stem = stem.to_ascii_uppercase();
-    if matches!(upper_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+    if matches!(
+        upper_stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
         return false;
     }
     for prefix in ["COM", "LPT"] {
@@ -379,6 +383,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_asset_versions_that_exceed_the_shared_status_contract() {
+        let version = "18446744073709551615.18446744073709551615.1".to_string();
+        assert!(version.len() > 40);
+        let mut asset = valid_asset();
+        asset.version = version.clone();
+        asset.url = format!(
+            "https://github.com/kareem-sf/tawreed/releases/download/v{version}/runtime.zip"
+        );
+
+        assert_eq!(validate_asset(&asset).unwrap_err(), "invalid_runtime_asset");
+    }
+
+    #[test]
     fn rejects_invalid_digests_sizes_archives_and_entrypoint_paths() {
         for digest in ["A".repeat(64), "g".repeat(64), "a".repeat(63)] {
             let mut asset = valid_asset();
@@ -431,6 +448,8 @@ mod tests {
             "agent/PRN.exe",
             "agent/aux.log",
             "agent/NUL",
+            "agent/CONIN$",
+            "agent/conout$.log",
             "agent/com1.exe",
             "agent/COM9",
             "agent/COM¹",

@@ -1,23 +1,29 @@
-use std::io::Read as _;
+use std::collections::BTreeMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use super::manifest::{valid_entrypoint, validate_asset, RuntimeAsset};
-use crate::storage::{atomic_write_json, DataLayout};
+use crate::storage::secure_dir::SecureDir;
+use crate::storage::DataLayout;
 
 const MAX_ARCHIVE_ENTRIES: usize = 10_000;
 const MAX_EXPANDED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
+const MAX_RUNTIME_STATE_BYTES: u64 = 16 * 1024;
+const MAX_RUNTIME_METADATA_BYTES: u64 = 4 * 1024;
+const RUNTIME_STATE_FILE: &str = "runtime-state.json";
+const RUNTIME_METADATA_FILE: &str = "runtime-metadata.json";
 
 #[async_trait::async_trait]
 pub trait RuntimeSource: Send + Sync {
     async fn download(
         &self,
         asset: &RuntimeAsset,
-        destination: &Path,
+        destination: &mut tokio::fs::File,
         resume_from: u64,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
     ) -> Result<(), String>;
@@ -45,12 +51,10 @@ impl RuntimeSource for HttpRuntimeSource {
     async fn download(
         &self,
         asset: &RuntimeAsset,
-        destination: &Path,
+        destination: &mut tokio::fs::File,
         resume_from: u64,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
     ) -> Result<(), String> {
-        use tokio::io::AsyncWriteExt;
-
         let mut request = self.client.get(&asset.url);
         if resume_from > 0 {
             request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
@@ -89,16 +93,21 @@ impl RuntimeSource for HttpRuntimeSource {
             return Err("runtime_download_too_large".into());
         }
 
-        let mut options = tokio::fs::OpenOptions::new();
-        options
-            .create(true)
-            .write(true)
-            .append(append)
-            .truncate(!append);
-        let mut file = options
-            .open(destination)
-            .await
-            .map_err(|_| "runtime_download_failed".to_string())?;
+        if append {
+            destination
+                .seek(std::io::SeekFrom::Start(resume_from))
+                .await
+                .map_err(|_| "runtime_download_failed".to_string())?;
+        } else {
+            destination
+                .set_len(0)
+                .await
+                .map_err(|_| "runtime_download_failed".to_string())?;
+            destination
+                .seek(std::io::SeekFrom::Start(0))
+                .await
+                .map_err(|_| "runtime_download_failed".to_string())?;
+        }
         let mut received = 0_u64;
         while let Some(chunk) = response
             .chunk()
@@ -109,17 +118,20 @@ impl RuntimeSource for HttpRuntimeSource {
                 .checked_add(chunk.len() as u64)
                 .ok_or_else(|| "runtime_download_too_large".to_string())?;
             if received > response_limit || base + received > asset.size {
-                file.set_len(0)
+                destination
+                    .set_len(0)
                     .await
                     .map_err(|_| "runtime_download_failed".to_string())?;
                 return Err("runtime_download_too_large".into());
             }
-            file.write_all(&chunk)
+            destination
+                .write_all(&chunk)
                 .await
                 .map_err(|_| "runtime_download_failed".to_string())?;
             progress(base + received, asset.size);
         }
-        file.sync_all()
+        destination
+            .sync_all()
             .await
             .map_err(|_| "runtime_download_failed".to_string())?;
         Ok(())
@@ -188,6 +200,156 @@ pub(crate) struct InstallProgress {
     pub progress: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeRecord {
+    version: String,
+    target: String,
+    entrypoint: String,
+    sha256: String,
+    size: u64,
+}
+
+impl RuntimeRecord {
+    fn from_asset(asset: &RuntimeAsset) -> Result<Self, String> {
+        Ok(Self {
+            version: asset.version.clone(),
+            target: current_target_key()?.into(),
+            entrypoint: asset.entrypoint.clone(),
+            sha256: asset.sha256.clone(),
+            size: asset.size,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeState {
+    schema_version: u32,
+    generation: u64,
+    current: Option<RuntimeRecord>,
+    previous: Option<RuntimeRecord>,
+}
+
+impl Default for RuntimeState {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            generation: 0,
+            current: None,
+            previous: None,
+        }
+    }
+}
+
+struct RuntimeFs {
+    layout: DataLayout,
+    runtime: SecureDir,
+    versions: SecureDir,
+    staging: SecureDir,
+}
+
+impl RuntimeFs {
+    fn open(layout: &DataLayout) -> Result<Self, String> {
+        let root = SecureDir::open_private_root(&layout.root).map_err(|_| "unsafe_runtime_root")?;
+        let runtime = root
+            .open_or_create_private_dir("runtime")
+            .map_err(|_| "unsafe_runtime_root")?;
+        let versions = runtime
+            .open_or_create_private_dir("versions")
+            .map_err(|_| "unsafe_runtime_root")?;
+        let staging = root
+            .open_or_create_private_dir("staging")
+            .map_err(|_| "unsafe_runtime_root")?;
+        Ok(Self {
+            layout: layout.clone(),
+            runtime,
+            versions,
+            staging,
+        })
+    }
+
+    fn read_state(&self) -> Result<RuntimeState, String> {
+        let bytes = match self
+            .runtime
+            .read_bytes_limited(RUNTIME_STATE_FILE, MAX_RUNTIME_STATE_BYTES)
+        {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(RuntimeState::default())
+            }
+            Err(_) => return Err("invalid_runtime_state".into()),
+        };
+        let state: RuntimeState =
+            serde_json::from_slice(&bytes).map_err(|_| "invalid_runtime_state")?;
+        if state.schema_version != 1 {
+            return Err("invalid_runtime_state".into());
+        }
+        if let Some(record) = &state.current {
+            validate_record(record)?;
+        }
+        if let Some(record) = &state.previous {
+            validate_record(record)?;
+        }
+        Ok(state)
+    }
+
+    fn write_state(&self, state: &RuntimeState) -> Result<(), String> {
+        run_test_before_state_publish_hook().map_err(|_| "runtime_activation_failed")?;
+        self.runtime
+            .atomic_write_json(RUNTIME_STATE_FILE, state)
+            .map_err(|_| "runtime_activation_failed".to_string())
+    }
+
+    fn read_version_metadata(&self, version: &str) -> Result<RuntimeRecord, String> {
+        let directory = self
+            .versions
+            .open_private_dir(version)
+            .map_err(|_| "runtime_version_unavailable")?;
+        let bytes = directory
+            .read_bytes_limited(RUNTIME_METADATA_FILE, MAX_RUNTIME_METADATA_BYTES)
+            .map_err(|_| "invalid_runtime_metadata")?;
+        let record: RuntimeRecord =
+            serde_json::from_slice(&bytes).map_err(|_| "invalid_runtime_metadata")?;
+        validate_record(&record)?;
+        if record.version != version {
+            return Err("invalid_runtime_metadata".into());
+        }
+        Ok(record)
+    }
+
+    fn version_exists(&self, version: &str) -> Result<bool, String> {
+        match self.versions.symlink_metadata(version) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(_) => Err("unsafe_runtime_version".into()),
+        }
+    }
+
+    fn remove_version_entry(&self, version: &str) -> Result<(), String> {
+        let metadata = self
+            .versions
+            .symlink_metadata(version)
+            .map_err(|_| "runtime_orphan_cleanup_failed")?;
+        if metadata.is_dir() {
+            self.versions
+                .remove_dir_all(version)
+                .map_err(|_| "runtime_orphan_cleanup_failed".to_string())
+        } else {
+            self.versions
+                .remove_file_or_symlink(version)
+                .map_err(|_| "runtime_orphan_cleanup_failed".to_string())
+        }
+    }
+
+    fn active_path(&self, record: &RuntimeRecord) -> PathBuf {
+        self.layout
+            .runtime_versions
+            .join(&record.version)
+            .join(&record.entrypoint)
+    }
+}
+
 pub struct RuntimeInstaller<S> {
     layout: DataLayout,
     source: S,
@@ -208,141 +370,263 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
         progress: &(dyn Fn(InstallProgress) + Send + Sync),
     ) -> Result<PathBuf, String> {
         validate_asset(asset)?;
-        self.layout.ensure()?;
+        if asset.version.len() > 40 {
+            return Err("invalid_runtime_asset".into());
+        }
+        let fs = RuntimeFs::open(&self.layout)?;
+        let state = fs.read_state()?;
+        let record = RuntimeRecord::from_asset(asset)?;
 
-        if let Some(current) = read_pointer_if_exists(&self.layout.runtime.join("current.json"))? {
-            if current.version == asset.version
-                && current.target == current_target_key()?
-                && current.entrypoint == asset.entrypoint
-            {
-                progress(InstallProgress {
-                    phase: InstallPhase::Downloading,
-                    progress: 80.0,
-                });
-                progress(InstallProgress {
-                    phase: InstallPhase::Verifying,
-                    progress: 85.0,
-                });
-                let entrypoint = resolve_pointer(&self.layout, &current)?;
-                progress(InstallProgress {
-                    phase: InstallPhase::Activating,
-                    progress: 95.0,
-                });
-                run_health_check(&entrypoint).await?;
-                return Ok(self.layout.runtime_versions.join(&asset.version));
+        if state
+            .current
+            .as_ref()
+            .is_some_and(|current| current == &record)
+        {
+            report_reuse_progress(progress);
+            verify_installed_version(&fs, &record).await?;
+            return Ok(fs.layout.runtime_versions.join(&record.version));
+        }
+
+        if fs.version_exists(&record.version)? {
+            let referenced =
+                state.current.as_ref() == Some(&record) || state.previous.as_ref() == Some(&record);
+            match fs.read_version_metadata(&record.version) {
+                Ok(metadata) if metadata == record => {
+                    report_reuse_progress(progress);
+                    verify_installed_version(&fs, &record).await?;
+                    publish_active_record(&fs, state, record.clone())?;
+                    return Ok(fs.layout.runtime_versions.join(&record.version));
+                }
+                _ if referenced => return Err("invalid_runtime_metadata".into()),
+                _ => fs.remove_version_entry(&record.version)?,
             }
         }
 
-        let part = self.layout.staging.join(format!(
-            "{}-{}.zip.part",
-            current_target_key()?,
-            asset.version
-        ));
-        let mut existing = regular_file_len_or_zero(&part)?;
+        let part_name = format!("{}-{}.zip.part", current_target_key()?, asset.version);
+        let archive = fs
+            .staging
+            .open_or_create_private_rw(&part_name)
+            .map_err(|_| "unsafe_runtime_download_path")?;
+        let mut existing = archive
+            .metadata()
+            .map_err(|_| "runtime_download_failed")?
+            .len();
         if existing > asset.size {
-            std::fs::remove_file(&part).map_err(|_| "runtime_download_failed".to_string())?;
+            archive.set_len(0).map_err(|_| "runtime_download_failed")?;
             existing = 0;
         }
         report_download_progress(progress, existing, asset.size);
+        let mut archive = tokio::fs::File::from_std(archive.into_std());
         if existing < asset.size {
             let download_progress = |downloaded, total| {
                 report_download_progress(progress, downloaded, total);
             };
             self.source
-                .download(asset, &part, existing, &download_progress)
+                .download(asset, &mut archive, existing, &download_progress)
                 .await?;
         }
+        archive
+            .sync_all()
+            .await
+            .map_err(|_| "runtime_download_failed")?;
+        let mut archive = archive.into_std().await;
         progress(InstallProgress {
             phase: InstallPhase::Verifying,
             progress: 85.0,
         });
-        if let Err(error) = verify_archive(&part, asset).await {
+        if let Err(error) = verify_archive_handle(&mut archive, asset) {
             if error == "runtime_hash_mismatch" {
-                std::fs::remove_file(&part)
-                    .map_err(|_| "runtime_download_cleanup_failed".to_string())?;
+                drop(archive);
+                fs.staging
+                    .remove_file_or_symlink(&part_name)
+                    .map_err(|_| "runtime_download_cleanup_failed")?;
             }
             return Err(error);
         }
+        run_test_after_archive_verify_hook();
 
         progress(InstallProgress {
             phase: InstallPhase::Activating,
             progress: 95.0,
         });
-        let staging_root = self
+        let staging_name = format!("runtime-{}.tmp", asset.version);
+        match fs.staging.symlink_metadata(&staging_name) {
+            Ok(metadata) if metadata.is_dir() => fs
+                .staging
+                .remove_dir_all(&staging_name)
+                .map_err(|_| "runtime_staging_failed")?,
+            Ok(_) => return Err("unsafe_runtime_staging".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("runtime_staging_failed".into()),
+        }
+        let staging_root = fs
+            .staging
+            .open_or_create_private_dir(&staging_name)
+            .map_err(|_| "runtime_staging_failed")?;
+        if let Err(error) = extract_archive(&mut archive, &staging_root) {
+            drop(staging_root);
+            let _ = fs.staging.remove_dir_all(&staging_name);
+            return Err(error);
+        }
+        staging_root
+            .atomic_write_json(RUNTIME_METADATA_FILE, &record)
+            .map_err(|_| "runtime_metadata_write_failed")?;
+
+        let staged_entrypoint_path = fs
             .layout
             .staging
-            .join(format!("runtime-{}.tmp", asset.version));
-        reset_staging_directory(&staging_root)?;
-        if let Err(error) = extract_archive(&part, &staging_root) {
-            let _ = std::fs::remove_dir_all(&staging_root);
+            .join(&staging_name)
+            .join(&asset.entrypoint);
+        if let Err(error) =
+            run_health_check(&staging_root, &asset.entrypoint, &staged_entrypoint_path).await
+        {
+            drop(staging_root);
+            let _ = fs.staging.remove_dir_all(&staging_name);
             return Err(error);
         }
+        drop(staging_root);
 
-        let staged_entrypoint = staging_root.join(&asset.entrypoint);
-        if let Err(error) = run_health_check(&staged_entrypoint).await {
-            let _ = std::fs::remove_dir_all(&staging_root);
-            return Err(error);
-        }
-
-        let active_root = self.layout.runtime_versions.join(&asset.version);
-        if active_root.exists() {
-            let _ = std::fs::remove_dir_all(&staging_root);
+        if fs.version_exists(&asset.version)? {
+            let _ = fs.staging.remove_dir_all(&staging_name);
             return Err("runtime_version_already_exists".into());
         }
-        std::fs::rename(&staging_root, &active_root)
-            .map_err(|_| "runtime_activation_failed".to_string())?;
-
-        let pointer = RuntimePointer {
-            version: asset.version.clone(),
-            target: current_target_key()?.into(),
-            entrypoint: asset.entrypoint.clone(),
-        };
-        let current_path = self.layout.runtime.join("current.json");
-        let activation = (|| {
-            if let Some(current) = read_pointer_if_exists(&current_path)? {
-                atomic_write_json(&self.layout.runtime.join("previous.json"), &current)
-                    .map_err(|_| "runtime_activation_failed".to_string())?;
-            }
-            atomic_write_json(&current_path, &pointer)
-                .map_err(|_| "runtime_activation_failed".to_string())
-        })();
-        if let Err(error) = activation {
-            std::fs::remove_dir_all(&active_root)
-                .map_err(|_| "runtime_activation_cleanup_failed".to_string())?;
-            return Err(error);
-        }
-        Ok(active_root)
+        fs.staging
+            .rename_to(&staging_name, &fs.versions, &asset.version)
+            .map_err(|_| "runtime_activation_failed")?;
+        publish_active_record(&fs, state, record)?;
+        Ok(fs.layout.runtime_versions.join(&asset.version))
     }
 
     pub fn active_entrypoint(&self) -> Result<PathBuf, String> {
-        let pointer = read_pointer_if_exists(&self.layout.runtime.join("current.json"))?
+        let fs = RuntimeFs::open(&self.layout)?;
+        let record = fs
+            .read_state()?
+            .current
             .ok_or_else(|| "runtime_not_installed".to_string())?;
-        resolve_pointer(&self.layout, &pointer)
+        validate_installed_record(&fs, &record)?;
+        Ok(fs.active_path(&record))
     }
 
     pub(crate) fn active_version(&self) -> Result<String, String> {
-        let pointer = read_pointer_if_exists(&self.layout.runtime.join("current.json"))?
+        let fs = RuntimeFs::open(&self.layout)?;
+        let record = fs
+            .read_state()?
+            .current
             .ok_or_else(|| "runtime_not_installed".to_string())?;
-        resolve_pointer(&self.layout, &pointer)?;
-        Ok(pointer.version)
+        validate_installed_record(&fs, &record)?;
+        Ok(record.version)
     }
 
     pub async fn rollback(&self) -> Result<PathBuf, String> {
-        let current_path = self.layout.runtime.join("current.json");
-        let previous_path = self.layout.runtime.join("previous.json");
-        let current = read_pointer_if_exists(&current_path)?
+        let fs = RuntimeFs::open(&self.layout)?;
+        let state = fs.read_state()?;
+        let current = state
+            .current
+            .clone()
             .ok_or_else(|| "runtime_not_installed".to_string())?;
-        let previous = read_pointer_if_exists(&previous_path)?
+        let previous = state
+            .previous
+            .clone()
             .ok_or_else(|| "runtime_rollback_unavailable".to_string())?;
-        let entrypoint = resolve_pointer(&self.layout, &previous)?;
-        run_health_check(&entrypoint).await?;
-
-        atomic_write_json(&current_path, &previous)
-            .map_err(|_| "runtime_activation_failed".to_string())?;
-        atomic_write_json(&previous_path, &current)
-            .map_err(|_| "runtime_activation_failed".to_string())?;
+        validate_installed_record(&fs, &previous)?;
+        let entrypoint = fs.active_path(&previous);
+        let version_directory = fs
+            .versions
+            .open_private_dir(&previous.version)
+            .map_err(|_| "runtime_version_unavailable")?;
+        run_health_check(&version_directory, &previous.entrypoint, &entrypoint).await?;
+        let generation = state
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| "invalid_runtime_state".to_string())?;
+        fs.write_state(&RuntimeState {
+            schema_version: 1,
+            generation,
+            current: Some(previous),
+            previous: Some(current),
+        })?;
         Ok(entrypoint)
     }
+}
+
+fn report_reuse_progress(progress: &(dyn Fn(InstallProgress) + Send + Sync)) {
+    for (phase, value) in [
+        (InstallPhase::Downloading, 80.0),
+        (InstallPhase::Verifying, 85.0),
+        (InstallPhase::Activating, 95.0),
+    ] {
+        progress(InstallProgress {
+            phase,
+            progress: value,
+        });
+    }
+}
+
+fn publish_active_record(
+    fs: &RuntimeFs,
+    state: RuntimeState,
+    record: RuntimeRecord,
+) -> Result<(), String> {
+    if state.current.as_ref() == Some(&record) {
+        return Ok(());
+    }
+    let generation = state
+        .generation
+        .checked_add(1)
+        .ok_or_else(|| "invalid_runtime_state".to_string())?;
+    fs.write_state(&RuntimeState {
+        schema_version: 1,
+        generation,
+        previous: state.current,
+        current: Some(record),
+    })
+}
+
+fn validate_record(record: &RuntimeRecord) -> Result<(), String> {
+    let version = semver::Version::parse(&record.version).map_err(|_| "invalid_runtime_state")?;
+    if record.target != current_target_key()?
+        || record.version.len() > 40
+        || version.to_string() != record.version
+        || !version.pre.is_empty()
+        || !version.build.is_empty()
+        || !valid_entrypoint(&record.entrypoint)
+        || record.sha256.len() != 64
+        || !record
+            .sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || record.size == 0
+    {
+        return Err("invalid_runtime_state".into());
+    }
+    Ok(())
+}
+
+fn validate_installed_record(fs: &RuntimeFs, record: &RuntimeRecord) -> Result<(), String> {
+    validate_record(record)?;
+    if fs.read_version_metadata(&record.version)? != *record {
+        return Err("invalid_runtime_metadata".into());
+    }
+    let directory = fs
+        .versions
+        .open_private_dir(&record.version)
+        .map_err(|_| "runtime_version_unavailable")?;
+    open_entrypoint(&directory, &record.entrypoint)?;
+    Ok(())
+}
+
+async fn verify_installed_version(fs: &RuntimeFs, record: &RuntimeRecord) -> Result<(), String> {
+    validate_installed_record(fs, record)?;
+    let version_directory = fs
+        .versions
+        .open_private_dir(&record.version)
+        .map_err(|_| "runtime_version_unavailable")?;
+    run_health_check(
+        &version_directory,
+        &record.entrypoint,
+        &fs.active_path(record),
+    )
+    .await
 }
 
 fn report_download_progress(
@@ -361,46 +645,23 @@ fn report_download_progress(
     });
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RuntimePointer {
-    version: String,
-    target: String,
-    entrypoint: String,
-}
-
-fn regular_file_len_or_zero(path: &Path) -> Result<u64, String> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(_) => return Err("runtime_download_failed".into()),
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("unsafe_runtime_download_path".into());
-    }
-    Ok(metadata.len())
-}
-
-async fn verify_archive(path: &Path, asset: &RuntimeAsset) -> Result<(), String> {
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .map_err(|_| "runtime_download_failed".to_string())?;
+fn verify_archive_handle(file: &mut std::fs::File, asset: &RuntimeAsset) -> Result<(), String> {
     let size = file
         .metadata()
-        .await
-        .map_err(|_| "runtime_download_failed".to_string())?
+        .map_err(|_| "runtime_download_failed")?
         .len();
     if size != asset.size {
         return Err("runtime_size_mismatch".into());
     }
 
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| "runtime_download_failed")?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let read = file
             .read(&mut buffer)
-            .await
-            .map_err(|_| "runtime_download_failed".to_string())?;
+            .map_err(|_| "runtime_download_failed")?;
         if read == 0 {
             break;
         }
@@ -414,31 +675,105 @@ async fn verify_archive(path: &Path, asset: &RuntimeAsset) -> Result<(), String>
     if actual != asset.sha256 {
         return Err("runtime_hash_mismatch".into());
     }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| "runtime_download_failed")?;
     Ok(())
 }
 
-fn reset_staging_directory(path: &Path) -> Result<(), String> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err("unsafe_runtime_staging".into())
-        }
-        Ok(metadata) if metadata.is_dir() => {
-            std::fs::remove_dir_all(path).map_err(|_| "runtime_staging_failed".to_string())?;
-        }
-        Ok(_) => return Err("unsafe_runtime_staging".into()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err("runtime_staging_failed".into()),
-    }
-    std::fs::create_dir(path).map_err(|_| "runtime_staging_failed".to_string())
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArchiveEntryKind {
+    Directory,
+    File,
 }
 
-fn extract_archive(archive_path: &Path, staging_root: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(archive_path).map_err(|_| "invalid_runtime_archive")?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|_| "invalid_runtime_archive")?;
+struct ArchivePlanEntry {
+    index: usize,
+    components: Vec<String>,
+    kind: ArchiveEntryKind,
+    size: u64,
+    executable: bool,
+}
+
+fn extract_archive(
+    archive_file: &mut std::fs::File,
+    staging_root: &SecureDir,
+) -> Result<(), String> {
+    let declared_entries = central_directory_entry_count(archive_file)?;
+    archive_file
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| "invalid_runtime_archive")?;
+    let mut archive = zip::ZipArchive::new(archive_file).map_err(|_| "invalid_runtime_archive")?;
+    if archive.len() != declared_entries {
+        return Err("unsafe_runtime_archive".into());
+    }
+    let plan = preflight_archive(&mut archive)?;
+    for item in plan {
+        let entry = archive
+            .by_index(item.index)
+            .map_err(|_| "invalid_runtime_archive")?;
+        let parent = open_or_create_parent(staging_root, &item.components)?;
+        let name = item.components.last().ok_or("unsafe_runtime_archive")?;
+        if item.kind == ArchiveEntryKind::Directory {
+            parent
+                .open_or_create_private_dir(name)
+                .map_err(|_| "runtime_extraction_failed")?;
+            continue;
+        }
+        let mut output = parent
+            .create_private_file(name, item.executable)
+            .map_err(|_| "runtime_extraction_failed")?;
+        let copied = std::io::copy(&mut entry.take(item.size + 1), &mut output)
+            .map_err(|_| "runtime_extraction_failed")?;
+        if copied != item.size {
+            return Err("invalid_runtime_archive".into());
+        }
+        output.sync_all().map_err(|_| "runtime_extraction_failed")?;
+    }
+    Ok(())
+}
+
+fn central_directory_entry_count(file: &mut std::fs::File) -> Result<usize, String> {
+    let length = file
+        .metadata()
+        .map_err(|_| "invalid_runtime_archive")?
+        .len();
+    let tail_length = length.min(65_557) as usize;
+    file.seek(SeekFrom::End(-(tail_length as i64)))
+        .map_err(|_| "invalid_runtime_archive")?;
+    let mut tail = vec![0_u8; tail_length];
+    file.read_exact(&mut tail)
+        .map_err(|_| "invalid_runtime_archive")?;
+    let offset = tail
+        .windows(4)
+        .rposition(|window| window == b"PK\x05\x06")
+        .ok_or_else(|| "invalid_runtime_archive".to_string())?;
+    if offset + 22 > tail.len() {
+        return Err("invalid_runtime_archive".into());
+    }
+    let disk_entries = u16::from_le_bytes([tail[offset + 8], tail[offset + 9]]);
+    let total_entries = u16::from_le_bytes([tail[offset + 10], tail[offset + 11]]);
+    let comment_length = u16::from_le_bytes([tail[offset + 20], tail[offset + 21]]) as usize;
+    if total_entries as usize > MAX_ARCHIVE_ENTRIES {
+        return Err("runtime_archive_too_large".into());
+    }
+    if disk_entries != total_entries
+        || total_entries == u16::MAX
+        || offset + 22 + comment_length != tail.len()
+    {
+        return Err("invalid_runtime_archive".into());
+    }
+    Ok(total_entries as usize)
+}
+
+fn preflight_archive<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<Vec<ArchivePlanEntry>, String> {
     if archive.len() > MAX_ARCHIVE_ENTRIES {
         return Err("runtime_archive_too_large".into());
     }
     let mut expanded = 0_u64;
+    let mut namespace = BTreeMap::<String, ArchiveEntryKind>::new();
+    let mut plan = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
         let entry = archive
             .by_index(index)
@@ -448,10 +783,13 @@ fn extract_archive(archive_path: &Path, staging_root: &Path) -> Result<(), Strin
             .enclosed_name()
             .ok_or("unsafe_runtime_archive")?
             .to_owned();
+        let kind = if entry.is_dir() {
+            ArchiveEntryKind::Directory
+        } else {
+            ArchiveEntryKind::File
+        };
         let unix_mode = entry.unix_mode();
-        if !safe_archive_name(&entry_name, &relative)
-            || unsafe_unix_file_type(unix_mode, entry.is_dir())
-        {
+        if !safe_archive_name(&entry_name, &relative) || unsafe_unix_file_type(unix_mode, kind) {
             return Err("unsafe_runtime_archive".into());
         }
         let expected_size = entry.size();
@@ -461,31 +799,65 @@ fn extract_archive(archive_path: &Path, staging_root: &Path) -> Result<(), Strin
         if expanded > MAX_EXPANDED_BYTES {
             return Err("runtime_archive_too_large".into());
         }
-
-        let destination = staging_root.join(relative);
-        if entry.is_dir() {
-            ensure_safe_directory(staging_root, &destination)?;
-            continue;
-        }
-        if let Some(parent) = destination.parent() {
-            ensure_safe_directory(staging_root, parent)?;
-        }
-        let mut output = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&destination)
-            .map_err(|_| "runtime_extraction_failed".to_string())?;
-        let copied = std::io::copy(&mut entry.take(expected_size + 1), &mut output)
-            .map_err(|_| "runtime_extraction_failed".to_string())?;
-        if copied != expected_size {
+        if kind == ArchiveEntryKind::Directory && expected_size != 0 {
             return Err("invalid_runtime_archive".into());
         }
-        output
-            .sync_all()
-            .map_err(|_| "runtime_extraction_failed".to_string())?;
-        set_executable_permissions(&destination, unix_mode)?;
+        let components = relative
+            .components()
+            .map(|component| match component {
+                Component::Normal(value) => value
+                    .to_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| "unsafe_runtime_archive".to_string()),
+                _ => Err("unsafe_runtime_archive".into()),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let normalized = components
+            .iter()
+            .map(|component| component.to_lowercase())
+            .collect::<Vec<_>>();
+        let key = normalized.join("/");
+        if key == RUNTIME_METADATA_FILE {
+            return Err("unsafe_runtime_archive".into());
+        }
+        for end in 1..normalized.len() {
+            let ancestor = normalized[..end].join("/");
+            match namespace.get(&ancestor) {
+                Some(ArchiveEntryKind::File) => return Err("unsafe_runtime_archive".into()),
+                Some(ArchiveEntryKind::Directory) => {}
+                None => {
+                    namespace.insert(ancestor, ArchiveEntryKind::Directory);
+                }
+            }
+        }
+        if namespace.contains_key(&key)
+            || (kind == ArchiveEntryKind::File
+                && namespace
+                    .keys()
+                    .any(|existing| existing.starts_with(&(key.clone() + "/"))))
+        {
+            return Err("unsafe_runtime_archive".into());
+        }
+        namespace.insert(key, kind);
+        plan.push(ArchivePlanEntry {
+            index,
+            components,
+            kind,
+            size: expected_size,
+            executable: unix_mode.is_some_and(|mode| mode & 0o111 != 0),
+        });
     }
-    Ok(())
+    Ok(plan)
+}
+
+fn open_or_create_parent(root: &SecureDir, components: &[String]) -> Result<SecureDir, String> {
+    let mut directory = root.try_clone().map_err(|_| "runtime_extraction_failed")?;
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        directory = directory
+            .open_or_create_private_dir(component)
+            .map_err(|_| "runtime_extraction_failed")?;
+    }
+    Ok(directory)
 }
 
 fn safe_archive_name(name: &str, path: &Path) -> bool {
@@ -507,59 +879,24 @@ fn safe_archive_name(name: &str, path: &Path) -> bool {
             .all(|component| matches!(component, Component::Normal(_)))
 }
 
-fn unsafe_unix_file_type(mode: Option<u32>, directory: bool) -> bool {
-    let Some(kind) = mode.map(|value| value & 0o170000) else {
+fn unsafe_unix_file_type(mode: Option<u32>, entry_kind: ArchiveEntryKind) -> bool {
+    let Some(type_bits) = mode.map(|value| value & 0o170000) else {
         return false;
     };
-    kind != 0 && kind != 0o100000 && !(directory && kind == 0o040000)
-}
-
-fn ensure_safe_directory(root: &Path, directory: &Path) -> Result<(), String> {
-    let relative = directory
-        .strip_prefix(root)
-        .map_err(|_| "unsafe_runtime_archive".to_string())?;
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        let Component::Normal(component) = component else {
-            return Err("unsafe_runtime_archive".into());
-        };
-        current.push(component);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err("unsafe_runtime_archive".into())
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                std::fs::create_dir(&current).map_err(|_| "runtime_extraction_failed")?;
-                let metadata = std::fs::symlink_metadata(&current)
-                    .map_err(|_| "runtime_extraction_failed".to_string())?;
-                if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                    return Err("unsafe_runtime_archive".into());
-                }
-            }
-            Err(_) => return Err("runtime_extraction_failed".into()),
-        }
+    if type_bits == 0 {
+        return false;
     }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_executable_permissions(path: &Path, unix_mode: Option<u32>) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-
-    if let Some(mode) = unix_mode {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & 0o777))
-            .map_err(|_| "runtime_extraction_failed".to_string())?;
+    match entry_kind {
+        ArchiveEntryKind::Directory => type_bits != 0o040000,
+        ArchiveEntryKind::File => type_bits != 0o100000,
     }
-    Ok(())
 }
 
-#[cfg(not(unix))]
-fn set_executable_permissions(_path: &Path, _unix_mode: Option<u32>) -> Result<(), String> {
-    Ok(())
-}
-
-async fn run_health_check(entrypoint: &Path) -> Result<(), String> {
+async fn run_health_check(
+    version_directory: &SecureDir,
+    entrypoint: &str,
+    ambient_entrypoint: &Path,
+) -> Result<(), String> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct HealthStatus {
@@ -567,16 +904,83 @@ async fn run_health_check(entrypoint: &Path) -> Result<(), String> {
         protocol_version: u32,
     }
 
-    let output = tokio::process::Command::new(entrypoint)
+    const MAX_HEALTH_STREAM_BYTES: usize = 4 * 1024;
+    #[cfg(test)]
+    const HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(400);
+    #[cfg(not(test))]
+    const HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+    let pinned_entrypoint = open_entrypoint(version_directory, entrypoint)?;
+    #[cfg(unix)]
+    let inherited_entrypoint = duplicate_inheritable_file(&pinned_entrypoint)?;
+    #[cfg(unix)]
+    let command_path = {
+        use std::os::fd::AsRawFd;
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let root = "/proc/self/fd";
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let root = "/dev/fd";
+        PathBuf::from(format!("{root}/{}", inherited_entrypoint.as_raw_fd()))
+    };
+    #[cfg(windows)]
+    let command_path = ambient_entrypoint.to_path_buf();
+    #[cfg(unix)]
+    let _ = ambient_entrypoint;
+
+    let mut command = tokio::process::Command::new(command_path);
+    command
         .arg("--health-check")
-        .output()
-        .await
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command
+        .spawn()
         .map_err(|_| "runtime_health_check_failed".to_string())?;
-    if !output.status.success() {
+    let process_group = HealthProcessGroup::new(&child)?;
+    let stdout = child.stdout.take().ok_or("runtime_health_check_failed")?;
+    let stderr = child.stderr.take().ok_or("runtime_health_check_failed")?;
+    let operation = async {
+        tokio::try_join!(
+            read_capped_health_stream(stdout, MAX_HEALTH_STREAM_BYTES),
+            read_capped_health_stream(stderr, MAX_HEALTH_STREAM_BYTES),
+            async {
+                child
+                    .wait()
+                    .await
+                    .map_err(|_| "runtime_health_check_failed".to_string())
+            }
+        )
+    };
+    let (stdout, stderr, status) = match tokio::time::timeout(HEALTH_TIMEOUT, operation).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            process_group.terminate();
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(error);
+        }
+        Err(_) => {
+            process_group.terminate();
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err("runtime_health_timeout".into());
+        }
+    };
+    drop(pinned_entrypoint);
+    #[cfg(unix)]
+    drop(inherited_entrypoint);
+    if !status.success() {
         return Err("runtime_health_check_failed".into());
     }
-    let stdout = std::str::from_utf8(&output.stdout)
-        .map_err(|_| "runtime_health_check_failed".to_string())?;
+    if !stderr.is_empty() {
+        return Err("runtime_health_stderr".into());
+    }
+    let stdout =
+        std::str::from_utf8(&stdout).map_err(|_| "runtime_health_check_failed".to_string())?;
     let mut lines = stdout.lines();
     let line = lines.next().ok_or("runtime_health_check_failed")?;
     if lines.next().is_some() {
@@ -590,49 +994,188 @@ async fn run_health_check(entrypoint: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn read_pointer_if_exists(path: &Path) -> Result<Option<RuntimePointer>, String> {
-    match std::fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| "invalid_runtime_pointer".to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err("invalid_runtime_pointer".into()),
+#[cfg(unix)]
+fn duplicate_inheritable_file(file: &cap_std::fs::File) -> Result<std::fs::File, String> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+
+    let descriptor = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD, 3) };
+    if descriptor < 0 {
+        return Err("runtime_health_check_failed".into());
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(descriptor) })
+}
+
+#[cfg(windows)]
+struct HealthProcessGroup {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(windows)]
+impl HealthProcessGroup {
+    fn new(child: &tokio::process::Child) -> Result<Self, String> {
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err("runtime_health_check_failed".into());
+        }
+        let mut information = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&information).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        let Some(process) = child.raw_handle() else {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(handle);
+            }
+            return Err("runtime_health_check_failed".into());
+        };
+        let assigned = unsafe { AssignProcessToJobObject(handle, process.cast()) };
+        if configured == 0 || assigned == 0 {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(handle);
+            }
+            return Err("runtime_health_check_failed".into());
+        }
+        Ok(Self { handle })
+    }
+
+    fn terminate(&self) {
+        unsafe {
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.handle, 1);
+        }
     }
 }
 
-fn resolve_pointer(layout: &DataLayout, pointer: &RuntimePointer) -> Result<PathBuf, String> {
-    let version = semver::Version::parse(&pointer.version)
-        .map_err(|_| "invalid_runtime_pointer".to_string())?;
-    let entrypoint = Path::new(&pointer.entrypoint);
-    if pointer.target != current_target_key()?
-        || version.to_string() != pointer.version
-        || !version.pre.is_empty()
-        || !version.build.is_empty()
-        || !safe_archive_name(&pointer.entrypoint, entrypoint)
-    {
-        return Err("invalid_runtime_pointer".into());
-    }
-
-    let version_root = layout.runtime_versions.join(&pointer.version);
-    let resolved = version_root.join(entrypoint);
-    let metadata =
-        std::fs::symlink_metadata(&resolved).map_err(|_| "runtime_not_installed".to_string())?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("invalid_runtime_pointer".into());
-    }
-    let mut current = version_root;
-    for component in entrypoint.components() {
-        let Component::Normal(component) = component else {
-            return Err("invalid_runtime_pointer".into());
-        };
-        current.push(component);
-        let metadata =
-            std::fs::symlink_metadata(&current).map_err(|_| "runtime_not_installed".to_string())?;
-        if metadata.file_type().is_symlink() {
-            return Err("invalid_runtime_pointer".into());
+#[cfg(windows)]
+impl Drop for HealthProcessGroup {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.handle);
         }
     }
-    Ok(resolved)
+}
+
+#[cfg(unix)]
+struct HealthProcessGroup {
+    process_group: i32,
+}
+
+#[cfg(unix)]
+impl HealthProcessGroup {
+    fn new(child: &tokio::process::Child) -> Result<Self, String> {
+        let process_group = child.id().ok_or("runtime_health_check_failed")? as i32;
+        Ok(Self { process_group })
+    }
+
+    fn terminate(&self) {
+        unsafe {
+            libc::kill(-self.process_group, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for HealthProcessGroup {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
+
+async fn read_capped_health_stream<R: tokio::io::AsyncRead + Unpin>(
+    mut reader: R,
+    maximum: usize,
+) -> Result<Vec<u8>, String> {
+    use tokio::io::AsyncReadExt;
+
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    loop {
+        let read = reader
+            .read(&mut chunk)
+            .await
+            .map_err(|_| "runtime_health_check_failed".to_string())?;
+        if read == 0 {
+            return Ok(bytes);
+        }
+        if bytes.len() + read > maximum {
+            return Err("runtime_health_output_too_large".into());
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+}
+
+fn open_entrypoint(
+    version_directory: &SecureDir,
+    entrypoint: &str,
+) -> Result<cap_std::fs::File, String> {
+    if !valid_entrypoint(entrypoint) {
+        return Err("invalid_runtime_state".into());
+    }
+    let components = entrypoint.split('/').collect::<Vec<_>>();
+    let mut directory = version_directory
+        .try_clone()
+        .map_err(|_| "runtime_version_unavailable")?;
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        directory = directory
+            .open_private_dir(component)
+            .map_err(|_| "runtime_version_unavailable")?;
+    }
+    directory
+        .open_private_read(components.last().ok_or("invalid_runtime_state")?)
+        .map_err(|_| "runtime_version_unavailable".into())
+}
+
+#[cfg(test)]
+type StatePublishHook = Box<dyn FnOnce() -> Result<(), String>>;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_AFTER_ARCHIVE_VERIFY_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+    static TEST_BEFORE_STATE_PUBLISH_HOOK: std::cell::RefCell<Option<StatePublishHook>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn set_test_after_archive_verify_hook(hook: impl FnOnce() + 'static) {
+    TEST_AFTER_ARCHIVE_VERIFY_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn set_test_before_state_publish_hook(hook: impl FnOnce() -> Result<(), String> + 'static) {
+    TEST_BEFORE_STATE_PUBLISH_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+fn run_test_after_archive_verify_hook() {
+    #[cfg(test)]
+    TEST_AFTER_ARCHIVE_VERIFY_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+fn run_test_before_state_publish_hook() -> Result<(), String> {
+    #[cfg(test)]
+    return TEST_BEFORE_STATE_PUBLISH_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook()
+        } else {
+            Ok(())
+        }
+    });
+    #[cfg(not(test))]
+    Ok(())
 }
 
 pub(crate) fn current_target_key() -> Result<&'static str, String> {
@@ -658,7 +1201,11 @@ pub(crate) fn current_target_key() -> Result<&'static str, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{allowed_redirect_url, HttpRuntimeSource, RuntimeInstaller, RuntimeSource};
+    use super::{
+        allowed_redirect_url, set_test_after_archive_verify_hook,
+        set_test_before_state_publish_hook, HttpRuntimeSource, RuntimeInstaller, RuntimeSource,
+        MAX_RUNTIME_STATE_BYTES, RUNTIME_STATE_FILE,
+    };
     use crate::runtime::manifest::RuntimeAsset;
     use crate::storage::DataLayout;
     use sha2::{Digest, Sha256};
@@ -703,28 +1250,34 @@ mod tests {
         async fn download(
             &self,
             _asset: &RuntimeAsset,
-            destination: &Path,
+            destination: &mut tokio::fs::File,
             resume_from: u64,
             progress: &(dyn Fn(u64, u64) + Send + Sync),
         ) -> Result<(), String> {
-            use tokio::io::AsyncWriteExt;
+            use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
             self.offsets.lock().unwrap().push(resume_from);
-            let mut options = tokio::fs::OpenOptions::new();
-            options.create(true).write(true);
             if resume_from == 0 {
-                options.truncate(true);
+                destination
+                    .set_len(0)
+                    .await
+                    .map_err(|_| "runtime_download_failed".to_string())?;
+                destination
+                    .seek(std::io::SeekFrom::Start(0))
+                    .await
+                    .map_err(|_| "runtime_download_failed".to_string())?;
             } else {
-                options.append(true);
+                destination
+                    .seek(std::io::SeekFrom::Start(resume_from))
+                    .await
+                    .map_err(|_| "runtime_download_failed".to_string())?;
             }
-            let mut file = options
-                .open(destination)
+            destination
+                .write_all(&self.bytes[resume_from as usize..])
                 .await
                 .map_err(|_| "runtime_download_failed".to_string())?;
-            file.write_all(&self.bytes[resume_from as usize..])
-                .await
-                .map_err(|_| "runtime_download_failed".to_string())?;
-            file.sync_all()
+            destination
+                .sync_all()
                 .await
                 .map_err(|_| "runtime_download_failed".to_string())?;
             progress(self.bytes.len() as u64, self.bytes.len() as u64);
@@ -746,10 +1299,139 @@ mod tests {
             .unwrap();
 
         assert!(active.join(health_entrypoint()).exists());
-        let pointer: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(layout.runtime.join("current.json")).unwrap())
-                .unwrap();
-        assert_eq!(pointer["version"], "1.0.0");
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
+    }
+
+    #[tokio::test]
+    async fn publishes_current_and_previous_in_one_generation_state_document() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "0.9.0"))
+            .await
+            .unwrap();
+        installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+
+        let state: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(layout.runtime.join("runtime-state.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(state["generation"], 2);
+        assert_eq!(state["current"]["version"], "1.0.0");
+        assert_eq!(state["previous"]["version"], "0.9.0");
+        assert!(!layout.runtime.join("current.json").exists());
+        assert!(!layout.runtime.join("previous.json").exists());
+    }
+
+    #[tokio::test]
+    async fn pins_verified_archive_handle_through_extraction() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let asset = asset_for(&source, "1.0.0");
+        let part = layout
+            .staging
+            .join(format!("{}-1.0.0.zip.part", current_target_key()));
+        #[cfg(unix)]
+        let held = layout.staging.join("verified-held.zip");
+        let replacement = archive_with_file("attacker.txt", b"unverified", Some(0o644));
+        set_test_after_archive_verify_hook(move || {
+            #[cfg(windows)]
+            assert!(std::fs::write(&part, &replacement).is_err());
+            #[cfg(unix)]
+            {
+                std::fs::rename(&part, &held).unwrap();
+                std::fs::write(&part, &replacement).unwrap();
+            }
+        });
+
+        let active = RuntimeInstaller::new(layout, source)
+            .ensure(&asset)
+            .await
+            .unwrap();
+
+        assert!(active.join(health_entrypoint()).is_file());
+        assert!(!active.join("attacker.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn rejects_a_symlinked_staging_root_without_touching_its_target() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        std::fs::remove_dir_all(&layout.staging).unwrap();
+        create_directory_link(outside.path(), &layout.staging);
+        let source = FakeRuntimeSource::healthy_archive();
+
+        let error = RuntimeInstaller::new(layout, source.clone())
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, "unsafe_runtime_root");
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn bounds_runtime_state_reads_before_parsing() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+        std::fs::write(
+            layout.runtime.join(RUNTIME_STATE_FILE),
+            vec![b'x'; (MAX_RUNTIME_STATE_BYTES + 1) as usize],
+        )
+        .unwrap();
+
+        assert_eq!(
+            installer.active_entrypoint().unwrap_err(),
+            "invalid_runtime_state"
+        );
+    }
+
+    #[tokio::test]
+    async fn state_write_failure_keeps_one_old_generation_and_reuses_verified_orphan() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "0.9.0"))
+            .await
+            .unwrap();
+        set_test_before_state_publish_hook(|| Err("injected_state_write_failure".into()));
+
+        assert_eq!(
+            installer
+                .ensure(&asset_for(&source, "1.0.0"))
+                .await
+                .unwrap_err(),
+            "runtime_activation_failed"
+        );
+        assert_eq!(state_version(&layout, "current"), "0.9.0");
+        assert!(layout.runtime_versions.join("1.0.0").is_dir());
+
+        installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+        assert_eq!(source.requested_offsets(), vec![0, 0]);
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
     }
 
     #[tokio::test]
@@ -766,7 +1448,8 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(source.requested_offsets(), vec![0]);
-        assert!(!layout.runtime.join("previous.json").exists());
+        assert_eq!(runtime_state(&layout)["generation"], 1);
+        assert!(runtime_state(&layout)["previous"].is_null());
     }
 
     #[tokio::test]
@@ -787,14 +1470,11 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error, "runtime_health_check_failed");
-        let pointer: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(layout.runtime.join("current.json")).unwrap())
-                .unwrap();
-        assert_eq!(pointer["version"], "0.9.0");
+        assert_eq!(state_version(&layout, "current"), "0.9.0");
     }
 
     #[tokio::test]
-    async fn failed_pointer_publication_keeps_current_and_removes_orphaned_version() {
+    async fn state_publication_uses_an_unpredictable_no_follow_temporary_file() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -804,18 +1484,20 @@ mod tests {
             .ensure(&asset_for(&source, "0.9.0"))
             .await
             .unwrap();
-        std::fs::create_dir(layout.runtime.join("previous.json")).unwrap();
+        let sentinel = root.path().join("sentinel.txt");
+        std::fs::write(&sentinel, b"preserve").unwrap();
+        let predictable = layout
+            .runtime
+            .join(format!(".runtime-state.json.{}.tmp", std::process::id()));
+        create_file_symlink(&sentinel, &predictable);
 
-        assert_eq!(
-            installer
-                .ensure(&asset_for(&source, "1.0.0"))
-                .await
-                .unwrap_err(),
-            "runtime_activation_failed"
-        );
+        installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
 
-        assert_eq!(pointer_version(&layout, "current.json"), "0.9.0");
-        assert!(!layout.runtime_versions.join("1.0.0").exists());
+        assert_eq!(std::fs::read(sentinel).unwrap(), b"preserve");
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
     }
 
     #[tokio::test]
@@ -883,7 +1565,7 @@ mod tests {
                 .unwrap_err();
 
             assert_eq!(error, expected_error);
-            assert!(!layout.runtime.join("current.json").exists());
+            assert!(!layout.runtime.join(RUNTIME_STATE_FILE).exists());
             assert!(!layout
                 .staging
                 .join(format!("runtime-{}.tmp", asset.version))
@@ -903,6 +1585,8 @@ mod tests {
             "agent/file.",
             "agent/file ",
             "agent/CON",
+            "agent/CONIN$",
+            "agent/conout$.log",
             "agent/com1.log",
         ] {
             let root = tempfile::tempdir().unwrap();
@@ -921,7 +1605,7 @@ mod tests {
 
             assert_eq!(error, "unsafe_runtime_archive", "accepted {unsafe_name:?}");
             assert!(!root.path().join("outside.txt").exists());
-            assert!(!layout.runtime.join("current.json").exists());
+            assert!(!layout.runtime.join(RUNTIME_STATE_FILE).exists());
         }
     }
 
@@ -947,6 +1631,109 @@ mod tests {
 
         assert_eq!(error, "unsafe_runtime_archive");
         assert!(!root.path().join("outside").exists());
+    }
+
+    #[tokio::test]
+    async fn preflights_exact_case_and_file_prefix_collisions_before_extraction() {
+        let mut exact = archive_with_files(&[
+            ("agent/Foo", b"one".as_slice()),
+            ("agent/foo", b"two".as_slice()),
+        ]);
+        for index in 0..exact.len().saturating_sub(2) {
+            if &exact[index..index + 3] == b"Foo" {
+                exact[index..index + 3].copy_from_slice(b"foo");
+            }
+        }
+        let exact_names = {
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&exact)).unwrap();
+            (0..archive.len())
+                .map(|index| archive.by_index(index).unwrap().name().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(exact_names, vec!["agent/foo"]);
+        for (case, bytes) in [
+            exact,
+            archive_with_files(&[
+                ("agent/Foo", b"one".as_slice()),
+                ("agent/foo", b"two".as_slice()),
+            ]),
+            archive_with_files(&[
+                ("agent", b"file".as_slice()),
+                ("agent/child", b"child".as_slice()),
+            ]),
+            archive_with_files(&[
+                ("agent/child", b"child".as_slice()),
+                ("agent", b"file".as_slice()),
+            ]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let root = tempfile::tempdir().unwrap();
+            let layout = DataLayout::from_root(root.path().join(".tawreed"));
+            layout.ensure().unwrap();
+            let source = FakeRuntimeSource::from_bytes(bytes);
+
+            assert_eq!(
+                RuntimeInstaller::new(layout.clone(), source.clone())
+                    .ensure(&asset_for(&source, "1.0.0"))
+                    .await
+                    .unwrap_err(),
+                "unsafe_runtime_archive",
+                "collision case {case} was not rejected during preflight"
+            );
+            assert!(!layout.staging.join("runtime-1.0.0.tmp").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn removes_an_unreferenced_invalid_orphan_then_installs_verified_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let orphan = layout.runtime_versions.join("1.0.0");
+        std::fs::create_dir(&orphan).unwrap();
+        std::fs::write(orphan.join("untrusted.txt"), b"remove").unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+
+        let active = RuntimeInstaller::new(layout, source.clone())
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+
+        assert!(!active.join("untrusted.txt").exists());
+        assert!(active.join("runtime-metadata.json").is_file());
+        assert!(active.join(health_entrypoint()).is_file());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clamps_signed_archive_modes_to_private_runtime_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::from_bytes(runtime_archive_with_mode(0o777));
+        let active = RuntimeInstaller::new(layout.clone(), source.clone())
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::metadata(active.join(health_entrypoint()))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        for directory in [&layout.runtime, &layout.runtime_versions, &layout.staging] {
+            assert_eq!(
+                std::fs::metadata(directory).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
     }
 
     #[tokio::test]
@@ -1006,8 +1793,64 @@ mod tests {
                 .unwrap_err();
 
             assert_eq!(error, "runtime_health_check_failed");
-            assert!(!layout.runtime.join("current.json").exists());
+            assert!(!layout.runtime.join(RUNTIME_STATE_FILE).exists());
         }
+    }
+
+    #[tokio::test]
+    async fn health_check_times_out_and_reaps_a_hung_process() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::from_bytes(runtime_archive_with_script(hanging_script()));
+        let started = std::time::Instant::now();
+
+        let error = RuntimeInstaller::new(layout, source.clone())
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, "runtime_health_timeout");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn health_check_caps_stdout_and_rejects_any_stderr() {
+        for (script, expected) in [
+            (flooding_stdout_script(), "runtime_health_output_too_large"),
+            (stderr_script(), "runtime_health_stderr"),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let layout = DataLayout::from_root(root.path().join(".tawreed"));
+            layout.ensure().unwrap();
+            let source = FakeRuntimeSource::from_bytes(runtime_archive_with_script(script));
+
+            assert_eq!(
+                RuntimeInstaller::new(layout, source.clone())
+                    .ensure(&asset_for(&source, "1.0.0"))
+                    .await
+                    .unwrap_err(),
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn health_check_does_not_wait_forever_on_inherited_descendant_pipes() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source =
+            FakeRuntimeSource::from_bytes(runtime_archive_with_script(inherited_pipe_script()));
+        let started = std::time::Instant::now();
+
+        let error = RuntimeInstaller::new(layout, source.clone())
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, "runtime_health_timeout");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[tokio::test]
@@ -1029,8 +1872,8 @@ mod tests {
         let entrypoint = installer.rollback().await.unwrap();
 
         assert!(entrypoint.ends_with(health_entrypoint()));
-        assert_eq!(pointer_version(&layout, "current.json"), "0.9.0");
-        assert_eq!(pointer_version(&layout, "previous.json"), "1.0.0");
+        assert_eq!(state_version(&layout, "current"), "0.9.0");
+        assert_eq!(state_version(&layout, "previous"), "1.0.0");
         assert_eq!(installer.active_entrypoint().unwrap(), entrypoint);
     }
 
@@ -1062,7 +1905,7 @@ mod tests {
             installer.rollback().await.unwrap_err(),
             "runtime_health_check_failed"
         );
-        assert_eq!(pointer_version(&layout, "current.json"), "1.0.0");
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
     }
 
     #[tokio::test]
@@ -1077,8 +1920,13 @@ mod tests {
         );
         let source = HttpRuntimeSource::with_client(reqwest::Client::new());
         let asset = http_asset(url, 6);
+        let mut destination = open_test_part(&part).await;
 
-        source.download(&asset, &part, 3, &|_, _| {}).await.unwrap();
+        source
+            .download(&asset, &mut destination, 3, &|_, _| {})
+            .await
+            .unwrap();
+        drop(destination);
 
         assert_eq!(std::fs::read(part).unwrap(), b"abcdef");
         assert!(request
@@ -1095,11 +1943,13 @@ mod tests {
         std::fs::write(&part, b"stale").unwrap();
         let (url, request) = serve_once("200 OK", &[], b"abcdef");
         let source = HttpRuntimeSource::with_client(reqwest::Client::new());
+        let mut destination = open_test_part(&part).await;
 
         source
-            .download(&http_asset(url, 6), &part, 5, &|_, _| {})
+            .download(&http_asset(url, 6), &mut destination, 5, &|_, _| {})
             .await
             .unwrap();
+        drop(destination);
 
         assert_eq!(std::fs::read(part).unwrap(), b"abcdef");
         assert!(request
@@ -1120,23 +1970,27 @@ mod tests {
             b"def",
         );
         let source = HttpRuntimeSource::with_client(reqwest::Client::new());
+        let mut destination = open_test_part(&part).await;
         assert_eq!(
             source
-                .download(&http_asset(url, 6), &part, 3, &|_, _| {})
+                .download(&http_asset(url, 6), &mut destination, 3, &|_, _| {})
                 .await
                 .unwrap_err(),
             "runtime_download_invalid_response"
         );
+        drop(destination);
         request.join().unwrap();
 
         let (url, request) = serve_once("200 OK", &[], b"abcdefg");
+        let mut destination = open_test_part(&part).await;
         assert_eq!(
             source
-                .download(&http_asset(url, 6), &part, 0, &|_, _| {})
+                .download(&http_asset(url, 6), &mut destination, 0, &|_, _| {})
                 .await
                 .unwrap_err(),
             "runtime_download_too_large"
         );
+        drop(destination);
         request.join().unwrap();
     }
 
@@ -1184,6 +2038,15 @@ mod tests {
     }
 
     fn runtime_archive_with_script(script: &str) -> Vec<u8> {
+        runtime_archive_with_script_and_mode(script, 0o755)
+    }
+
+    #[cfg(unix)]
+    fn runtime_archive_with_mode(mode: u32) -> Vec<u8> {
+        runtime_archive_with_script_and_mode(health_script(true), mode)
+    }
+
+    fn runtime_archive_with_script_and_mode(script: &str, mode: u32) -> Vec<u8> {
         use std::io::Write;
         use zip::write::SimpleFileOptions;
 
@@ -1192,7 +2055,7 @@ mod tests {
         writer
             .start_file(
                 health_entrypoint(),
-                SimpleFileOptions::default().unix_permissions(0o755),
+                SimpleFileOptions::default().unix_permissions(mode),
             )
             .unwrap();
         writer.write_all(script.as_bytes()).unwrap();
@@ -1216,6 +2079,22 @@ mod tests {
         bytes.into_inner()
     }
 
+    fn archive_with_files(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(&mut bytes);
+        for (name, contents) in entries {
+            writer
+                .start_file(*name, SimpleFileOptions::default().unix_permissions(0o644))
+                .unwrap();
+            writer.write_all(contents).unwrap();
+        }
+        writer.finish().unwrap();
+        bytes.into_inner()
+    }
+
     fn patch_zip_uncompressed_size(bytes: &mut [u8], size: u32) {
         for (signature, size_offset) in [
             (b"PK\x03\x04".as_slice(), 22),
@@ -1230,10 +2109,42 @@ mod tests {
         }
     }
 
-    fn pointer_version(layout: &DataLayout, name: &str) -> String {
-        let pointer: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(layout.runtime.join(name)).unwrap()).unwrap();
-        pointer["version"].as_str().unwrap().to_string()
+    fn state_version(layout: &DataLayout, slot: &str) -> String {
+        let state = runtime_state(layout);
+        state[slot]["version"].as_str().unwrap().to_string()
+    }
+
+    fn runtime_state(layout: &DataLayout) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(layout.runtime.join(RUNTIME_STATE_FILE)).unwrap())
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn create_file_symlink(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn create_file_symlink(target: &Path, link: &Path) {
+        std::fs::hard_link(target, link).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn create_directory_link(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn create_directory_link(target: &Path, link: &Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     #[cfg(windows)]
@@ -1256,6 +2167,46 @@ mod tests {
         ]
     }
 
+    #[cfg(windows)]
+    fn hanging_script() -> &'static str {
+        "@echo off\r\nping -n 4 127.0.0.1 >nul\r\necho {\"status\":\"ok\",\"protocolVersion\":1}\r\n"
+    }
+
+    #[cfg(not(windows))]
+    fn hanging_script() -> &'static str {
+        "#!/bin/sh\nsleep 3\nprintf '%s\\n' '{\"status\":\"ok\",\"protocolVersion\":1}'\n"
+    }
+
+    #[cfg(windows)]
+    fn flooding_stdout_script() -> &'static str {
+        "@echo off\r\nfor /L %%i in (1,1,100) do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n"
+    }
+
+    #[cfg(not(windows))]
+    fn flooding_stdout_script() -> &'static str {
+        "#!/bin/sh\nhead -c 5000 /dev/zero\n"
+    }
+
+    #[cfg(windows)]
+    fn stderr_script() -> &'static str {
+        "@echo off\r\necho noise 1>&2\r\necho {\"status\":\"ok\",\"protocolVersion\":1}\r\n"
+    }
+
+    #[cfg(not(windows))]
+    fn stderr_script() -> &'static str {
+        "#!/bin/sh\nprintf '%s\\n' noise >&2\nprintf '%s\\n' '{\"status\":\"ok\",\"protocolVersion\":1}'\n"
+    }
+
+    #[cfg(windows)]
+    fn inherited_pipe_script() -> &'static str {
+        "@echo off\r\nstart \"\" /b ping -n 4 127.0.0.1\r\necho {\"status\":\"ok\",\"protocolVersion\":1}\r\nexit /b 0\r\n"
+    }
+
+    #[cfg(not(windows))]
+    fn inherited_pipe_script() -> &'static str {
+        "#!/bin/sh\n(sleep 3) &\nprintf '%s\\n' '{\"status\":\"ok\",\"protocolVersion\":1}'\n"
+    }
+
     fn http_asset(url: String, size: u64) -> RuntimeAsset {
         RuntimeAsset {
             version: "1.0.0".into(),
@@ -1265,6 +2216,15 @@ mod tests {
             archive: "zip".into(),
             entrypoint: health_entrypoint().into(),
         }
+    }
+
+    async fn open_test_part(path: &Path) -> tokio::fs::File {
+        tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .await
+            .unwrap()
     }
 
     fn serve_once(

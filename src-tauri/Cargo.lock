@@ -3768,6 +3768,7 @@ dependencies = [
  "dirs",
  "dotenvy",
  "ed25519-dalek",
+ "libc",
  "reqwest 0.12.28",
  "rusqlite",
  "semver",

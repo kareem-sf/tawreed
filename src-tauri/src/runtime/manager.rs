@@ -6,7 +6,9 @@ use super::installer::{
     current_target_key, runtime_http_client, HttpRuntimeSource, InstallPhase, InstallProgress,
     RuntimeInstaller, RuntimeSource,
 };
-use super::manifest::{select_asset, verify_embedded_manifest, RuntimeAsset, RuntimeTarget};
+use super::manifest::{
+    select_asset, validate_asset, verify_embedded_manifest, RuntimeAsset, RuntimeTarget,
+};
 use crate::storage::DataLayout;
 
 pub const RUNTIME_MANIFEST_URL: &str =
@@ -47,7 +49,11 @@ impl RuntimeBootstrapStatus {
         };
         Self {
             phase: phase.into(),
-            progress: Some(event.progress),
+            progress: Some(if event.progress.is_finite() {
+                event.progress.clamp(0.0, 100.0)
+            } else {
+                0.0
+            }),
             component: Some("agent-kernel".into()),
             version: Some(version.into()),
             error_code: None,
@@ -66,14 +72,15 @@ impl RuntimeBootstrapStatus {
         }
     }
 
-    fn error(code: String, version: Option<String>) -> Self {
+    fn error(internal_code: &str, version: Option<String>) -> Self {
+        let (code, recoverable) = public_error(internal_code);
         Self {
             phase: "error".into(),
             progress: None,
             component: None,
-            version,
-            recoverable: recoverable_error(&code),
-            error_code: Some(code),
+            version: version.filter(|value| !value.is_empty() && value.len() <= 40),
+            recoverable,
+            error_code: Some(code.into()),
         }
     }
 }
@@ -133,7 +140,35 @@ pub struct RuntimeManager<
     installer: RuntimeInstaller<S>,
     bootstrap: B,
     status: tokio::sync::RwLock<RuntimeBootstrapStatus>,
-    install_lock: tokio::sync::Mutex<()>,
+    operation: tokio::sync::Mutex<OperationState>,
+}
+
+#[derive(Clone)]
+enum CompletedOperation {
+    Bootstrap(Result<RuntimeBootstrapStatus, String>),
+    Rollback(Result<PathBuf, String>),
+}
+
+struct OperationState {
+    generation: u64,
+    in_flight: Option<InFlightOperation>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OperationKind {
+    Bootstrap,
+    Rollback,
+}
+
+struct InFlightOperation {
+    generation: u64,
+    kind: OperationKind,
+    result: tokio::sync::watch::Sender<Option<CompletedOperation>>,
+}
+
+enum OperationRole {
+    Leader(u64),
+    Follower(CompletedOperation),
 }
 
 impl RuntimeManager<HttpRuntimeSource, HttpRuntimeBootstrap> {
@@ -151,7 +186,10 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
             installer,
             bootstrap,
             status: tokio::sync::RwLock::new(RuntimeBootstrapStatus::checking()),
-            install_lock: tokio::sync::Mutex::new(()),
+            operation: tokio::sync::Mutex::new(OperationState {
+                generation: 0,
+                in_flight: None,
+            }),
         }
     }
 
@@ -163,24 +201,51 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
     where
         F: Fn(RuntimeBootstrapStatus) + Send + Sync,
     {
-        let observed = self.status().await;
-        let _install_guard = self.install_lock.lock().await;
+        let generation = match self.begin_operation(OperationKind::Bootstrap).await {
+            OperationRole::Follower(CompletedOperation::Bootstrap(result)) => {
+                if let Ok(status) = &result {
+                    progress(status.clone());
+                }
+                return result;
+            }
+            OperationRole::Follower(CompletedOperation::Rollback(_)) => unreachable!(),
+            OperationRole::Leader(generation) => generation,
+        };
+        let result = self.run_start(&progress).await;
+        self.finish_operation(
+            OperationKind::Bootstrap,
+            generation,
+            CompletedOperation::Bootstrap(result.clone()),
+        )
+        .await;
+        result
+    }
+
+    async fn run_start<F>(&self, progress: &F) -> Result<RuntimeBootstrapStatus, String>
+    where
+        F: Fn(RuntimeBootstrapStatus) + Send + Sync,
+    {
         let current = self.status().await;
-        if current != observed || current.phase == "ready" {
+        if current.phase == "ready" {
             progress(current.clone());
-            return status_result(current);
+            return Ok(current);
         }
 
-        self.publish(RuntimeBootstrapStatus::checking(), &progress)
+        self.publish(RuntimeBootstrapStatus::checking(), progress)
             .await;
         let asset = match self.bootstrap.verified_asset().await {
             Ok(asset) => asset,
             Err(code) => {
-                let status = RuntimeBootstrapStatus::error(code.clone(), None);
-                self.publish(status.clone(), &progress).await;
+                let status = RuntimeBootstrapStatus::error(&code, None);
+                self.publish(status.clone(), progress).await;
                 return Ok(status);
             }
         };
+        if asset.version.len() > 40 || validate_asset(&asset).is_err() {
+            let status = RuntimeBootstrapStatus::error("invalid_runtime_asset", None);
+            self.publish(status.clone(), progress).await;
+            return Ok(status);
+        }
         let version = asset.version.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let send_progress = move |event| {
@@ -194,7 +259,7 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
                 Some(event) = receiver.recv() => {
                     self.publish(
                         RuntimeBootstrapStatus::from_install_progress(event, &version),
-                        &progress,
+                        progress,
                     ).await;
                 }
                 result = &mut installation => break result,
@@ -203,7 +268,7 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         while let Ok(event) = receiver.try_recv() {
             self.publish(
                 RuntimeBootstrapStatus::from_install_progress(event, &version),
-                &progress,
+                progress,
             )
             .await;
         }
@@ -211,12 +276,12 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         match result {
             Ok(_) => {
                 let status = RuntimeBootstrapStatus::ready(version);
-                self.publish(status.clone(), &progress).await;
+                self.publish(status.clone(), progress).await;
                 Ok(status)
             }
             Err(code) => {
-                let status = RuntimeBootstrapStatus::error(code.clone(), Some(version));
-                self.publish(status.clone(), &progress).await;
+                let status = RuntimeBootstrapStatus::error(&code, Some(version));
+                self.publish(status.clone(), progress).await;
                 Ok(status)
             }
         }
@@ -234,11 +299,71 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
     }
 
     pub async fn rollback(&self) -> Result<PathBuf, String> {
-        let _install_guard = self.install_lock.lock().await;
-        let entrypoint = self.installer.rollback().await?;
-        let version = self.installer.active_version()?;
-        *self.status.write().await = RuntimeBootstrapStatus::ready(version);
-        Ok(entrypoint)
+        let generation = match self.begin_operation(OperationKind::Rollback).await {
+            OperationRole::Follower(CompletedOperation::Rollback(result)) => return result,
+            OperationRole::Follower(CompletedOperation::Bootstrap(_)) => unreachable!(),
+            OperationRole::Leader(generation) => generation,
+        };
+        let result = async {
+            let entrypoint = self.installer.rollback().await?;
+            let version = self.installer.active_version()?;
+            *self.status.write().await = RuntimeBootstrapStatus::ready(version);
+            Ok(entrypoint)
+        }
+        .await;
+        self.finish_operation(
+            OperationKind::Rollback,
+            generation,
+            CompletedOperation::Rollback(result.clone()),
+        )
+        .await;
+        result
+    }
+
+    async fn begin_operation(&self, requested: OperationKind) -> OperationRole {
+        loop {
+            let mut state = self.operation.lock().await;
+            if let Some(in_flight) = &state.in_flight {
+                let same_kind = in_flight.kind == requested;
+                let mut receiver = in_flight.result.subscribe();
+                drop(state);
+                if receiver.borrow().is_none() {
+                    let _ = receiver.changed().await;
+                }
+                let completed = receiver.borrow().clone();
+                if same_kind {
+                    if let Some(completed) = completed {
+                        return OperationRole::Follower(completed);
+                    }
+                }
+                continue;
+            }
+            state.generation = state.generation.checked_add(1).unwrap_or(1);
+            let generation = state.generation;
+            let (result, receiver) = tokio::sync::watch::channel(None);
+            drop(receiver);
+            state.in_flight = Some(InFlightOperation {
+                generation,
+                kind: requested,
+                result,
+            });
+            return OperationRole::Leader(generation);
+        }
+    }
+
+    async fn finish_operation(
+        &self,
+        kind: OperationKind,
+        generation: u64,
+        completed: CompletedOperation,
+    ) {
+        let mut state = self.operation.lock().await;
+        if let Some(in_flight) = &state.in_flight {
+            if in_flight.kind == kind && in_flight.generation == generation {
+                in_flight.result.send_replace(Some(completed));
+                state.in_flight = None;
+            }
+        }
     }
 
     async fn publish<F>(&self, status: RuntimeBootstrapStatus, progress: &F)
@@ -250,26 +375,83 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
     }
 }
 
-fn status_result(status: RuntimeBootstrapStatus) -> Result<RuntimeBootstrapStatus, String> {
-    Ok(status)
+fn public_error(internal: &str) -> (&'static str, bool) {
+    match internal {
+        "runtime_download_failed"
+        | "runtime_download_invalid_response"
+        | "runtime_download_too_large"
+        | "runtime_download_cleanup_failed"
+        | "runtime_size_mismatch"
+        | "runtime_hash_mismatch"
+        | "runtime_staging_failed"
+        | "runtime_extraction_failed"
+        | "runtime_metadata_write_failed"
+        | "runtime_version_unavailable"
+        | "runtime_version_already_exists"
+        | "runtime_health_check_failed"
+        | "runtime_health_timeout"
+        | "runtime_health_output_too_large"
+        | "runtime_health_stderr"
+        | "runtime_activation_failed"
+        | "runtime_orphan_cleanup_failed"
+        | "runtime_manifest_download_failed" => (internal_to_public(internal), true),
+        "invalid_runtime_signature"
+        | "invalid_runtime_manifest"
+        | "invalid_runtime_asset"
+        | "runtime_manifest_too_large"
+        | "runtime_manifest_signature_too_large"
+        | "runtime_asset_unavailable"
+        | "runtime_platform_unsupported"
+        | "invalid_runtime_archive"
+        | "unsafe_runtime_archive"
+        | "runtime_archive_too_large"
+        | "unsafe_runtime_root"
+        | "unsafe_runtime_download_path"
+        | "unsafe_runtime_staging"
+        | "unsafe_runtime_version"
+        | "invalid_runtime_state"
+        | "invalid_runtime_metadata" => (internal_to_public(internal), false),
+        _ => ("runtime_internal_error", true),
+    }
 }
 
-fn recoverable_error(code: &str) -> bool {
-    matches!(
-        code,
-        "runtime_download_failed"
-            | "runtime_download_invalid_response"
-            | "runtime_download_too_large"
-            | "runtime_download_cleanup_failed"
-            | "runtime_size_mismatch"
-            | "runtime_hash_mismatch"
-            | "runtime_staging_failed"
-            | "runtime_extraction_failed"
-            | "runtime_health_check_failed"
-            | "runtime_activation_failed"
-            | "runtime_activation_cleanup_failed"
-            | "runtime_manifest_download_failed"
-    )
+fn internal_to_public(code: &str) -> &'static str {
+    match code {
+        "runtime_health_timeout" | "runtime_health_output_too_large" | "runtime_health_stderr" => {
+            "runtime_health_check_failed"
+        }
+        "unsafe_runtime_archive"
+        | "invalid_runtime_archive"
+        | "runtime_archive_too_large"
+        | "unsafe_runtime_root"
+        | "unsafe_runtime_download_path"
+        | "unsafe_runtime_staging"
+        | "unsafe_runtime_version"
+        | "invalid_runtime_state"
+        | "invalid_runtime_metadata" => "runtime_install_security_error",
+        "runtime_download_failed" => "runtime_download_failed",
+        "runtime_download_invalid_response" => "runtime_download_invalid_response",
+        "runtime_download_too_large" => "runtime_download_too_large",
+        "runtime_download_cleanup_failed" => "runtime_download_cleanup_failed",
+        "runtime_size_mismatch" => "runtime_size_mismatch",
+        "runtime_hash_mismatch" => "runtime_hash_mismatch",
+        "runtime_staging_failed" => "runtime_staging_failed",
+        "runtime_extraction_failed" => "runtime_extraction_failed",
+        "runtime_activation_failed"
+        | "runtime_orphan_cleanup_failed"
+        | "runtime_metadata_write_failed"
+        | "runtime_version_unavailable"
+        | "runtime_version_already_exists" => "runtime_activation_failed",
+        "runtime_manifest_download_failed" => "runtime_manifest_download_failed",
+        "invalid_runtime_signature" => "invalid_runtime_signature",
+        "invalid_runtime_manifest" => "invalid_runtime_manifest",
+        "invalid_runtime_asset" => "invalid_runtime_asset",
+        "runtime_manifest_too_large" => "runtime_manifest_too_large",
+        "runtime_manifest_signature_too_large" => "runtime_manifest_signature_too_large",
+        "runtime_asset_unavailable" => "runtime_asset_unavailable",
+        "runtime_platform_unsupported" => "runtime_platform_unsupported",
+        _ => "runtime_internal_error",
+    }
 }
 
 async fn fetch_bounded(
@@ -328,7 +510,6 @@ mod tests {
     use crate::storage::DataLayout;
     use sha2::{Digest, Sha256};
     use std::io::Write as _;
-    use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -369,35 +550,42 @@ mod tests {
         async fn download(
             &self,
             _asset: &RuntimeAsset,
-            destination: &Path,
+            destination: &mut tokio::fs::File,
             resume_from: u64,
             progress: &(dyn Fn(u64, u64) + Send + Sync),
         ) -> Result<(), String> {
-            use tokio::io::AsyncWriteExt;
+            use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
             self.downloads.fetch_add(1, Ordering::SeqCst);
             tokio::time::sleep(Duration::from_millis(30)).await;
-            let mut options = tokio::fs::OpenOptions::new();
-            options.create(true).write(true);
             if resume_from == 0 {
-                options.truncate(true);
+                destination
+                    .set_len(0)
+                    .await
+                    .map_err(|_| "runtime_download_failed".to_string())?;
+                destination
+                    .seek(std::io::SeekFrom::Start(0))
+                    .await
+                    .map_err(|_| "runtime_download_failed".to_string())?;
             } else {
-                options.append(true);
+                destination
+                    .seek(std::io::SeekFrom::Start(resume_from))
+                    .await
+                    .map_err(|_| "runtime_download_failed".to_string())?;
             }
-            let mut file = options
-                .open(destination)
-                .await
-                .map_err(|_| "runtime_download_failed".to_string())?;
             let midpoint = resume_from as usize + (self.bytes.len() - resume_from as usize) / 2;
-            file.write_all(&self.bytes[resume_from as usize..midpoint])
+            destination
+                .write_all(&self.bytes[resume_from as usize..midpoint])
                 .await
                 .map_err(|_| "runtime_download_failed".to_string())?;
             progress(midpoint as u64, self.bytes.len() as u64);
-            file.write_all(&self.bytes[midpoint..])
+            destination
+                .write_all(&self.bytes[midpoint..])
                 .await
                 .map_err(|_| "runtime_download_failed".to_string())?;
             progress(self.bytes.len() as u64, self.bytes.len() as u64);
-            file.sync_all()
+            destination
+                .sync_all()
                 .await
                 .map_err(|_| "runtime_download_failed".to_string())
         }
@@ -500,6 +688,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_identical_retries_share_one_completed_generation() {
+        let fixture = manager_fixture();
+        let downloads = fixture.source_downloads.clone();
+        let mut wrong_asset = fixture.source.asset();
+        wrong_asset.sha256 = "0".repeat(64);
+        let manager = Arc::new(RuntimeManager::with_components(
+            RuntimeInstaller::new(fixture.layout, fixture.source),
+            FakeBootstrap {
+                asset: wrong_asset,
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+        ));
+        assert_eq!(manager.start(|_| {}).await.unwrap().phase, "error");
+        let first = manager.clone();
+        let second = manager.clone();
+
+        let (first_status, second_status) = tokio::join!(
+            async move { first.retry(|_| {}).await.unwrap() },
+            async move { second.retry(|_| {}).await.unwrap() }
+        );
+
+        assert_eq!(first_status, second_status);
+        assert_eq!(downloads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
     async fn exposes_stable_recoverable_error_state_and_retries() {
         let fixture = manager_fixture();
         let mut wrong_asset = fixture.source.asset();
@@ -554,6 +768,89 @@ mod tests {
         let status = manager.status().await;
         assert_eq!(status.phase, "ready");
         assert_eq!(status.version.as_deref(), Some("0.9.0"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_rollbacks_share_one_swap_generation() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeSource::new();
+        let downloads = source.downloads.clone();
+        let installer = RuntimeInstaller::new(layout, source.clone());
+        let mut previous = source.asset();
+        previous.version = "0.9.0".into();
+        previous.url =
+            "https://github.com/kareem-sf/tawreed/releases/download/v0.9.0/runtime.zip".into();
+        installer.ensure(&previous).await.unwrap();
+        let current = source.asset();
+        installer.ensure(&current).await.unwrap();
+        let manager = Arc::new(RuntimeManager::with_components(
+            installer,
+            FakeBootstrap {
+                asset: current,
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+        ));
+        let first = manager.clone();
+        let second = manager.clone();
+
+        let (first_path, second_path) =
+            tokio::join!(async move { first.rollback().await.unwrap() }, async move {
+                second.rollback().await.unwrap()
+            });
+
+        assert_eq!(first_path, second_path);
+        assert!(first_path.to_string_lossy().contains("0.9.0"));
+        assert_eq!(manager.status().await.version.as_deref(), Some("0.9.0"));
+        assert_eq!(downloads.load(Ordering::SeqCst), 2);
+    }
+
+    #[derive(Clone)]
+    struct ErrorBootstrap(String);
+
+    #[async_trait::async_trait]
+    impl RuntimeBootstrapSource for ErrorBootstrap {
+        async fn verified_asset(&self) -> Result<RuntimeAsset, String> {
+            Err(self.0.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn maps_private_diagnostics_and_oversized_versions_to_shared_contract_bounds() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeSource::new();
+        let private = format!("C:\\Users\\secret\\{}", "x".repeat(200));
+        let manager = RuntimeManager::with_components(
+            RuntimeInstaller::new(layout.clone(), source.clone()),
+            ErrorBootstrap(private.clone()),
+        );
+
+        let status = manager.start(|_| {}).await.unwrap();
+
+        assert_eq!(status.error_code.as_deref(), Some("runtime_internal_error"));
+        assert!(!serde_json::to_string(&status).unwrap().contains(&private));
+        assert!(status.error_code.as_ref().unwrap().len() <= 80);
+
+        let mut oversized = source.asset();
+        oversized.version = "18446744073709551615.18446744073709551615.1".into();
+        oversized.url = format!(
+            "https://github.com/kareem-sf/tawreed/releases/download/v{}/runtime.zip",
+            oversized.version
+        );
+        assert!(oversized.version.len() > 40);
+        let manager = RuntimeManager::with_components(
+            RuntimeInstaller::new(layout, source),
+            FakeBootstrap {
+                asset: oversized,
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        let status = manager.start(|_| {}).await.unwrap();
+        assert_eq!(status.error_code.as_deref(), Some("invalid_runtime_asset"));
+        assert!(status.version.is_none());
     }
 
     #[test]
