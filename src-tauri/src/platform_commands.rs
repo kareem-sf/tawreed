@@ -1,6 +1,43 @@
+use crate::runtime::{RuntimeBootstrapStatus, RuntimeManager};
 use crate::storage::connections::{ConnectionStore, ConnectionSummary};
 use crate::storage::projects::{Checkpoint, ProjectStore, ProjectSummary};
 use crate::storage::DataLayout;
+use tauri::Emitter;
+
+const RUNTIME_PROGRESS_EVENT: &str = "runtime://progress";
+
+#[tauri::command]
+pub async fn runtime_status(
+    manager: tauri::State<'_, RuntimeManager>,
+) -> Result<RuntimeBootstrapStatus, String> {
+    Ok(manager.status().await)
+}
+
+#[tauri::command]
+pub async fn runtime_start(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, RuntimeManager>,
+) -> Result<RuntimeBootstrapStatus, String> {
+    let progress_app = app.clone();
+    manager
+        .start(move |status| {
+            let _ = progress_app.emit(RUNTIME_PROGRESS_EVENT, status);
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn runtime_retry(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, RuntimeManager>,
+) -> Result<RuntimeBootstrapStatus, String> {
+    let progress_app = app.clone();
+    manager
+        .retry(move |status| {
+            let _ = progress_app.emit(RUNTIME_PROGRESS_EVENT, status);
+        })
+        .await
+}
 
 #[tauri::command]
 pub fn list_connections() -> Result<Vec<ConnectionSummary>, String> {

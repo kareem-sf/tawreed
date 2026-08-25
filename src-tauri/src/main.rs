@@ -42,6 +42,9 @@ fn main() {
             commands::codex_models,
             commands::get_settings,
             commands::set_setting,
+            platform_commands::runtime_status,
+            platform_commands::runtime_start,
+            platform_commands::runtime_retry,
             platform_commands::list_connections,
             platform_commands::save_api_key_connection,
             platform_commands::delete_connection,
@@ -57,6 +60,15 @@ fn main() {
                 eprintln!("[tawreed] bootstrap failed: {e}");
                 e
             })?;
+            let layout = storage::DataLayout::discover().map_err(|error| {
+                eprintln!("[tawreed] runtime layout failed: {error}");
+                "runtime_internal_error".to_string()
+            })?;
+            let runtime_manager = runtime::RuntimeManager::new(layout).map_err(|error| {
+                eprintln!("[tawreed] runtime manager failed: {error}");
+                "runtime_internal_error".to_string()
+            })?;
+            app.manage(runtime_manager);
             app.manage(info);
             Ok(())
         })

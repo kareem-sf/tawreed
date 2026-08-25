@@ -122,6 +122,16 @@ body {
   color: #fff;
 }
 
+@keyframes bootstrap-progress {
+  from { transform: translateX(-130%); }
+  to { transform: translateX(330%); }
+}
+
+.bootstrap-progress-indeterminate {
+  width: 32%;
+  animation: bootstrap-progress 1.35s ease-in-out infinite;
+}
+
 .titlebar-nav {
   height: 28px;
   display: inline-flex;
@@ -199,6 +209,11 @@ body {
   .titlebar-btn,
   .titlebar-nav {
     transition: none;
+  }
+
+  .bootstrap-progress-indeterminate {
+    animation: none;
+    transform: translateX(105%);
   }
 }
 

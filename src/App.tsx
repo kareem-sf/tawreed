@@ -9,8 +9,24 @@ import WorkLoader from './components/WorkLoader';
 import { DotPattern } from './components/ui/dot-pattern';
 import { WorkflowWorkspace } from './features/workflow/components/WorkflowWorkspace';
 import { useBoqWorkflow } from './features/workflow/useBoqWorkflow';
+import { BootstrapScreen } from './features/bootstrap/BootstrapScreen';
+import { useRuntimeBootstrap } from './features/bootstrap/useRuntimeBootstrap';
+import { selectAppSurface } from './app/routing';
+import type { RuntimeBootstrapStatus } from '../shared/platform';
 
 export default function App() {
+  const runtime = useRuntimeBootstrap();
+  const surface = selectAppSurface(runtime.status, {
+    configured: false,
+    onboardingOpen: false,
+  });
+  if (surface === 'bootstrap') {
+    return <BootstrapScreen status={runtime.status} onRetry={runtime.retry} />;
+  }
+  return <ReadyApp runtime={runtime.status} />;
+}
+
+function ReadyApp({ runtime }: { runtime: RuntimeBootstrapStatus }) {
   const { t } = useTranslation();
   const [dialog, setDialog] = useState<AppDialog>(null);
   const configuration = useAppConfiguration();
@@ -20,7 +36,13 @@ export default function App() {
     processingMode: configuration.processingMode,
   });
 
-  if (!configuration.boot) {
+  const surface = selectAppSurface(runtime, {
+    configured: configuration.boot !== null,
+    onboardingOpen: configuration.onboardingOpen,
+  });
+  const boot = configuration.boot;
+
+  if (surface === 'configuration' || !boot) {
     return (
       <div className="app-frame flex items-center justify-center">
         <WorkLoader title={t('startingTawreed')} size="md" />
@@ -28,14 +50,14 @@ export default function App() {
     );
   }
 
-  if (configuration.onboardingOpen) {
+  if (surface === 'onboarding') {
     return (
       <div className="app-frame">
         <Onboarding
           initialStep={configuration.onboardingStep}
           required={configuration.onboardingRequired}
-          hasKey={configuration.boot.has_api_key}
-          hasCompatibleKey={configuration.boot.has_compatible_key}
+          hasKey={boot.has_api_key}
+          hasCompatibleKey={boot.has_compatible_key}
           onComplete={() => void configuration.completeOnboarding()}
           onClose={configuration.closeOnboarding}
         />
@@ -54,7 +76,7 @@ export default function App() {
       />
 
       <WorkflowWorkspace
-        boot={configuration.boot}
+        boot={boot}
         state={workflow.state}
         onFile={(file) => void workflow.handleFile(file)}
         onConsent={workflow.analyzePending}
@@ -66,7 +88,7 @@ export default function App() {
 
       <AppDialogs
         active={dialog}
-        boot={configuration.boot}
+        boot={boot}
         update={configuration.update}
         onChange={setDialog}
         onSettingsClosed={() => void configuration.refreshConfiguration()}
