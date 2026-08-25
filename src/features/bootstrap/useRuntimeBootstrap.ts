@@ -27,46 +27,60 @@ export interface RuntimeBootstrapGeneration {
   dispose: () => void;
 }
 
+type RuntimeControllerMode =
+  | { kind: 'subscribing' }
+  | { kind: 'probing' }
+  | { kind: 'external-observing' }
+  | { kind: 'command-active'; command: 'start' | 'retry'; id: number }
+  | { kind: 'settled' };
+
+function isTerminalStatus(status: RuntimeBootstrapStatus): boolean {
+  return status.phase === 'ready' || status.phase === 'error';
+}
+
 export function createRuntimeBootstrapGeneration(
   dependencies: RuntimeBootstrapDependencies,
   dispatch: (status: RuntimeBootstrapStatus) => void,
 ): RuntimeBootstrapGeneration {
   let live = true;
   let started = false;
-  let attemptEpoch = 0;
-  let eventSequence = 0;
-  let terminalEventEpoch: number | undefined;
+  let nextCommandId = 0;
+  let mode: RuntimeControllerMode = { kind: 'subscribing' };
   let unlisten: RuntimeUnlisten | undefined;
-  let activeRetry: { epoch: number; promise: Promise<void> } | undefined;
+  let activeRetry: { id: number; promise: Promise<void> } | undefined;
 
-  const publishCommand = (epoch: number, status: RuntimeBootstrapStatus) => {
-    if (live && epoch === attemptEpoch && terminalEventEpoch !== epoch) dispatch(status);
+  const settleCommand = (id: number, status: RuntimeBootstrapStatus) => {
+    if (!live || mode.kind !== 'command-active' || mode.id !== id) return;
+    dispatch(status);
+    mode = { kind: 'settled' };
   };
-  const publishCommandError = (epoch: number) => {
-    publishCommand(epoch, RUNTIME_PROTOCOL_ERROR_STATUS);
+  const settleCommandError = (id: number) => {
+    settleCommand(id, RUNTIME_PROTOCOL_ERROR_STATUS);
   };
   const publishEvent = (status: RuntimeBootstrapStatus) => {
     if (!live) return;
-    eventSequence += 1;
-    if (status.phase === 'ready' || status.phase === 'error') {
-      terminalEventEpoch = attemptEpoch;
-      activeRetry = undefined;
+    if (mode.kind === 'command-active') {
+      if (!isTerminalStatus(status)) dispatch(status);
+      return;
     }
+    if (mode.kind === 'settled') return;
     dispatch(status);
+    mode = isTerminalStatus(status)
+      ? { kind: 'settled' }
+      : { kind: 'external-observing' };
   };
   const publishEventError = () => publishEvent(RUNTIME_PROTOCOL_ERROR_STATUS);
 
   const run = async () => {
     if (!live || started) return;
     started = true;
-    const epoch = attemptEpoch;
-    const subscriptionSequence = eventSequence;
     let stop: RuntimeUnlisten;
     try {
       stop = await dependencies.subscribe(publishEvent, publishEventError);
     } catch {
-      if (live && epoch === attemptEpoch && subscriptionSequence === eventSequence) {
+      if (live && mode.kind === 'subscribing') {
         dispatch(RUNTIME_PROTOCOL_ERROR_STATUS);
+        mode = { kind: 'settled' };
       }
       return;
     }
@@ -75,44 +89,56 @@ export function createRuntimeBootstrapGeneration(
       return;
     }
     unlisten = stop;
-    if (epoch !== attemptEpoch || subscriptionSequence !== eventSequence) return;
+    if (mode.kind !== 'subscribing') return;
+    mode = { kind: 'probing' };
 
-    const probeSequence = eventSequence;
+    let current: RuntimeBootstrapStatus;
     try {
-      const current = await dependencies.status();
-      if (!live || epoch !== attemptEpoch || probeSequence !== eventSequence) return;
-      dispatch(current);
-      if (current.phase === 'ready') return;
+      current = await dependencies.status();
     } catch {
-      if (live && epoch === attemptEpoch && probeSequence === eventSequence) {
+      if (live && mode.kind === 'probing') {
         dispatch(RUNTIME_PROTOCOL_ERROR_STATUS);
+        mode = { kind: 'settled' };
       }
       return;
     }
+    if (!live || mode.kind !== 'probing') return;
+    dispatch(current);
+    if (current.phase === 'ready') {
+      mode = { kind: 'settled' };
+      return;
+    }
 
+    nextCommandId += 1;
+    const id = nextCommandId;
+    mode = { kind: 'command-active', command: 'start', id };
     try {
       const completed = await dependencies.start();
-      publishCommand(epoch, completed);
+      settleCommand(id, completed);
     } catch {
-      publishCommandError(epoch);
+      settleCommandError(id);
     }
   };
 
   const retry = (): Promise<void> => {
     if (!live) return Promise.resolve();
-    if (activeRetry) return activeRetry.promise;
+    if (
+      mode.kind === 'command-active'
+      && mode.command === 'retry'
+      && activeRetry?.id === mode.id
+    ) return activeRetry.promise;
 
-    attemptEpoch += 1;
-    terminalEventEpoch = undefined;
-    const epoch = attemptEpoch;
+    nextCommandId += 1;
+    const id = nextCommandId;
+    mode = { kind: 'command-active', command: 'retry', id };
     const operation = Promise.resolve()
       .then(() => dependencies.retry())
-      .then((completed) => publishCommand(epoch, completed))
-      .catch(() => publishCommandError(epoch))
+      .then((completed) => settleCommand(id, completed))
+      .catch(() => settleCommandError(id))
       .finally(() => {
-        if (activeRetry?.epoch === epoch) activeRetry = undefined;
+        if (activeRetry?.id === id) activeRetry = undefined;
       });
-    activeRetry = { epoch, promise: operation };
+    activeRetry = { id, promise: operation };
     return operation;
   };
 

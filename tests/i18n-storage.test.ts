@@ -42,6 +42,7 @@ describe('i18n locale storage', () => {
       ['ar', 'ar', 'rtl'],
       ['ar-EG', 'ar', 'rtl'],
       ['ar-SA', 'ar', 'rtl'],
+      ['ar_SA', 'ar', 'rtl'],
       ['en', 'en', 'ltr'],
       ['en-US', 'en', 'ltr'],
       ['fr-FR', 'en', 'ltr'],

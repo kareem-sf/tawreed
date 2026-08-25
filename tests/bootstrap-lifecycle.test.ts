@@ -203,7 +203,7 @@ describe('runtime bootstrap lifecycle generation', () => {
     expect(dispatch.mock.calls).toEqual([[checking], [BROWSER_READY_RUNTIME_STATUS]]);
   });
 
-  it('invalidates a pending retry completion and rejection when an event arrives', async () => {
+  it('uses the owned retry rejection instead of an untagged terminal event', async () => {
     const retryResult = deferred<RuntimeBootstrapStatus>();
     let event: ((status: RuntimeBootstrapStatus) => void) | undefined;
     const dispatch = vi.fn();
@@ -222,7 +222,7 @@ describe('runtime bootstrap lifecycle generation', () => {
     retryResult.reject(new Error('stale retry failure'));
     await retrying;
 
-    expect(dispatch.mock.calls).toEqual([[recoverableError]]);
+    expect(dispatch.mock.calls).toEqual([[RUNTIME_PROTOCOL_ERROR_STATUS]]);
   });
 
   it('coalesces rapid retry calls into one host operation and one completion', async () => {
@@ -296,7 +296,50 @@ describe('runtime bootstrap lifecycle generation', () => {
     ]);
   });
 
-  it('allows a new retry after terminal error and suppresses the older retry return', async () => {
+  it('keeps rapid retry coalesced when an untagged terminal event arrives', async () => {
+    const retryResult = deferred<RuntimeBootstrapStatus>();
+    const retry = vi.fn(() => retryResult.promise);
+    let event: ((status: RuntimeBootstrapStatus) => void) | undefined;
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({
+      subscribe: async (handler) => {
+        event = handler;
+        return () => undefined;
+      },
+      retry,
+    }), dispatch);
+    await generation.run();
+    dispatch.mockClear();
+
+    const first = generation.retry();
+    await Promise.resolve();
+    event?.(recoverableError);
+    const second = generation.retry();
+    expect(retry).toHaveBeenCalledTimes(1);
+    retryResult.resolve(recoverableError);
+    await Promise.all([first, second]);
+
+    expect(dispatch.mock.calls).toEqual([[recoverableError]]);
+  });
+
+  it('ignores late nonterminal events after an owned command settles ready', async () => {
+    let event: ((status: RuntimeBootstrapStatus) => void) | undefined;
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({
+      subscribe: async (handler) => {
+        event = handler;
+        return () => undefined;
+      },
+      status: async () => checking,
+    }), dispatch);
+
+    await generation.run();
+    event?.(downloading);
+
+    expect(dispatch.mock.calls).toEqual([[checking], [BROWSER_READY_RUNTIME_STATUS]]);
+  });
+
+  it('ignores a delayed retry-one terminal event while retry two owns authority', async () => {
     const firstResult = deferred<RuntimeBootstrapStatus>();
     const secondResult = deferred<RuntimeBootstrapStatus>();
     const retry = vi.fn()
@@ -316,16 +359,69 @@ describe('runtime bootstrap lifecycle generation', () => {
 
     const first = generation.retry();
     await Promise.resolve();
-    event?.(recoverableError);
+    firstResult.resolve(recoverableError);
+    await first;
     const second = generation.retry();
     await Promise.resolve();
-    expect(retry).toHaveBeenCalledTimes(2);
+    event?.(recoverableError);
     secondResult.resolve(BROWSER_READY_RUNTIME_STATUS);
-    firstResult.resolve(recoverableError);
-    await Promise.all([first, second]);
+    await second;
 
     expect(dispatch.mock.calls).toEqual([
       [recoverableError], [BROWSER_READY_RUNTIME_STATUS],
     ]);
+  });
+
+  it('does not expose an untagged terminal event while an owned retry is active', async () => {
+    const retryResult = deferred<RuntimeBootstrapStatus>();
+    let event: ((status: RuntimeBootstrapStatus) => void) | undefined;
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({
+      subscribe: async (handler) => {
+        event = handler;
+        return () => undefined;
+      },
+      retry: () => retryResult.promise,
+    }), dispatch);
+    await generation.run();
+    dispatch.mockClear();
+
+    const retrying = generation.retry();
+    await Promise.resolve();
+    event?.(recoverableError);
+    expect(dispatch).not.toHaveBeenCalled();
+    retryResult.resolve(BROWSER_READY_RUNTIME_STATUS);
+    await retrying;
+
+    expect(dispatch.mock.calls).toEqual([[BROWSER_READY_RUNTIME_STATUS]]);
+  });
+
+  it('observes an external runtime after an event invalidates the pending probe', async () => {
+    const probe = deferred<RuntimeBootstrapStatus>();
+    const start = vi.fn(async () => BROWSER_READY_RUNTIME_STATUS);
+    let event: ((status: RuntimeBootstrapStatus) => void) | undefined;
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({
+      subscribe: async (handler) => {
+        event = handler;
+        return () => undefined;
+      },
+      status: () => probe.promise,
+      start,
+    }), dispatch);
+
+    const running = generation.run();
+    await Promise.resolve();
+    await Promise.resolve();
+    event?.(downloading);
+    event?.(verifying);
+    event?.(recoverableError);
+    probe.resolve(checking);
+    await running;
+
+    expect(dispatch.mock.calls).toEqual([
+      [downloading], [verifying], [recoverableError],
+    ]);
+    expect(start).not.toHaveBeenCalled();
   });
 });

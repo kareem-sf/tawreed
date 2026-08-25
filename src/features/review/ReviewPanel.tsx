@@ -7,6 +7,7 @@ import { PackageSummaryList } from './PackageSummaryList';
 import { ReviewItemsDialog } from './ReviewItemsDialog';
 import type { PipelineData } from '../workflow/types';
 import { NumberTicker } from '../../components/ui/number-ticker';
+import { isArabicLocale } from '../../i18n/locale';
 
 interface Props {
   data: PipelineData;
@@ -35,7 +36,7 @@ export default function ReviewPanel({
   const [itemsOpen, setItemsOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [packageFilter, setPackageFilter] = useState<string | null>(null);
-  const ar = i18n.language === 'ar';
+  const ar = isArabicLocale(i18n);
   const locale = ar ? 'ar-EG' : 'en-EG';
   const totalItems = data.inspection.items.length;
   const grandTotal = data.packages.reduce((sum, workPackage) => sum + workPackage.totalCost, 0);

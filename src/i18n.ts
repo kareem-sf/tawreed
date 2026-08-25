@@ -2,14 +2,13 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import ar from './i18n/resources/ar';
 import en from './i18n/resources/en';
+import {
+  canonicalLocale,
+  resolvedLocale,
+  type SupportedLocale,
+} from './i18n/locale';
 
 const LOCALE_STORAGE_KEY = 'tawreed-locale';
-type SupportedLocale = 'en' | 'ar';
-
-function canonicalLocale(language: unknown): SupportedLocale {
-  if (typeof language !== 'string') return 'en';
-  return language.trim().toLowerCase().split(/[-_]/, 1)[0] === 'ar' ? 'ar' : 'en';
-}
 
 function syncDocumentLocale(locale: SupportedLocale): void {
   if (typeof document === 'undefined') return;
@@ -47,12 +46,12 @@ i18n.use(initReactI18next).init({
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
 });
-const resolvedInitialLocale = canonicalLocale(i18n.resolvedLanguage ?? initialLocale);
+const resolvedInitialLocale = resolvedLocale(i18n);
 syncDocumentLocale(resolvedInitialLocale);
 persistLocale(resolvedInitialLocale);
 
 i18n.on('languageChanged', (language) => {
-  const locale = canonicalLocale(i18n.resolvedLanguage ?? language);
+  const locale = resolvedLocale({ language, resolvedLanguage: i18n.resolvedLanguage });
   syncDocumentLocale(locale);
   persistLocale(locale);
 });

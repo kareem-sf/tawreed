@@ -6,6 +6,7 @@ import { setSetting } from '../../bridge';
 import { currentDesktopWindow } from '../../platform/desktop/window';
 import Logo from '../../components/Logo';
 import { ProviderSetup } from '../settings/ProviderSetup';
+import { isArabicLocale } from '../../i18n/locale';
 
 type OnboardingStep = 'language' | 'video' | 'connection';
 
@@ -32,7 +33,7 @@ export default function Onboarding({
   const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [finishing, setFinishing] = useState(false);
   const appWindow = useMemo(() => currentDesktopWindow(), []);
-  const ar = i18n.language === 'ar';
+  const ar = isArabicLocale(i18n);
   const index = stepOrder.indexOf(step);
 
   useEffect(() => {

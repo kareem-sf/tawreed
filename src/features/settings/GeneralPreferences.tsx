@@ -3,6 +3,7 @@ import { Loader, SegmentedControl, Select, Text, useMantineColorScheme } from '@
 import { useTranslation } from 'react-i18next';
 import { getSettings, setSetting } from '../../bridge';
 import type { ProcessingMode } from '../workflow/useBoqWorkflow';
+import { resolvedLocale } from '../../i18n/locale';
 
 export function GeneralPreferences() {
   const { t, i18n } = useTranslation();
@@ -33,7 +34,7 @@ export function GeneralPreferences() {
         <SegmentedControl
           fullWidth
           size="xs"
-          value={i18n.language === 'ar' ? 'ar' : 'en'}
+          value={resolvedLocale(i18n)}
           onChange={(value) => void changeLanguage(value)}
           data={[
             { value: 'en', label: 'English' },

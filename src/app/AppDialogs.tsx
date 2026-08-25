@@ -4,6 +4,7 @@ import { openUpdateRelease, type BootstrapInfo } from '../bridge';
 import AboutModal from '../features/about/AboutModal';
 import HistoryDrawer from '../features/history/HistoryDrawer';
 import SettingsModal from '../features/settings/SettingsModal';
+import { isArabicLocale } from '../i18n/locale';
 import type { AppDialog, UpdateState } from './types';
 
 interface Props {
@@ -71,7 +72,7 @@ export function AppDialogs({
         opened={active === 'history'}
         onClose={() => onChange(null)}
         title={t('history')}
-        position={i18n.language === 'ar' ? 'left' : 'right'}
+        position={isArabicLocale(i18n) ? 'left' : 'right'}
         size={560}
         closeButtonProps={{ 'aria-label': t('close') }}
       >
