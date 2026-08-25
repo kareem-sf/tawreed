@@ -2,6 +2,7 @@
 
 mod codex;
 mod commands;
+pub mod storage;
 mod store;
 mod update;
 
