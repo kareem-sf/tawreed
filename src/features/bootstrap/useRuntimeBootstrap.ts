@@ -33,20 +33,25 @@ export function createRuntimeBootstrapGeneration(
 ): RuntimeBootstrapGeneration {
   let live = true;
   let started = false;
-  let revision = 0;
+  let attemptEpoch = 0;
+  let eventSequence = 0;
+  let terminalEventEpoch: number | undefined;
   let unlisten: RuntimeUnlisten | undefined;
-  let activeRetry: { revision: number; promise: Promise<void> } | undefined;
+  let activeRetry: { epoch: number; promise: Promise<void> } | undefined;
 
-  const publishAttempt = (attempt: number, status: RuntimeBootstrapStatus) => {
-    if (live && attempt === revision) dispatch(status);
+  const publishCommand = (epoch: number, status: RuntimeBootstrapStatus) => {
+    if (live && epoch === attemptEpoch && terminalEventEpoch !== epoch) dispatch(status);
   };
-  const publishAttemptError = (attempt: number) => {
-    publishAttempt(attempt, RUNTIME_PROTOCOL_ERROR_STATUS);
+  const publishCommandError = (epoch: number) => {
+    publishCommand(epoch, RUNTIME_PROTOCOL_ERROR_STATUS);
   };
   const publishEvent = (status: RuntimeBootstrapStatus) => {
     if (!live) return;
-    revision += 1;
-    activeRetry = undefined;
+    eventSequence += 1;
+    if (status.phase === 'ready' || status.phase === 'error') {
+      terminalEventEpoch = attemptEpoch;
+      activeRetry = undefined;
+    }
     dispatch(status);
   };
   const publishEventError = () => publishEvent(RUNTIME_PROTOCOL_ERROR_STATUS);
@@ -54,25 +59,42 @@ export function createRuntimeBootstrapGeneration(
   const run = async () => {
     if (!live || started) return;
     started = true;
-    const attempt = revision;
+    const epoch = attemptEpoch;
+    const subscriptionSequence = eventSequence;
+    let stop: RuntimeUnlisten;
     try {
-      const stop = await dependencies.subscribe(publishEvent, publishEventError);
-      if (!live) {
-        stop();
-        return;
-      }
-      unlisten = stop;
-      if (attempt !== revision) return;
-
-      const current = await dependencies.status();
-      if (!live || attempt !== revision) return;
-      publishAttempt(attempt, current);
-      if (current.phase === 'ready') return;
-
-      const completed = await dependencies.start();
-      publishAttempt(attempt, completed);
+      stop = await dependencies.subscribe(publishEvent, publishEventError);
     } catch {
-      publishAttemptError(attempt);
+      if (live && epoch === attemptEpoch && subscriptionSequence === eventSequence) {
+        dispatch(RUNTIME_PROTOCOL_ERROR_STATUS);
+      }
+      return;
+    }
+    if (!live) {
+      stop();
+      return;
+    }
+    unlisten = stop;
+    if (epoch !== attemptEpoch || subscriptionSequence !== eventSequence) return;
+
+    const probeSequence = eventSequence;
+    try {
+      const current = await dependencies.status();
+      if (!live || epoch !== attemptEpoch || probeSequence !== eventSequence) return;
+      dispatch(current);
+      if (current.phase === 'ready') return;
+    } catch {
+      if (live && epoch === attemptEpoch && probeSequence === eventSequence) {
+        dispatch(RUNTIME_PROTOCOL_ERROR_STATUS);
+      }
+      return;
+    }
+
+    try {
+      const completed = await dependencies.start();
+      publishCommand(epoch, completed);
+    } catch {
+      publishCommandError(epoch);
     }
   };
 
@@ -80,23 +102,23 @@ export function createRuntimeBootstrapGeneration(
     if (!live) return Promise.resolve();
     if (activeRetry) return activeRetry.promise;
 
-    revision += 1;
-    const attempt = revision;
+    attemptEpoch += 1;
+    terminalEventEpoch = undefined;
+    const epoch = attemptEpoch;
     const operation = Promise.resolve()
       .then(() => dependencies.retry())
-      .then((completed) => publishAttempt(attempt, completed))
-      .catch(() => publishAttemptError(attempt))
+      .then((completed) => publishCommand(epoch, completed))
+      .catch(() => publishCommandError(epoch))
       .finally(() => {
-        if (activeRetry?.revision === attempt) activeRetry = undefined;
+        if (activeRetry?.epoch === epoch) activeRetry = undefined;
       });
-    activeRetry = { revision: attempt, promise: operation };
+    activeRetry = { epoch, promise: operation };
     return operation;
   };
 
   const dispose = () => {
     if (!live) return;
     live = false;
-    revision += 1;
     activeRetry = undefined;
     unlisten?.();
     unlisten = undefined;

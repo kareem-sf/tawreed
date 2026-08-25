@@ -4,20 +4,33 @@ import ar from './i18n/resources/ar';
 import en from './i18n/resources/en';
 
 const LOCALE_STORAGE_KEY = 'tawreed-locale';
+type SupportedLocale = 'en' | 'ar';
 
-function syncDocumentLocale(language: string): void {
+function canonicalLocale(language: unknown): SupportedLocale {
+  if (typeof language !== 'string') return 'en';
+  return language.trim().toLowerCase().split(/[-_]/, 1)[0] === 'ar' ? 'ar' : 'en';
+}
+
+function syncDocumentLocale(locale: SupportedLocale): void {
   if (typeof document === 'undefined') return;
-  const locale = language === 'ar' ? 'ar' : 'en';
   document.documentElement.lang = locale;
   document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr';
 }
 
-function storedLocale(): 'en' | 'ar' {
+function persistLocale(locale: SupportedLocale): void {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    // Persistence is an optional enhancement in restricted/test contexts.
+  }
+}
+
+function storedLocale(): SupportedLocale {
   try {
     const saved = typeof window === 'undefined'
       ? null
       : window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    return saved === 'ar' ? 'ar' : 'en';
+    return canonicalLocale(saved);
   } catch {
     return 'en';
   }
@@ -34,17 +47,14 @@ i18n.use(initReactI18next).init({
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
 });
-syncDocumentLocale(initialLocale);
+const resolvedInitialLocale = canonicalLocale(i18n.resolvedLanguage ?? initialLocale);
+syncDocumentLocale(resolvedInitialLocale);
+persistLocale(resolvedInitialLocale);
 
 i18n.on('languageChanged', (language) => {
-  syncDocumentLocale(language);
-  try {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(LOCALE_STORAGE_KEY, language);
-    }
-  } catch {
-    // Persistence is an optional enhancement in restricted/test contexts.
-  }
+  const locale = canonicalLocale(i18n.resolvedLanguage ?? language);
+  syncDocumentLocale(locale);
+  persistLocale(locale);
 });
 
 export default i18n;
