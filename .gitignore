@@ -8,6 +8,8 @@ src-tauri/gen/schemas/
 coverage/
 .vite/
 .cache/
+.worktrees/
+.superpowers/
 *.tsbuildinfo
 
 # Local configuration and Tawreed runtime data
