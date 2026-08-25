@@ -3,11 +3,13 @@ use std::path::PathBuf;
 #[derive(Clone)]
 pub struct HistoryStore {
     path: PathBuf,
+    legacy_path: PathBuf,
 }
 
 impl HistoryStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        let legacy_path = path.with_file_name("legacy-runs.jsonl");
+        Self { path, legacy_path }
     }
 
     pub fn record(&self, value: &serde_json::Value) -> Result<(), String> {
@@ -21,19 +23,46 @@ impl HistoryStore {
     }
 
     pub fn list(&self) -> Result<Vec<serde_json::Value>, String> {
-        let content = match std::fs::read_to_string(&self.path) {
-            Ok(content) => content,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(error) => return Err(format!("read run history: {error}")),
-        };
-        content
-            .lines()
-            .rev()
-            .map(|line| {
-                serde_json::from_str(line).map_err(|error| format!("invalid_run_history: {error}"))
+        let mut records = read_records(&self.legacy_path)?;
+        records.extend(read_records(&self.path)?);
+        records.sort_by(|left, right| {
+            let left_started = left
+                .get("startedAt")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let right_started = right
+                .get("startedAt")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            right_started.cmp(left_started).then_with(|| {
+                right
+                    .get("id")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0)
+                    .cmp(
+                        &left
+                            .get("id")
+                            .and_then(serde_json::Value::as_i64)
+                            .unwrap_or(0),
+                    )
             })
-            .collect()
+        });
+        Ok(records)
     }
+}
+
+fn read_records(path: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("read run history: {error}")),
+    };
+    content
+        .lines()
+        .map(|line| {
+            serde_json::from_str(line).map_err(|error| format!("invalid_run_history: {error}"))
+        })
+        .collect()
 }
 
 #[cfg(test)]
