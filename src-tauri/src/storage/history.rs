@@ -21,7 +21,11 @@ impl HistoryStore {
     }
 
     pub fn list(&self) -> Result<Vec<serde_json::Value>, String> {
-        let content = std::fs::read_to_string(&self.path).unwrap_or_default();
+        let content = match std::fs::read_to_string(&self.path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(format!("read run history: {error}")),
+        };
         content
             .lines()
             .rev()
@@ -53,5 +57,17 @@ mod tests {
             ]
         );
         assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 2);
+    }
+
+    #[test]
+    fn reports_non_not_found_read_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("runs.jsonl");
+        std::fs::write(&path, [0xff]).unwrap();
+        let store = HistoryStore::new(path);
+
+        let error = store.list().unwrap_err();
+
+        assert!(error.starts_with("read run history: "), "{error}");
     }
 }

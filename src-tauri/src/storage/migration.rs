@@ -3,7 +3,8 @@ use rusqlite::OpenFlags;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const LEGACY_SQLITE_MIGRATION: &str = "legacy-sqlite-v1";
 const LEGACY_ENV_MIGRATION: &str = "legacy-env-v1";
@@ -11,6 +12,56 @@ const LEGACY_ENV_MIGRATION: &str = "legacy-env-v1";
 #[derive(Default, Deserialize, Serialize)]
 struct MigrationState {
     completed: Vec<String>,
+}
+
+struct LegacySqliteSnapshot {
+    directory: PathBuf,
+    database: PathBuf,
+}
+
+impl LegacySqliteSnapshot {
+    fn create(source: &Path) -> Result<Self, String> {
+        static NEXT_SNAPSHOT: AtomicU64 = AtomicU64::new(0);
+
+        let sequence = NEXT_SNAPSHOT.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!(
+            "tawreed-legacy-sqlite-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory)
+            .map_err(|error| format!("create legacy sqlite snapshot: {error}"))?;
+        let snapshot = Self {
+            database: directory.join("history.sqlite"),
+            directory,
+        };
+        std::fs::copy(source, &snapshot.database)
+            .map_err(|error| format!("copy legacy sqlite snapshot: {error}"))?;
+        let source_wal = sqlite_sidecar(source, "-wal");
+        if source_wal.exists() {
+            std::fs::copy(&source_wal, sqlite_sidecar(&snapshot.database, "-wal"))
+                .map_err(|error| format!("copy legacy sqlite WAL snapshot: {error}"))?;
+        }
+        Ok(snapshot)
+    }
+
+    fn database(&self) -> &Path {
+        &self.database
+    }
+}
+
+impl Drop for LegacySqliteSnapshot {
+    fn drop(&mut self) {
+        for suffix in ["-journal", "-shm", "-wal", ""] {
+            let _ = std::fs::remove_file(sqlite_sidecar(&self.database, suffix));
+        }
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
+fn sqlite_sidecar(database: &Path, suffix: &str) -> PathBuf {
+    let mut path = database.as_os_str().to_os_string();
+    path.push(suffix);
+    path.into()
 }
 
 pub fn migrate_legacy_state(layout: &DataLayout) -> Result<(), String> {
@@ -32,12 +83,13 @@ pub fn migrate_legacy_state(layout: &DataLayout) -> Result<(), String> {
     if !sqlite_complete {
         let database_path = layout.root.join("history.sqlite");
         if database_path.exists() {
+            let snapshot = LegacySqliteSnapshot::create(&database_path)?;
             import_runs(
-                &database_path,
+                snapshot.database(),
                 &layout.root.join("history").join("runs.jsonl"),
             )?;
             import_memory(
-                &database_path,
+                snapshot.database(),
                 &layout.rules.join("legacy-classification-memory.jsonl"),
             )?;
         }
@@ -263,6 +315,19 @@ fn atomic_write_jsonl(path: &Path, values: &[Value]) -> Result<(), String> {
 mod tests {
     use super::migrate_legacy_state;
     use crate::storage::DataLayout;
+    use std::collections::BTreeMap;
+
+    fn legacy_sqlite_family(root: &std::path::Path) -> BTreeMap<String, Vec<u8>> {
+        std::fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.starts_with("history.sqlite")
+                    .then(|| (name, std::fs::read(entry.path()).unwrap()))
+            })
+            .collect()
+    }
 
     #[test]
     fn imports_legacy_runs_once_and_keeps_the_database() {
@@ -457,5 +522,47 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn imports_committed_wal_rows_without_touching_the_legacy_sqlite_family() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let database_path = layout.root.join("history.sqlite");
+        let writer = rusqlite::Connection::open(&database_path).unwrap();
+        let journal_mode: String = writer
+            .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_mode, "wal");
+        writer
+            .execute_batch(
+                "PRAGMA wal_autocheckpoint = 0;
+                 CREATE TABLE runs (
+                    id INTEGER PRIMARY KEY, started_at TEXT NOT NULL,
+                    file_name TEXT NOT NULL, file_hash TEXT NOT NULL,
+                    item_count INTEGER NOT NULL, package_count INTEGER NOT NULL,
+                    error_count INTEGER NOT NULL, warning_count INTEGER NOT NULL,
+                    output_file TEXT NOT NULL, duration_ms INTEGER NOT NULL,
+                    llm_used INTEGER NOT NULL
+                 );
+                 INSERT INTO runs VALUES (
+                    91, '2026-02-01', 'wal.xlsx', 'wal-hash', 4, 2, 0, 1,
+                    'wal-out.xlsx', 30, 1
+                 );",
+            )
+            .unwrap();
+        let before = legacy_sqlite_family(&layout.root);
+        assert!(before["history.sqlite-wal"].len() > 32);
+        assert!(before.contains_key("history.sqlite-shm"));
+
+        migrate_legacy_state(&layout).unwrap();
+
+        let history = std::fs::read_to_string(layout.root.join("history/runs.jsonl")).unwrap();
+        let record: serde_json::Value = serde_json::from_str(history.trim()).unwrap();
+        assert_eq!(record["id"], 91);
+        assert_eq!(record["fileName"], "wal.xlsx");
+        assert_eq!(legacy_sqlite_family(&layout.root), before);
+        drop(writer);
     }
 }
