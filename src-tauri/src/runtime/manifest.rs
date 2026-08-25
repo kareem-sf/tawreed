@@ -181,18 +181,33 @@ fn valid_official_release_url(asset: &RuntimeAsset, version: &Version) -> bool {
 }
 
 fn valid_entrypoint(entrypoint: &str) -> bool {
-    if entrypoint.is_empty()
-        || entrypoint.starts_with('/')
-        || entrypoint.contains('\\')
-        || entrypoint.contains(':')
-        || entrypoint.contains('\0')
+    if entrypoint.is_empty() || entrypoint.starts_with('/') || entrypoint.contains('\\') {
+        return false;
+    }
+
+    entrypoint.split('/').all(valid_entrypoint_component)
+}
+
+fn valid_entrypoint_component(component: &str) -> bool {
+    if component.is_empty()
+        || component == "."
+        || component == ".."
+        || component.ends_with('.')
+        || component.ends_with(' ')
+        || component.chars().any(|character| {
+            character <= '\u{1f}' || matches!(character, '<' | '>' | '"' | '|' | '?' | '*' | ':')
+        })
     {
         return false;
     }
 
-    entrypoint
-        .split('/')
-        .all(|component| !component.is_empty() && component != "." && component != "..")
+    let stem = component.split('.').next().unwrap_or_default();
+    let upper_stem = stem.to_ascii_uppercase();
+    if matches!(upper_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return false;
+    }
+    let bytes = upper_stem.as_bytes();
+    !(bytes.len() == 4 && matches!(&bytes[..3], b"COM" | b"LPT") && matches!(bytes[3], b'1'..=b'9'))
 }
 
 #[cfg(test)]
@@ -384,6 +399,40 @@ mod tests {
             let mut asset = valid_asset();
             asset.entrypoint = entrypoint.into();
             assert_eq!(validate_asset(&asset).unwrap_err(), "invalid_runtime_asset");
+        }
+    }
+
+    #[test]
+    fn rejects_windows_ambiguous_entrypoint_components() {
+        for entrypoint in [
+            "agent./node.exe",
+            "agent /node.exe",
+            "agent/node.exe.",
+            "agent/node.exe ",
+            "agent/no\u{1f}de.exe",
+            "agent/no<de.exe",
+            "agent/no>de.exe",
+            "agent/no\"de.exe",
+            "agent/no|de.exe",
+            "agent/no?de.exe",
+            "agent/no*de.exe",
+            "CON",
+            "con.txt",
+            "agent/PRN.exe",
+            "agent/aux.log",
+            "agent/NUL",
+            "agent/com1.exe",
+            "agent/COM9",
+            "agent/lpt1.bin",
+            "agent/LPT9",
+        ] {
+            let mut asset = valid_asset();
+            asset.entrypoint = entrypoint.into();
+            assert_eq!(
+                validate_asset(&asset),
+                Err("invalid_runtime_asset".into()),
+                "accepted ambiguous Windows path {entrypoint:?}"
+            );
         }
     }
 

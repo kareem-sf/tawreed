@@ -7,10 +7,18 @@ import {
   open,
   realpath,
   rm,
+  rmdir,
   stat,
-  writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -57,6 +65,101 @@ function pathIsInside(parent, candidate) {
   );
 }
 
+function isUnsafeWindowsAlias(path) {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+  const windowsPath = path.replaceAll('/', '\\');
+  const upperPath = windowsPath.toUpperCase();
+  return (
+    windowsPath.startsWith('\\\\') ||
+    upperPath.startsWith('\\??\\') ||
+    upperPath.startsWith('\\DEVICE\\') ||
+    upperPath.startsWith('\\GLOBAL??\\')
+  );
+}
+
+async function nearestExistingAncestor(path) {
+  let candidate = path;
+  const missingComponents = [];
+  while (true) {
+    try {
+      await stat(candidate, { bigint: true });
+      return { path: candidate, missingComponents };
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
+      const parent = dirname(candidate);
+      if (parent === candidate) {
+        throw error;
+      }
+      missingComponents.unshift(basename(candidate));
+      candidate = parent;
+    }
+  }
+}
+
+function sameIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function ancestorChainContainsIdentity(start, expectedIdentity) {
+  let candidate = start;
+  while (true) {
+    const identity = await stat(candidate, { bigint: true });
+    if (sameIdentity(identity, expectedIdentity)) {
+      return true;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      return false;
+    }
+    candidate = parent;
+  }
+}
+
+function outsideRepositoryError() {
+  return new Error('Output directory must be outside the repository');
+}
+
+async function assertOutsideRepository(
+  candidate,
+  canonicalRepository,
+  repositoryIdentity,
+) {
+  const nearest = await nearestExistingAncestor(candidate);
+  const canonicalAncestor = await realpath(nearest.path);
+  const canonicalCandidate = resolve(
+    canonicalAncestor,
+    ...nearest.missingComponents,
+  );
+  if (
+    pathIsInside(canonicalRepository, canonicalCandidate) ||
+    (await ancestorChainContainsIdentity(nearest.path, repositoryIdentity))
+  ) {
+    throw outsideRepositoryError();
+  }
+  return nearest;
+}
+
+async function createMissingDirectories(nearest) {
+  const created = [];
+  let candidate = nearest.path;
+  for (const component of nearest.missingComponents) {
+    candidate = join(candidate, component);
+    try {
+      await mkdir(candidate, { mode: 0o700 });
+      created.push(candidate);
+    } catch (error) {
+      if (error?.code !== 'EEXIST' || !(await stat(candidate)).isDirectory()) {
+        throw error;
+      }
+    }
+  }
+  return created;
+}
+
 function secureWindowsPath(path, isDirectory) {
   const environment = {
     ...process.env,
@@ -94,27 +197,38 @@ async function securePath(path, mode, isDirectory) {
 }
 
 async function generateRuntimeKeypair(outputDirectory) {
+  if (isUnsafeWindowsAlias(outputDirectory)) {
+    throw new Error('Unsafe Windows UNC or device path');
+  }
   const requestedOutput = resolve(outputDirectory);
   const canonicalRepository = await realpath(repositoryRoot);
-
-  if (pathIsInside(canonicalRepository, requestedOutput)) {
-    throw new Error('Output directory must be outside the repository');
-  }
-
-  await mkdir(requestedOutput, { recursive: true, mode: 0o700 });
-  const canonicalOutput = await realpath(requestedOutput);
-  if (pathIsInside(canonicalRepository, canonicalOutput)) {
-    throw new Error('Output directory must be outside the repository');
-  }
-  await securePath(canonicalOutput, 0o700, true);
-
-  const privatePath = join(canonicalOutput, 'runtime-private.pem');
+  const repositoryIdentity = await stat(canonicalRepository, { bigint: true });
+  const nearest = await assertOutsideRepository(
+    requestedOutput,
+    canonicalRepository,
+    repositoryIdentity,
+  );
   const publicPath = join(canonicalRepository, 'src-tauri', 'runtime-updater.pub');
+  const createdDirectories = [];
+  let privatePath;
   let privateHandle;
   let privateCreated = false;
+  let publicHandle;
+  let publicCreated = false;
   let completed = false;
 
   try {
+    createdDirectories.push(...(await createMissingDirectories(nearest)));
+    const canonicalOutput = await realpath(requestedOutput);
+    if (
+      pathIsInside(canonicalRepository, canonicalOutput) ||
+      (await ancestorChainContainsIdentity(requestedOutput, repositoryIdentity))
+    ) {
+      throw outsideRepositoryError();
+    }
+    await securePath(canonicalOutput, 0o700, true);
+    privatePath = join(canonicalOutput, 'runtime-private.pem');
+
     try {
       privateHandle = await open(privatePath, 'wx', 0o600);
     } catch (error) {
@@ -139,9 +253,19 @@ async function generateRuntimeKeypair(outputDirectory) {
     privateHandle = undefined;
     await securePath(privatePath, 0o600, false);
 
-    await writeFile(publicPath, `${rawPublic.toString('base64')}\n`, {
-      encoding: 'utf8',
-    });
+    try {
+      publicHandle = await open(publicPath, 'wx');
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        throw new Error(`Public key already exists at ${publicPath}`);
+      }
+      throw error;
+    }
+    publicCreated = true;
+    await publicHandle.writeFile(`${rawPublic.toString('base64')}\n`, 'utf8');
+    await publicHandle.sync();
+    await publicHandle.close();
+    publicHandle = undefined;
 
     completed = true;
     return {
@@ -152,8 +276,19 @@ async function generateRuntimeKeypair(outputDirectory) {
     if (privateHandle) {
       await privateHandle.close().catch(() => {});
     }
+    if (publicHandle) {
+      await publicHandle.close().catch(() => {});
+    }
+    if (publicCreated && !completed) {
+      await rm(publicPath, { force: true }).catch(() => {});
+    }
     if (privateCreated && !completed) {
       await rm(privatePath, { force: true }).catch(() => {});
+    }
+    if (!completed) {
+      for (const directory of createdDirectories.reverse()) {
+        await rmdir(directory).catch(() => {});
+      }
     }
   }
 }

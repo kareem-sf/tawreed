@@ -7,9 +7,12 @@ import {
   mkdtemp,
   readFile,
   rm,
+  stat,
+  symlink,
+  writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, parse, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -83,6 +86,33 @@ $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.Security
   return JSON.parse(result.stdout.trim());
 }
 
+async function pathSecuritySnapshot(path) {
+  if (process.platform !== 'win32') {
+    const metadata = await stat(path);
+    return `${metadata.mode & 0o777}:${metadata.uid}:${metadata.gid}`;
+  }
+
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+(Get-Acl -LiteralPath $env:TAWREED_ACL_TARGET).Sddl
+`;
+  const result = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: Object.fromEntries(
+        Object.entries({ ...process.env, TAWREED_ACL_TARGET: path }).filter(
+          ([key]) => key.toUpperCase() !== 'PSMODULEPATH',
+        ),
+      ),
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
 test('requires exactly one output directory argument', async () => {
   await withFixture(async ({ script }) => {
     for (const args of [[], ['one', 'two']]) {
@@ -103,6 +133,58 @@ test('refuses output directories inside the repository', async () => {
     await assert.rejects(access(join(outputDirectory, 'runtime-private.pem')));
   });
 });
+
+test('refuses a junction or symlink into the repository before any mutation', async () => {
+  await withFixture(async ({ root, repository, script }) => {
+    const alias = join(root, 'repository-alias');
+    await symlink(
+      repository,
+      alias,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const outputDirectory = join(alias, 'private-keys');
+    const repositoryDestination = join(repository, 'private-keys');
+    const securityBefore = await pathSecuritySnapshot(repository);
+
+    const result = runScript(script, [outputDirectory]);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /outside the repository/);
+    await assert.rejects(access(repositoryDestination));
+    await assert.rejects(access(join(repositoryDestination, 'runtime-private.pem')));
+    assert.equal(await pathSecuritySnapshot(repository), securityBefore);
+  });
+});
+
+test(
+  'refuses Windows UNC and device aliases before any mutation',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    await withFixture(async ({ repository, script }) => {
+      const { root: driveRoot } = parse(repository);
+      const driveLetter = driveRoot[0];
+      const pathBelowDrive = repository.slice(driveRoot.length).split(sep).join('\\');
+      const aliases = [
+        `\\\\localhost\\${driveLetter}$\\${pathBelowDrive}\\unc-private-keys`,
+        `\\\\?\\${repository}\\device-private-keys`,
+      ];
+      const destinations = [
+        join(repository, 'unc-private-keys'),
+        join(repository, 'device-private-keys'),
+      ];
+      const securityBefore = await pathSecuritySnapshot(repository);
+
+      for (let index = 0; index < aliases.length; index += 1) {
+        const result = runScript(script, [aliases[index]]);
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /Unsafe Windows UNC or device path/);
+        await assert.rejects(access(destinations[index]));
+        await assert.rejects(access(join(destinations[index], 'runtime-private.pem')));
+        assert.equal(await pathSecuritySnapshot(repository), securityBefore);
+      }
+    });
+  },
+);
 
 test('writes a protected PKCS8 private key outside the repository and only the raw public key inside it', async () => {
   await withFixture(async ({ repository, script, outputDirectory }) => {
@@ -155,5 +237,21 @@ test('refuses to overwrite an existing private key', async () => {
     assert.notEqual(second.status, 0);
     assert.match(second.stderr, /already exists/);
     assert.deepEqual(await readFile(privatePath), originalPrivate);
+  });
+});
+
+test('preserves an existing public trust root and removes only newly created output', async () => {
+  await withFixture(async ({ repository, script, outputDirectory }) => {
+    const publicPath = join(repository, 'src-tauri', 'runtime-updater.pub');
+    const existingPublic = 'existing-public-trust-root\n';
+    await writeFile(publicPath, existingPublic, 'utf8');
+
+    const result = runScript(script, [outputDirectory]);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Public key already exists/);
+    assert.equal(await readFile(publicPath, 'utf8'), existingPublic);
+    await assert.rejects(access(join(outputDirectory, 'runtime-private.pem')));
+    await assert.rejects(access(outputDirectory));
   });
 });
