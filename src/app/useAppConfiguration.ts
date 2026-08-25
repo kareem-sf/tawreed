@@ -81,11 +81,6 @@ export function useAppConfiguration() {
     void refreshUpdate();
   }, [refreshUpdate]);
 
-  useEffect(() => {
-    document.documentElement.dir = i18n.language === 'ar' ? 'rtl' : 'ltr';
-    document.documentElement.lang = i18n.language;
-  }, [i18n.language]);
-
   const openOnboarding = useCallback((required = false, step: OnboardingStep = 'language') => {
     setConfiguration((current) => ({
       ...current,

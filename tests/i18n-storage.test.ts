@@ -6,8 +6,9 @@ describe('i18n locale storage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reads and writes locale through browser localStorage', async () => {
+  it('synchronizes Arabic and English document metadata without mounted configuration', async () => {
     const values = new Map([['tawreed-locale', 'ar']]);
+    const documentElement = { lang: '', dir: '' };
     const storage = {
       getItem: vi.fn((key: string) => values.get(key) ?? null),
       setItem: vi.fn((key: string, value: string) => {
@@ -15,11 +16,14 @@ describe('i18n locale storage', () => {
       }),
     };
     vi.stubGlobal('window', { localStorage: storage });
+    vi.stubGlobal('document', { documentElement });
 
     const { default: i18n } = await import('../src/i18n');
 
     expect(i18n.language).toBe('ar');
+    expect(documentElement).toEqual({ lang: 'ar', dir: 'rtl' });
     await i18n.changeLanguage('en');
+    expect(documentElement).toEqual({ lang: 'en', dir: 'ltr' });
     expect(storage.setItem).toHaveBeenCalledWith('tawreed-locale', 'en');
   });
 
@@ -38,6 +42,7 @@ describe('i18n locale storage', () => {
       const { default: i18n } = await import('../src/i18n');
       expect(i18n.language).toBe('en');
       expect(accessed).toBe(false);
+      expect(typeof document).toBe('undefined');
     } finally {
       if (originalDescriptor) {
         Object.defineProperty(globalThis, 'localStorage', originalDescriptor);

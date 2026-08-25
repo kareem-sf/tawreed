@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { RuntimeBootstrapStatus } from '../shared/platform';
 import {
   createRuntimeBootstrapGeneration,
   type RuntimeBootstrapDependencies,
@@ -10,9 +11,23 @@ import {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
+
+const checking: RuntimeBootstrapStatus = {
+  phase: 'checking', progress: null, component: null, version: null,
+  errorCode: null, recoverable: false,
+};
+
+const recoverableError: RuntimeBootstrapStatus = {
+  phase: 'error', progress: null, component: null, version: null,
+  errorCode: 'runtime_download_failed', recoverable: true,
+};
 
 function dependencies(
   overrides: Partial<RuntimeBootstrapDependencies> = {},
@@ -129,5 +144,92 @@ describe('runtime bootstrap lifecycle generation', () => {
     }), dispatch);
     await rejected.run();
     expect(dispatch).toHaveBeenLastCalledWith(RUNTIME_PROTOCOL_ERROR_STATUS);
+  });
+
+  it('keeps an event authoritative when it arrives before the startup probe resolves', async () => {
+    const probe = deferred<RuntimeBootstrapStatus>();
+    const start = vi.fn(async () => BROWSER_READY_RUNTIME_STATUS);
+    let event: ((status: RuntimeBootstrapStatus) => void) | undefined;
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({
+      subscribe: async (handler) => {
+        event = handler;
+        return () => undefined;
+      },
+      status: () => probe.promise,
+      start,
+    }), dispatch);
+
+    const running = generation.run();
+    await Promise.resolve();
+    await Promise.resolve();
+    event?.(recoverableError);
+    probe.resolve(checking);
+    await running;
+
+    expect(dispatch.mock.calls).toEqual([[recoverableError]]);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('ignores an older start rejection when a newer retry resolves first', async () => {
+    const oldStart = deferred<RuntimeBootstrapStatus>();
+    const retry = vi.fn(async () => BROWSER_READY_RUNTIME_STATUS);
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({
+      status: async () => checking,
+      start: () => oldStart.promise,
+      retry,
+    }), dispatch);
+
+    const running = generation.run();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await generation.retry();
+    oldStart.reject(new Error('older private host failure'));
+    await running;
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls).toEqual([[checking], [BROWSER_READY_RUNTIME_STATUS]]);
+  });
+
+  it('invalidates a pending retry completion and rejection when an event arrives', async () => {
+    const retryResult = deferred<RuntimeBootstrapStatus>();
+    let event: ((status: RuntimeBootstrapStatus) => void) | undefined;
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({
+      subscribe: async (handler) => {
+        event = handler;
+        return () => undefined;
+      },
+      retry: () => retryResult.promise,
+    }), dispatch);
+    await generation.run();
+    dispatch.mockClear();
+
+    const retrying = generation.retry();
+    event?.(recoverableError);
+    retryResult.reject(new Error('stale retry failure'));
+    await retrying;
+
+    expect(dispatch.mock.calls).toEqual([[recoverableError]]);
+  });
+
+  it('coalesces rapid retry calls into one host operation and one completion', async () => {
+    const retryResult = deferred<RuntimeBootstrapStatus>();
+    const retry = vi.fn(() => retryResult.promise);
+    const dispatch = vi.fn();
+    const generation = createRuntimeBootstrapGeneration(dependencies({ retry }), dispatch);
+    await generation.run();
+    dispatch.mockClear();
+
+    const first = generation.retry();
+    const second = generation.retry();
+    await Promise.resolve();
+    expect(retry).toHaveBeenCalledTimes(1);
+    retryResult.resolve(recoverableError);
+    await Promise.all([first, second]);
+
+    expect(dispatch.mock.calls).toEqual([[recoverableError]]);
   });
 });

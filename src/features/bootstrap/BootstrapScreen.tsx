@@ -74,41 +74,40 @@ export function BootstrapScreen({ status, onRetry }: BootstrapScreenProps) {
   return (
     <div className="app-frame text-zinc-950 dark:text-white">
       <BootstrapTitleBar />
-      <main
-        className="flex min-h-0 flex-1 items-center justify-center px-8 pb-12"
-        aria-busy={status.phase !== 'ready'}
-      >
-        <section className="w-full max-w-md text-center">
-          <Logo size={46} className="mx-auto drop-shadow-[0_8px_22px_rgba(232,181,74,0.22)]" />
-          <h1 className="mt-6 text-2xl font-semibold tracking-[-0.035em]">
-            {t('preparingTawreed')}
-          </h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-            {t('runtimeSetupDetail')}
-          </p>
+      <main className="flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
+        <div className="w-full max-w-md text-center">
+          <section aria-busy={status.phase !== 'ready' && status.phase !== 'error'}>
+            <Logo size={46} className="mx-auto drop-shadow-[0_8px_22px_rgba(232,181,74,0.22)]" />
+            <h1 className="mt-6 text-2xl font-semibold tracking-[-0.035em]">
+              {t('preparingTawreed')}
+            </h1>
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+              {t('runtimeSetupDetail')}
+            </p>
 
-          <div className="mx-auto mt-8 w-full max-w-sm">
-            <div
-              className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
-              role="progressbar"
-              aria-label={t('setupProgress')}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={status.progress ?? undefined}
-            >
+            <div className="mx-auto mt-8 w-full max-w-sm">
               <div
-                className={status.progress === null
-                  ? 'bootstrap-progress-indeterminate h-full rounded-full bg-amber-500'
-                  : 'h-full rounded-full bg-amber-500 transition-[width] duration-300 motion-reduce:transition-none'}
-                style={status.progress === null ? undefined : { width: `${status.progress}%` }}
-              />
-            </div>
-            {status.progress !== null ? (
-              <div className="mt-2 text-[11px] tabular-nums text-zinc-500">
-                {Math.round(status.progress)}%
+                className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
+                role="progressbar"
+                aria-label={t('setupProgress')}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={status.progress ?? undefined}
+              >
+                <div
+                  className={status.progress === null
+                    ? 'bootstrap-progress-indeterminate h-full rounded-full bg-amber-500'
+                    : 'h-full rounded-full bg-amber-500 transition-[width] duration-300 motion-reduce:transition-none'}
+                  style={status.progress === null ? undefined : { width: `${status.progress}%` }}
+                />
               </div>
-            ) : null}
-          </div>
+              {status.progress !== null ? (
+                <div className="mt-2 text-[11px] tabular-nums text-zinc-500">
+                  {Math.round(status.progress)}%
+                </div>
+              ) : null}
+            </div>
+          </section>
 
           <div className="mt-5" role="status" aria-live="polite" aria-atomic="true">
             <p className="text-sm font-medium">{t(`runtimePhase.${status.phase}`)}</p>
@@ -141,7 +140,7 @@ export function BootstrapScreen({ status, onRetry }: BootstrapScreenProps) {
               </code>
             </details>
           ) : null}
-        </section>
+        </div>
       </main>
     </div>
   );
