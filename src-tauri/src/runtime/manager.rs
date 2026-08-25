@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use super::installer::{
     current_target_key, runtime_http_client, HttpRuntimeSource, InstallPhase, InstallProgress,
-    RuntimeInstaller, RuntimeSource,
+    PinnedEntrypoint, RuntimeInstaller, RuntimeSource,
 };
 use super::manifest::{
     select_asset, validate_asset, verify_embedded_manifest, RuntimeAsset, RuntimeTarget,
@@ -163,11 +163,14 @@ enum OperationKind {
 struct InFlightOperation {
     generation: u64,
     kind: OperationKind,
-    result: tokio::sync::watch::Sender<Option<CompletedOperation>>,
+    result: tokio::sync::watch::Receiver<Option<CompletedOperation>>,
 }
 
 enum OperationRole {
-    Leader(u64),
+    Leader {
+        generation: u64,
+        result: tokio::sync::watch::Sender<Option<CompletedOperation>>,
+    },
     Follower(CompletedOperation),
 }
 
@@ -209,12 +212,14 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
                 return result;
             }
             OperationRole::Follower(CompletedOperation::Rollback(_)) => unreachable!(),
-            OperationRole::Leader(generation) => generation,
+            OperationRole::Leader { generation, result } => (generation, result),
         };
+        let (generation, result_sender) = generation;
         let result = self.run_start(&progress).await;
         self.finish_operation(
             OperationKind::Bootstrap,
             generation,
+            result_sender,
             CompletedOperation::Bootstrap(result.clone()),
         )
         .await;
@@ -294,7 +299,7 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         self.start(progress).await
     }
 
-    pub fn active_entrypoint(&self) -> Result<PathBuf, String> {
+    pub fn active_entrypoint(&self) -> Result<PinnedEntrypoint, String> {
         self.installer.active_entrypoint()
     }
 
@@ -302,8 +307,9 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         let generation = match self.begin_operation(OperationKind::Rollback).await {
             OperationRole::Follower(CompletedOperation::Rollback(result)) => return result,
             OperationRole::Follower(CompletedOperation::Bootstrap(_)) => unreachable!(),
-            OperationRole::Leader(generation) => generation,
+            OperationRole::Leader { generation, result } => (generation, result),
         };
+        let (generation, result_sender) = generation;
         let result = async {
             let entrypoint = self.installer.rollback().await?;
             let version = self.installer.active_version()?;
@@ -314,6 +320,7 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         self.finish_operation(
             OperationKind::Rollback,
             generation,
+            result_sender,
             CompletedOperation::Rollback(result.clone()),
         )
         .await;
@@ -325,10 +332,19 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
             let mut state = self.operation.lock().await;
             if let Some(in_flight) = &state.in_flight {
                 let same_kind = in_flight.kind == requested;
-                let mut receiver = in_flight.result.subscribe();
+                let generation = in_flight.generation;
+                let mut receiver = in_flight.result.clone();
                 drop(state);
-                if receiver.borrow().is_none() {
-                    let _ = receiver.changed().await;
+                if receiver.borrow().is_none() && receiver.changed().await.is_err() {
+                    let mut state = self.operation.lock().await;
+                    if state
+                        .in_flight
+                        .as_ref()
+                        .is_some_and(|operation| operation.generation == generation)
+                    {
+                        state.in_flight = None;
+                    }
+                    continue;
                 }
                 let completed = receiver.borrow().clone();
                 if same_kind {
@@ -341,13 +357,12 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
             state.generation = state.generation.checked_add(1).unwrap_or(1);
             let generation = state.generation;
             let (result, receiver) = tokio::sync::watch::channel(None);
-            drop(receiver);
             state.in_flight = Some(InFlightOperation {
                 generation,
                 kind: requested,
-                result,
+                result: receiver,
             });
-            return OperationRole::Leader(generation);
+            return OperationRole::Leader { generation, result };
         }
     }
 
@@ -355,12 +370,13 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         &self,
         kind: OperationKind,
         generation: u64,
+        result: tokio::sync::watch::Sender<Option<CompletedOperation>>,
         completed: CompletedOperation,
     ) {
         let mut state = self.operation.lock().await;
         if let Some(in_flight) = &state.in_flight {
             if in_flight.kind == kind && in_flight.generation == generation {
-                in_flight.result.send_replace(Some(completed));
+                result.send_replace(Some(completed));
                 state.in_flight = None;
             }
         }
@@ -388,6 +404,8 @@ fn public_error(internal: &str) -> (&'static str, bool) {
         | "runtime_metadata_write_failed"
         | "runtime_version_unavailable"
         | "runtime_version_already_exists"
+        | "runtime_state_lock_failed"
+        | "runtime_state_stale"
         | "runtime_health_check_failed"
         | "runtime_health_timeout"
         | "runtime_health_output_too_large"
@@ -441,7 +459,9 @@ fn internal_to_public(code: &str) -> &'static str {
         | "runtime_orphan_cleanup_failed"
         | "runtime_metadata_write_failed"
         | "runtime_version_unavailable"
-        | "runtime_version_already_exists" => "runtime_activation_failed",
+        | "runtime_version_already_exists"
+        | "runtime_state_lock_failed"
+        | "runtime_state_stale" => "runtime_activation_failed",
         "runtime_manifest_download_failed" => "runtime_manifest_download_failed",
         "invalid_runtime_signature" => "invalid_runtime_signature",
         "invalid_runtime_manifest" => "invalid_runtime_manifest",
@@ -660,12 +680,17 @@ mod tests {
         assert_eq!(final_status.progress, Some(100.0));
         assert_eq!(final_status.version.as_deref(), Some("1.0.0"));
         assert_eq!(
-            fixture.manager.active_entrypoint().unwrap(),
+            fixture
+                .manager
+                .active_entrypoint()
+                .unwrap()
+                .informational_path(),
             fixture
                 .layout
                 .runtime_versions
                 .join("1.0.0")
                 .join(health_entrypoint())
+                .as_path()
         );
     }
 
@@ -711,6 +736,107 @@ mod tests {
 
         assert_eq!(first_status, second_status);
         assert_eq!(downloads.load(Ordering::SeqCst), 2);
+    }
+
+    #[derive(Clone)]
+    struct CancelOnceBootstrap {
+        asset: RuntimeAsset,
+        calls: Arc<AtomicUsize>,
+        started: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeBootstrapSource for CancelOnceBootstrap {
+        async fn verified_asset(&self) -> Result<RuntimeAsset, String> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.started.notify_waiters();
+                std::future::pending::<()>().await;
+                unreachable!();
+            }
+            Ok(self.asset.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn aborted_leader_closes_followers_and_allows_one_new_leader() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeSource::new();
+        let downloads = source.downloads.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let manager = Arc::new(RuntimeManager::with_components(
+            RuntimeInstaller::new(layout, source.clone()),
+            CancelOnceBootstrap {
+                asset: source.asset(),
+                calls: calls.clone(),
+                started: started.clone(),
+            },
+        ));
+        let started_wait = started.notified();
+        let leader_manager = manager.clone();
+        let leader = tokio::spawn(async move { leader_manager.start(|_| {}).await });
+        started_wait.await;
+        let follower_manager = manager.clone();
+        let follower = tokio::spawn(async move { follower_manager.retry(|_| {}).await });
+        tokio::task::yield_now().await;
+
+        leader.abort();
+        let _ = leader.await;
+        let status = tokio::time::timeout(std::time::Duration::from_secs(2), follower)
+            .await
+            .expect("follower remained blocked after leader abort")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(status.phase, "ready");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(downloads.load(Ordering::SeqCst), 1);
+    }
+
+    #[derive(Clone)]
+    struct PanicOnceBootstrap {
+        asset: RuntimeAsset,
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeBootstrapSource for PanicOnceBootstrap {
+        async fn verified_asset(&self) -> Result<RuntimeAsset, String> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("injected bootstrap panic");
+            }
+            Ok(self.asset.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn panicked_leader_closes_generation_and_next_start_releads() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeSource::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let manager = Arc::new(RuntimeManager::with_components(
+            RuntimeInstaller::new(layout, source.clone()),
+            PanicOnceBootstrap {
+                asset: source.asset(),
+                calls: calls.clone(),
+            },
+        ));
+        let first = manager.clone();
+        assert!(tokio::spawn(async move { first.start(|_| {}).await })
+            .await
+            .is_err());
+
+        let status = tokio::time::timeout(std::time::Duration::from_secs(2), manager.start(|_| {}))
+            .await
+            .expect("next start remained blocked after leader panic")
+            .unwrap();
+
+        assert_eq!(status.phase, "ready");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

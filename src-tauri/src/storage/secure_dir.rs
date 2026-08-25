@@ -11,7 +11,6 @@ pub(crate) struct SecureDir {
 
 impl SecureDir {
     pub(crate) fn open_root(path: &Path) -> std::io::Result<Self> {
-        std::fs::create_dir_all(path)?;
         let parent = path.parent().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "root parent missing")
         })?;
@@ -19,9 +18,21 @@ impl SecureDir {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "root name missing")
         })?;
         let parent = Dir::open_ambient_dir(parent, cap_std::ambient_authority())?;
-        Ok(Self {
-            inner: parent.open_dir_nofollow(name)?,
-        })
+        match parent.open_dir_nofollow(name) {
+            Ok(inner) => Ok(Self { inner }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match parent.create_dir(name) {
+                    Ok(()) => {}
+                    Err(create_error)
+                        if create_error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(create_error) => return Err(create_error),
+                }
+                Ok(Self {
+                    inner: parent.open_dir_nofollow(name)?,
+                })
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) fn open_private_root(path: &Path) -> std::io::Result<Self> {
@@ -152,6 +163,40 @@ impl SecureDir {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "not a regular private file",
+            ));
+        }
+        restrict_private_file(&file, 0o600)?;
+        Ok(file)
+    }
+
+    pub(crate) fn open_or_create_lock_file(
+        &self,
+        name: &str,
+    ) -> std::io::Result<cap_std::fs::File> {
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .write(true)
+            .create(true)
+            .follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+
+            options.mode(0o600);
+        }
+        #[cfg(windows)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+            options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+        }
+        let file = self.inner.open_with(name, &options)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a regular lock file",
             ));
         }
         restrict_private_file(&file, 0o600)?;

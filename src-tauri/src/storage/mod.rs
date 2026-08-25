@@ -36,6 +36,36 @@ mod tests {
     }
 
     #[test]
+    fn layout_creation_rejects_linked_runtime_before_creating_descendants() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        std::fs::create_dir(&layout.root).unwrap();
+        create_directory_link(outside.path(), &layout.runtime);
+
+        assert!(layout.ensure().is_err());
+        assert!(!outside.path().join("versions").exists());
+    }
+
+    #[cfg(unix)]
+    fn create_directory_link(target: &std::path::Path, link: &std::path::Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn create_directory_link(target: &std::path::Path, link: &std::path::Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
     fn json_write_replaces_the_complete_document() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("settings.json");

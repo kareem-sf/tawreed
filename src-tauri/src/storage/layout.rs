@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use super::secure_dir::SecureDir;
+
 #[derive(Clone, Debug)]
 pub struct DataLayout {
     pub root: PathBuf,
@@ -38,19 +40,17 @@ impl DataLayout {
     }
 
     pub fn ensure(&self) -> Result<(), String> {
-        for path in [
-            &self.root,
-            &self.runtime,
-            &self.runtime_versions,
-            &self.assets,
-            &self.projects,
-            &self.rules,
-            &self.cache,
-            &self.staging,
-            &self.logs,
-        ] {
-            std::fs::create_dir_all(path)
-                .map_err(|error| format!("create {}: {error}", path.display()))?;
+        let root = SecureDir::open_private_root(&self.root)
+            .map_err(|_| "create data root failed".to_string())?;
+        let runtime = root
+            .open_or_create_private_dir("runtime")
+            .map_err(|_| "create runtime root failed".to_string())?;
+        runtime
+            .open_or_create_private_dir("versions")
+            .map_err(|_| "create runtime versions failed".to_string())?;
+        for name in ["assets", "projects", "rules", "cache", "staging", "logs"] {
+            root.open_or_create_private_dir(name)
+                .map_err(|_| format!("create {name} root failed"))?;
         }
         Ok(())
     }
