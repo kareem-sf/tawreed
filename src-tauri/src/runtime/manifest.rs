@@ -224,6 +224,7 @@ mod tests {
     use super::*;
     use base64::engine::general_purpose::STANDARD;
     use ed25519_dalek::{Signer, SigningKey};
+    use sha2::{Digest, Sha256};
 
     const VALID_MANIFEST: &[u8] = br#"{"schemaVersion":1,"appVersion":"0.5.6","assets":{"windows-x86_64":{"version":"1.0.0","url":"https://github.com/kareem-sf/tawreed/releases/download/v1.0.0/tawreed-runtime-windows-x64.zip","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1024,"archive":"zip","entrypoint":"agent/node.exe"}}}"#;
 
@@ -483,6 +484,21 @@ mod tests {
                 "invalid_runtime_key"
             );
         }
+    }
+
+    #[test]
+    fn embedded_public_key_matches_the_approved_fingerprint() {
+        let public_key = decode_public_key_base64(EMBEDDED_RUNTIME_PUBLIC_KEY_BASE64).unwrap();
+        let fingerprint = Sha256::digest(public_key)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+
+        assert_eq!(public_key.len(), 32);
+        assert_eq!(
+            fingerprint,
+            "daf0aba9cd4450abb50f89c2e75c943cb6ddda54a66211399bb434e026e6a71b"
+        );
     }
 
     #[test]

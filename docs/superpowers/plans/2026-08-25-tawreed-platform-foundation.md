@@ -701,7 +701,6 @@ git commit -m "feat(platform): add project checkpoints"
 - Create: `src-tauri/src/runtime/mod.rs`
 - Create: `src-tauri/src/runtime/manifest.rs`
 - Create: `src-tauri/runtime-updater.pub`
-- Create: `scripts/generate-runtime-keypair.mjs`
 - Modify: `src-tauri/src/main.rs:3-9`
 - Modify: `src-tauri/Cargo.toml`
 
@@ -802,23 +801,9 @@ pub fn verify_manifest(bytes: &[u8], signature: &[u8; 64], public_key: &[u8; 32]
 }
 ```
 
-- [ ] **Step 6: Generate and commit only the production public key**
+- [ ] **Step 6: Commit only the approved production public trust root**
 
-Implement `scripts/generate-runtime-keypair.mjs` so it requires an output directory outside the repository, writes an unencrypted PKCS#8 private key there with owner-only permissions, exports the Ed25519 public JWK, decodes its `x` member to the raw 32-byte key expected by Rust, and writes only that key in Base64 to `src-tauri/runtime-updater.pub`.
-
-```js
-const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
-const publicJwk = publicKey.export({ format: 'jwk' });
-const rawPublic = Buffer.from(publicJwk.x, 'base64url');
-if (rawPublic.length !== 32) throw new Error('Unexpected Ed25519 public key length');
-await writeFile(join(outDir, 'runtime-private.pem'), privatePem, { mode: 0o600 });
-await writeFile('src-tauri/runtime-updater.pub', `${rawPublic.toString('base64')}\n`);
-```
-
-Run: `node scripts/generate-runtime-keypair.mjs "$env:TEMP\tawreed-runtime-key"` on Windows, or `node scripts/generate-runtime-keypair.mjs "$TMPDIR/tawreed-runtime-key"` on Unix.
-
-Store the generated private key as the protected GitHub Actions secret `TAWREED_RUNTIME_SIGNING_KEY`; never print or commit it.
+The user-approved one-time production key ceremony runs outside reusable repository tooling. Commit only the newline-terminated Base64 public key to `src-tauri/runtime-updater.pub`; the private key remains outside the repository under owner-only access. Add a Rust regression that decodes the embedded public key to exactly 32 bytes and verifies its approved SHA-256 fingerprint. Do not perform any GitHub secret operation in this task. Future key rotation requires a separately approved security ceremony and tool.
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml runtime::manifest::`
 
@@ -827,7 +812,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit manifest verification**
 
 ```bash
-git add scripts/generate-runtime-keypair.mjs src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/runtime-updater.pub src-tauri/src/main.rs src-tauri/src/runtime
+git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/runtime-updater.pub src-tauri/src/main.rs src-tauri/src/runtime
 git commit -m "feat(runtime): verify signed manifests"
 ```
 
