@@ -191,25 +191,25 @@ fn metadata_signal(path: &Path) -> std::io::Result<Option<MetadataSignal>> {
 
 fn stable_legacy_content_fingerprint(
     database: &Path,
-) -> Result<LegacySqliteContentFingerprint, String> {
+) -> Result<Option<LegacySqliteContentFingerprint>, String> {
     for _ in 0..MAX_SNAPSHOT_ATTEMPTS {
         let before = LegacySqliteFingerprint::capture(database)?;
         if before.journal.is_some() {
-            return Err("legacy_sqlite_busy".into());
+            return Ok(None);
         }
         let after = LegacySqliteFingerprint::capture(database)?;
         if after.journal.is_some() {
-            return Err("legacy_sqlite_busy".into());
+            return Ok(None);
         }
         if before == after {
-            return Ok(before.content);
+            return Ok(Some(before.content));
         }
     }
     Err("legacy_sqlite_unstable".into())
 }
 
 pub fn migrate_legacy_state(layout: &DataLayout) -> Result<(), String> {
-    migrate_legacy_state_with_hooks(layout, |_| Ok(()), |_| Ok(()), || Ok(()))
+    migrate_legacy_state_with_hooks(layout, |_| Ok(()), |_| Ok(()), |_| Ok(()), || Ok(()))
 }
 
 #[cfg(test)]
@@ -220,7 +220,30 @@ fn migrate_legacy_state_with_snapshot_hook<F>(
 where
     F: FnMut(usize) -> Result<(), String>,
 {
-    migrate_legacy_state_with_hooks(layout, after_database_copy, |_| Ok(()), || Ok(()))
+    migrate_legacy_state_with_hooks(
+        layout,
+        after_database_copy,
+        |_| Ok(()),
+        |_| Ok(()),
+        || Ok(()),
+    )
+}
+
+#[cfg(test)]
+fn migrate_legacy_state_with_accepted_snapshot_hook<F>(
+    layout: &DataLayout,
+    after_accepted_snapshot: F,
+) -> Result<(), String>
+where
+    F: FnMut(usize) -> Result<(), String>,
+{
+    migrate_legacy_state_with_hooks(
+        layout,
+        |_| Ok(()),
+        after_accepted_snapshot,
+        |_| Ok(()),
+        || Ok(()),
+    )
 }
 
 #[cfg(test)]
@@ -231,7 +254,13 @@ fn migrate_legacy_state_with_finalization_hook<F>(
 where
     F: FnMut() -> Result<(), String>,
 {
-    migrate_legacy_state_with_hooks(layout, |_| Ok(()), |_| Ok(()), after_finalization)
+    migrate_legacy_state_with_hooks(
+        layout,
+        |_| Ok(()),
+        |_| Ok(()),
+        |_| Ok(()),
+        after_finalization,
+    )
 }
 
 #[cfg(test)]
@@ -242,19 +271,21 @@ fn migrate_legacy_state_with_marker_hook<F>(
 where
     F: FnMut(usize) -> Result<(), String>,
 {
-    migrate_legacy_state_with_hooks(layout, |_| Ok(()), after_marker, || Ok(()))
+    migrate_legacy_state_with_hooks(layout, |_| Ok(()), |_| Ok(()), after_marker, || Ok(()))
 }
 
-fn migrate_legacy_state_with_hooks<F, G, H>(
+fn migrate_legacy_state_with_hooks<F, G, H, I>(
     layout: &DataLayout,
     mut after_database_copy: F,
-    mut after_marker: G,
-    mut after_finalization: H,
+    mut after_accepted_snapshot: G,
+    mut after_marker: H,
+    mut after_finalization: I,
 ) -> Result<(), String>
 where
     F: FnMut(usize) -> Result<(), String>,
     G: FnMut(usize) -> Result<(), String>,
-    H: FnMut() -> Result<(), String>,
+    H: FnMut(usize) -> Result<(), String>,
+    I: FnMut() -> Result<(), String>,
 {
     layout.ensure()?;
     let state_path = layout.root.join("migrations.json");
@@ -270,6 +301,7 @@ where
         for pass in 0..MAX_FINALIZATION_PASSES {
             let (snapshot, fingerprint) =
                 LegacySqliteSnapshot::create(&database_path, &mut after_database_copy)?;
+            after_accepted_snapshot(pass)?;
             if sqlite_complete && state.legacy_sqlite_v1.as_ref() == Some(&fingerprint) {
                 break;
             }
@@ -290,7 +322,13 @@ where
             state_dirty = false;
             after_marker(pass)?;
 
-            if stable_legacy_content_fingerprint(&database_path)? == fingerprint {
+            let Some(current_fingerprint) = stable_legacy_content_fingerprint(&database_path)?
+            else {
+                // A transaction started after snapshot acceptance; its outcome is reconciled
+                // against the accepted fingerprint on the next migration pass.
+                break;
+            };
+            if current_fingerprint == fingerprint {
                 break;
             }
             if pass + 1 == MAX_FINALIZATION_PASSES {
@@ -530,9 +568,9 @@ fn atomic_write_jsonl(path: &Path, values: &[Value]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        migrate_legacy_state, migrate_legacy_state_with_finalization_hook,
-        migrate_legacy_state_with_marker_hook, migrate_legacy_state_with_snapshot_hook,
-        sqlite_sidecar,
+        migrate_legacy_state, migrate_legacy_state_with_accepted_snapshot_hook,
+        migrate_legacy_state_with_finalization_hook, migrate_legacy_state_with_marker_hook,
+        migrate_legacy_state_with_snapshot_hook, sqlite_sidecar,
     };
     use crate::storage::history::HistoryStore;
     use crate::storage::DataLayout;
@@ -571,6 +609,86 @@ mod tests {
         assert!(!layout.root.join("history.sqlite-shm").exists());
         let lines = std::fs::read_to_string(layout.root.join("history/legacy-runs.jsonl")).unwrap();
         assert_eq!(lines.lines().count(), 1);
+    }
+
+    #[test]
+    fn upgrades_completed_only_marker_without_duplicate_history() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let database_path = layout.root.join("history.sqlite");
+        let connection = rusqlite::Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE runs (
+                    id INTEGER PRIMARY KEY, started_at TEXT NOT NULL,
+                    file_name TEXT NOT NULL, file_hash TEXT NOT NULL,
+                    item_count INTEGER NOT NULL, package_count INTEGER NOT NULL,
+                    error_count INTEGER NOT NULL, warning_count INTEGER NOT NULL,
+                    output_file TEXT NOT NULL, duration_ms INTEGER NOT NULL,
+                    llm_used INTEGER NOT NULL
+                 );
+                 INSERT INTO runs VALUES (
+                    1, '2026-01-01', 'refreshed-legacy-one.xlsx', 'legacy-one',
+                    1, 1, 0, 0, 'legacy-one-out.xlsx', 10, 0
+                 );
+                 INSERT INTO runs VALUES (
+                    2, '2026-01-02', 'refreshed-legacy-two.xlsx', 'legacy-two',
+                    1, 1, 0, 0, 'legacy-two-out.xlsx', 11, 0
+                 );",
+            )
+            .unwrap();
+        drop(connection);
+        let database_before = std::fs::read(&database_path).unwrap();
+        let current_path = layout.root.join("history/runs.jsonl");
+        std::fs::create_dir_all(current_path.parent().unwrap()).unwrap();
+        let current_bytes = concat!(
+            "{\"id\":1,\"startedAt\":\"2026-01-01\",\"fileName\":\"stale-legacy-one.xlsx\"}\n",
+            "{\"id\":2,\"startedAt\":\"2026-01-02\",\"fileName\":\"stale-legacy-two.xlsx\"}\n",
+            "{\"id\":900,\"startedAt\":\"2026-01-03\",\"fileName\":\"current.xlsx\"}\n",
+            "{\"startedAt\":\"2026-01-04\",\"fileName\":\"missing-id.xlsx\"}\n",
+            "{\"id\":\"1\",\"startedAt\":\"2026-01-05\",\"fileName\":\"malformed-id.xlsx\"}\n"
+        )
+        .as_bytes();
+        std::fs::write(&current_path, current_bytes).unwrap();
+        std::fs::write(
+            layout.root.join("migrations.json"),
+            br#"{"completed":["legacy-sqlite-v1","legacy-env-v1"]}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_state(&layout).unwrap();
+
+        assert_eq!(std::fs::read(&database_path).unwrap(), database_before);
+        assert_eq!(std::fs::read(&current_path).unwrap(), current_bytes);
+        let history = HistoryStore::new(current_path).list().unwrap();
+        assert_eq!(
+            history
+                .iter()
+                .map(|record| record["fileName"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                "malformed-id.xlsx",
+                "missing-id.xlsx",
+                "current.xlsx",
+                "refreshed-legacy-two.xlsx",
+                "refreshed-legacy-one.xlsx",
+            ]
+        );
+        assert_eq!(
+            history
+                .iter()
+                .filter(|record| record["id"].as_i64() == Some(1))
+                .count(),
+            1
+        );
+        assert_eq!(
+            history
+                .iter()
+                .filter(|record| record["id"].as_i64() == Some(2))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -896,6 +1014,165 @@ mod tests {
     }
 
     #[test]
+    fn imports_a_verified_snapshot_when_a_later_delete_transaction_commits() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let database_path = layout.root.join("history.sqlite");
+        let writer = rusqlite::Connection::open(&database_path).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA page_size = 512;
+                 PRAGMA journal_mode = DELETE;
+                 PRAGMA cache_size = 1;
+                 PRAGMA cache_spill = ON;
+                 CREATE TABLE runs (
+                    id INTEGER PRIMARY KEY, started_at TEXT NOT NULL,
+                    file_name TEXT NOT NULL, file_hash TEXT NOT NULL,
+                    item_count INTEGER NOT NULL, package_count INTEGER NOT NULL,
+                    error_count INTEGER NOT NULL, warning_count INTEGER NOT NULL,
+                    output_file TEXT NOT NULL, duration_ms INTEGER NOT NULL,
+                    llm_used INTEGER NOT NULL
+                 );
+                 INSERT INTO runs VALUES (
+                    1, '2026-07-01', 'committed-before-snapshot.xlsx', 'before',
+                    1, 1, 0, 0, 'before-out.xlsx', 10, 0
+                 );",
+            )
+            .unwrap();
+
+        migrate_legacy_state_with_accepted_snapshot_hook(&layout, |pass| {
+            assert_eq!(pass, 0);
+            writer
+                .execute_batch("BEGIN IMMEDIATE;")
+                .map_err(|error| error.to_string())?;
+            writer
+                .execute(
+                    "INSERT INTO runs VALUES (
+                        2, '2026-07-02', ?1, 'after', 1, 1, 0, 0,
+                        'after-out.xlsx', 11, 0
+                    )",
+                    [&"x".repeat(256 * 1024)],
+                )
+                .map_err(|error| error.to_string())?;
+            assert!(sqlite_sidecar(&database_path, "-journal").exists());
+            Ok(())
+        })
+        .unwrap();
+
+        let first_history = HistoryStore::new(layout.root.join("history/runs.jsonl"))
+            .list()
+            .unwrap();
+        assert_eq!(
+            first_history
+                .iter()
+                .map(|record| record["id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        let first_state: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(layout.root.join("migrations.json")).unwrap())
+                .unwrap();
+        let first_fingerprint = first_state["legacy_sqlite_v1"].clone();
+        assert!(!first_fingerprint.is_null());
+
+        writer.execute_batch("COMMIT;").unwrap();
+        migrate_legacy_state(&layout).unwrap();
+
+        let refreshed_history = HistoryStore::new(layout.root.join("history/runs.jsonl"))
+            .list()
+            .unwrap();
+        assert_eq!(
+            refreshed_history
+                .iter()
+                .map(|record| record["id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+        let refreshed_state: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(layout.root.join("migrations.json")).unwrap())
+                .unwrap();
+        assert_ne!(refreshed_state["legacy_sqlite_v1"], first_fingerprint);
+        drop(writer);
+    }
+
+    #[test]
+    fn keeps_the_accepted_fingerprint_when_a_later_delete_transaction_rolls_back() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let database_path = layout.root.join("history.sqlite");
+        let writer = rusqlite::Connection::open(&database_path).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA page_size = 512;
+                 PRAGMA journal_mode = DELETE;
+                 PRAGMA cache_size = 1;
+                 PRAGMA cache_spill = ON;
+                 CREATE TABLE runs (
+                    id INTEGER PRIMARY KEY, started_at TEXT NOT NULL,
+                    file_name TEXT NOT NULL, file_hash TEXT NOT NULL,
+                    item_count INTEGER NOT NULL, package_count INTEGER NOT NULL,
+                    error_count INTEGER NOT NULL, warning_count INTEGER NOT NULL,
+                    output_file TEXT NOT NULL, duration_ms INTEGER NOT NULL,
+                    llm_used INTEGER NOT NULL
+                 );
+                 INSERT INTO runs VALUES (
+                    1, '2026-08-01', 'committed-before-snapshot.xlsx', 'before',
+                    1, 1, 0, 0, 'before-out.xlsx', 10, 0
+                 );",
+            )
+            .unwrap();
+
+        migrate_legacy_state_with_accepted_snapshot_hook(&layout, |pass| {
+            assert_eq!(pass, 0);
+            writer
+                .execute_batch("BEGIN IMMEDIATE;")
+                .map_err(|error| error.to_string())?;
+            writer
+                .execute(
+                    "INSERT INTO runs VALUES (
+                        2, '2026-08-02', ?1, 'rolled-back', 1, 1, 0, 0,
+                        'rolled-back-out.xlsx', 11, 0
+                    )",
+                    [&"x".repeat(256 * 1024)],
+                )
+                .map_err(|error| error.to_string())?;
+            assert!(sqlite_sidecar(&database_path, "-journal").exists());
+            Ok(())
+        })
+        .unwrap();
+
+        let legacy_path = layout.root.join("history/legacy-runs.jsonl");
+        let legacy_before = std::fs::read(&legacy_path).unwrap();
+        let state_path = layout.root.join("migrations.json");
+        let state_before = std::fs::read(&state_path).unwrap();
+        assert_eq!(
+            HistoryStore::new(layout.root.join("history/runs.jsonl"))
+                .list()
+                .unwrap()
+                .into_iter()
+                .map(|record| record["id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+
+        writer.execute_batch("ROLLBACK;").unwrap();
+        let blocked_temporary_path = legacy_path
+            .parent()
+            .unwrap()
+            .join(format!(".legacy-runs.jsonl.{}.tmp", std::process::id()));
+        std::fs::create_dir(&blocked_temporary_path).unwrap();
+
+        migrate_legacy_state(&layout).unwrap();
+
+        assert_eq!(std::fs::read(&legacy_path).unwrap(), legacy_before);
+        assert_eq!(std::fs::read(&state_path).unwrap(), state_before);
+        std::fs::remove_dir(&blocked_temporary_path).unwrap();
+        drop(writer);
+    }
+
+    #[test]
     fn reimports_a_stale_source_fingerprint_without_losing_current_history() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
@@ -1039,7 +1316,9 @@ mod tests {
         let state = super::load_state(&layout.root.join("migrations.json")).unwrap();
         assert_eq!(
             state.legacy_sqlite_v1.unwrap(),
-            super::stable_legacy_content_fingerprint(&database_path).unwrap()
+            super::stable_legacy_content_fingerprint(&database_path)
+                .unwrap()
+                .unwrap()
         );
         drop(writer);
     }

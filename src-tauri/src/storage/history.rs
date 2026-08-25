@@ -23,8 +23,17 @@ impl HistoryStore {
     }
 
     pub fn list(&self) -> Result<Vec<serde_json::Value>, String> {
-        let mut records = read_records(&self.legacy_path)?;
-        records.extend(read_records(&self.path)?);
+        let legacy_records = read_records(&self.legacy_path)?;
+        let legacy_ids = legacy_records
+            .iter()
+            .filter_map(run_id)
+            .collect::<std::collections::HashSet<_>>();
+        let mut records = legacy_records;
+        records.extend(
+            read_records(&self.path)?
+                .into_iter()
+                .filter(|record| run_id(record).is_none_or(|id| !legacy_ids.contains(&id))),
+        );
         records.sort_by(|left, right| {
             let left_started = left
                 .get("startedAt")
@@ -49,6 +58,10 @@ impl HistoryStore {
         });
         Ok(records)
     }
+}
+
+fn run_id(record: &serde_json::Value) -> Option<i64> {
+    record.get("id").and_then(serde_json::Value::as_i64)
 }
 
 fn read_records(path: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
