@@ -3,6 +3,7 @@
 mod codex;
 mod commands;
 mod platform_commands;
+pub mod runtime;
 pub mod storage;
 mod store;
 mod update;
