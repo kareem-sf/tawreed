@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { generateKeyPairSync, createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import {
-  chmod,
+  lstat,
   mkdir,
   open,
   realpath,
@@ -11,18 +11,17 @@ import {
   stat,
 } from 'node:fs/promises';
 import {
-  basename,
   dirname,
   isAbsolute,
   join,
-  relative,
+  parse,
   resolve,
-  sep,
 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const publicPath = join(repositoryRoot, 'src-tauri', 'runtime-updater.pub');
 const usage =
   'Usage: node scripts/generate-runtime-keypair.mjs <output-directory>';
 
@@ -55,109 +54,29 @@ if ($isDirectory) {
 }
 `;
 
-function pathIsInside(parent, candidate) {
-  const pathFromParent = relative(parent, candidate);
-  return (
-    pathFromParent === '' ||
-    (!pathFromParent.startsWith(`..${sep}`) &&
-      pathFromParent !== '..' &&
-      !isAbsolute(pathFromParent))
-  );
-}
-
-function isUnsafeWindowsAlias(path) {
-  if (process.platform !== 'win32') {
-    return false;
-  }
-  const windowsPath = path.replaceAll('/', '\\');
-  const upperPath = windowsPath.toUpperCase();
-  return (
-    windowsPath.startsWith('\\\\') ||
-    upperPath.startsWith('\\??\\') ||
-    upperPath.startsWith('\\DEVICE\\') ||
-    upperPath.startsWith('\\GLOBAL??\\')
-  );
-}
-
-async function nearestExistingAncestor(path) {
-  let candidate = path;
-  const missingComponents = [];
-  while (true) {
-    try {
-      await stat(candidate, { bigint: true });
-      return { path: candidate, missingComponents };
-    } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        throw error;
-      }
-      const parent = dirname(candidate);
-      if (parent === candidate) {
-        throw error;
-      }
-      missingComponents.unshift(basename(candidate));
-      candidate = parent;
-    }
-  }
-}
-
 function sameIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
-async function ancestorChainContainsIdentity(start, expectedIdentity) {
-  let candidate = start;
-  while (true) {
-    const identity = await stat(candidate, { bigint: true });
-    if (sameIdentity(identity, expectedIdentity)) {
-      return true;
-    }
-    const parent = dirname(candidate);
-    if (parent === candidate) {
-      return false;
-    }
-    candidate = parent;
+async function removeIfStillCreated(path, expectedIdentity, isDirectory) {
+  if (!expectedIdentity) {
+    return;
   }
-}
-
-function outsideRepositoryError() {
-  return new Error('Output directory must be outside the repository');
-}
-
-async function assertOutsideRepository(
-  candidate,
-  canonicalRepository,
-  repositoryIdentity,
-) {
-  const nearest = await nearestExistingAncestor(candidate);
-  const canonicalAncestor = await realpath(nearest.path);
-  const canonicalCandidate = resolve(
-    canonicalAncestor,
-    ...nearest.missingComponents,
-  );
-  if (
-    pathIsInside(canonicalRepository, canonicalCandidate) ||
-    (await ancestorChainContainsIdentity(nearest.path, repositoryIdentity))
-  ) {
-    throw outsideRepositoryError();
-  }
-  return nearest;
-}
-
-async function createMissingDirectories(nearest) {
-  const created = [];
-  let candidate = nearest.path;
-  for (const component of nearest.missingComponents) {
-    candidate = join(candidate, component);
-    try {
-      await mkdir(candidate, { mode: 0o700 });
-      created.push(candidate);
-    } catch (error) {
-      if (error?.code !== 'EEXIST' || !(await stat(candidate)).isDirectory()) {
-        throw error;
-      }
+  try {
+    const currentIdentity = await lstat(path, { bigint: true });
+    if (!sameIdentity(currentIdentity, expectedIdentity)) {
+      return;
+    }
+    if (isDirectory) {
+      await rmdir(path);
+    } else {
+      await rm(path, { force: true });
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') {
+      throw error;
     }
   }
-  return created;
 }
 
 function secureWindowsPath(path, isDirectory) {
@@ -173,12 +92,13 @@ function secureWindowsPath(path, isDirectory) {
     { encoding: 'utf8', windowsHide: true, env: environment },
   );
   if (result.status !== 0) {
-    throw new Error(`Unable to restrict or verify Windows ACLs: ${result.stderr.trim()}`);
+    throw new Error(
+      `Unable to restrict or verify Windows ACLs: ${result.stderr.trim()}`,
+    );
   }
 }
 
-async function secureUnixPath(path, mode) {
-  await chmod(path, mode);
+async function verifyUnixOwnerOnly(path, mode) {
   const metadata = await stat(path);
   if ((metadata.mode & 0o777) !== mode) {
     throw new Error('Unable to enforce owner-only permissions');
@@ -188,56 +108,87 @@ async function secureUnixPath(path, mode) {
   }
 }
 
-async function securePath(path, mode, isDirectory) {
-  if (process.platform === 'win32') {
-    secureWindowsPath(path, isDirectory);
-  } else {
-    await secureUnixPath(path, mode);
+async function configuredUserHome() {
+  const variable = process.platform === 'win32' ? 'USERPROFILE' : 'HOME';
+  const home = process.env[variable];
+  if (!home || !isAbsolute(home) || resolve(home) !== home) {
+    throw new Error(`${variable} must be an exact absolute user-home path`);
   }
+  if (
+    process.platform === 'win32' &&
+    (!/^[A-Za-z]:\\/.test(home) || home.includes('/') || parse(home).root.length !== 3)
+  ) {
+    throw new Error('USERPROFILE must be a normal drive-letter path');
+  }
+
+  const homeLinkMetadata = await lstat(home);
+  if (!homeLinkMetadata.isDirectory() || homeLinkMetadata.isSymbolicLink()) {
+    throw new Error(`${variable} must identify a real directory`);
+  }
+  if ((await realpath(home)) !== home) {
+    throw new Error(`${variable} must not use an alias path`);
+  }
+  return home;
+}
+
+async function assertPublicKeyAbsent() {
+  try {
+    await lstat(publicPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+  throw new Error(`Public key already exists at ${publicPath}`);
 }
 
 async function generateRuntimeKeypair(outputDirectory) {
-  if (isUnsafeWindowsAlias(outputDirectory)) {
-    throw new Error('Unsafe Windows UNC or device path');
+  const home = await configuredUserHome();
+  const requiredOutput = join(home, '.tawreed-signing');
+  if (outputDirectory !== requiredOutput) {
+    throw new Error(`Use the exact output directory ${requiredOutput}`);
   }
-  const requestedOutput = resolve(outputDirectory);
-  const canonicalRepository = await realpath(repositoryRoot);
-  const repositoryIdentity = await stat(canonicalRepository, { bigint: true });
-  const nearest = await assertOutsideRepository(
-    requestedOutput,
-    canonicalRepository,
-    repositoryIdentity,
-  );
-  const publicPath = join(canonicalRepository, 'src-tauri', 'runtime-updater.pub');
-  const createdDirectories = [];
+
+  await assertPublicKeyAbsent();
+
+  let directoryCreated = false;
+  let directoryIdentity;
   let privatePath;
   let privateHandle;
   let privateCreated = false;
+  let privateIdentity;
   let publicHandle;
   let publicCreated = false;
+  let publicIdentity;
   let completed = false;
 
   try {
-    createdDirectories.push(...(await createMissingDirectories(nearest)));
-    const canonicalOutput = await realpath(requestedOutput);
-    if (
-      pathIsInside(canonicalRepository, canonicalOutput) ||
-      (await ancestorChainContainsIdentity(requestedOutput, repositoryIdentity))
-    ) {
-      throw outsideRepositoryError();
-    }
-    await securePath(canonicalOutput, 0o700, true);
-    privatePath = join(canonicalOutput, 'runtime-private.pem');
-
     try {
-      privateHandle = await open(privatePath, 'wx', 0o600);
+      await mkdir(requiredOutput, { mode: 0o700 });
     } catch (error) {
       if (error?.code === 'EEXIST') {
-        throw new Error(`Private key already exists at ${privatePath}`);
+        throw new Error(`Output directory must not already exist: ${requiredOutput}`);
       }
       throw error;
     }
+    directoryCreated = true;
+    directoryIdentity = await lstat(requiredOutput, { bigint: true });
+
+    if (process.platform === 'win32') {
+      secureWindowsPath(requiredOutput, true);
+    } else {
+      await verifyUnixOwnerOnly(requiredOutput, 0o700);
+    }
+    const securedDirectoryIdentity = await lstat(requiredOutput, { bigint: true });
+    if (!sameIdentity(directoryIdentity, securedDirectoryIdentity)) {
+      throw new Error('Output directory identity changed during security setup');
+    }
+
+    privatePath = join(requiredOutput, 'runtime-private.pem');
+    privateHandle = await open(privatePath, 'wx', 0o600);
     privateCreated = true;
+    privateIdentity = await privateHandle.stat({ bigint: true });
 
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -251,7 +202,11 @@ async function generateRuntimeKeypair(outputDirectory) {
     await privateHandle.sync();
     await privateHandle.close();
     privateHandle = undefined;
-    await securePath(privatePath, 0o600, false);
+    if (process.platform === 'win32') {
+      secureWindowsPath(privatePath, false);
+    } else {
+      await verifyUnixOwnerOnly(privatePath, 0o600);
+    }
 
     try {
       publicHandle = await open(publicPath, 'wx');
@@ -262,6 +217,7 @@ async function generateRuntimeKeypair(outputDirectory) {
       throw error;
     }
     publicCreated = true;
+    publicIdentity = await publicHandle.stat({ bigint: true });
     await publicHandle.writeFile(`${rawPublic.toString('base64')}\n`, 'utf8');
     await publicHandle.sync();
     await publicHandle.close();
@@ -280,15 +236,13 @@ async function generateRuntimeKeypair(outputDirectory) {
       await publicHandle.close().catch(() => {});
     }
     if (publicCreated && !completed) {
-      await rm(publicPath, { force: true }).catch(() => {});
+      await removeIfStillCreated(publicPath, publicIdentity, false).catch(() => {});
     }
     if (privateCreated && !completed) {
-      await rm(privatePath, { force: true }).catch(() => {});
+      await removeIfStillCreated(privatePath, privateIdentity, false).catch(() => {});
     }
-    if (!completed) {
-      for (const directory of createdDirectories.reverse()) {
-        await rmdir(directory).catch(() => {});
-      }
+    if (directoryCreated && !completed) {
+      await removeIfStillCreated(requiredOutput, directoryIdentity, true).catch(() => {});
     }
   }
 }

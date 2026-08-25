@@ -206,8 +206,17 @@ fn valid_entrypoint_component(component: &str) -> bool {
     if matches!(upper_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
         return false;
     }
-    let bytes = upper_stem.as_bytes();
-    !(bytes.len() == 4 && matches!(&bytes[..3], b"COM" | b"LPT") && matches!(bytes[3], b'1'..=b'9'))
+    for prefix in ["COM", "LPT"] {
+        if let Some(suffix) = upper_stem.strip_prefix(prefix) {
+            if matches!(
+                suffix,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            ) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -423,8 +432,14 @@ mod tests {
             "agent/NUL",
             "agent/com1.exe",
             "agent/COM9",
+            "agent/COM¹",
+            "agent/com².exe",
+            "agent/CoM³.log",
             "agent/lpt1.bin",
             "agent/LPT9",
+            "agent/LPT¹",
+            "agent/lpt².exe",
+            "agent/LpT³.log",
         ] {
             let mut asset = valid_asset();
             asset.entrypoint = entrypoint.into();
