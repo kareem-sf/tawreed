@@ -2,6 +2,7 @@
 
 mod codex;
 mod commands;
+mod platform_commands;
 pub mod storage;
 mod store;
 mod update;
@@ -40,6 +41,9 @@ fn main() {
             commands::codex_models,
             commands::get_settings,
             commands::set_setting,
+            platform_commands::list_connections,
+            platform_commands::save_api_key_connection,
+            platform_commands::delete_connection,
             update::check_for_update,
             update::open_update_release,
         ])
