@@ -290,10 +290,6 @@ where
     layout.ensure()?;
     let state_path = layout.root.join("migrations.json");
     let mut state = load_state(&state_path)?;
-    let mut sqlite_complete = state
-        .completed
-        .iter()
-        .any(|migration| migration == LEGACY_SQLITE_MIGRATION);
     let mut state_dirty = false;
 
     let database_path = layout.root.join("history.sqlite");
@@ -302,7 +298,7 @@ where
             let (snapshot, fingerprint) =
                 LegacySqliteSnapshot::create(&database_path, &mut after_database_copy)?;
             after_accepted_snapshot(pass)?;
-            if sqlite_complete && state.legacy_sqlite_v1.as_ref() == Some(&fingerprint) {
+            if state.legacy_sqlite_v1.as_ref() == Some(&fingerprint) {
                 break;
             }
             import_runs(
@@ -313,9 +309,12 @@ where
                 snapshot.database(),
                 &layout.rules.join("legacy-classification-memory.jsonl"),
             )?;
-            if !sqlite_complete {
+            if !state
+                .completed
+                .iter()
+                .any(|migration| migration == LEGACY_SQLITE_MIGRATION)
+            {
                 state.completed.push(LEGACY_SQLITE_MIGRATION.into());
-                sqlite_complete = true;
             }
             state.legacy_sqlite_v1 = Some(fingerprint.clone());
             atomic_write_json(&state_path, &state)?;
@@ -336,10 +335,6 @@ where
             }
         }
         after_finalization()?;
-    } else if !sqlite_complete {
-        state.completed.push(LEGACY_SQLITE_MIGRATION.into());
-        state.legacy_sqlite_v1 = None;
-        state_dirty = true;
     }
 
     let env_complete = state
@@ -416,8 +411,10 @@ fn import_runs(database_path: &Path, destination: &Path) -> Result<(), String> {
         .map_err(|error| format!("prepare legacy runs: {error}"))?;
     let records = statement
         .query_map([], |row| {
+            let legacy_id = row.get::<_, i64>(0)?;
             Ok(json!({
-                "id": row.get::<_, i64>(0)?,
+                "id": -legacy_id.abs(),
+                "legacyId": legacy_id,
                 "startedAt": row.get::<_, String>(1)?,
                 "fileName": row.get::<_, String>(2)?,
                 "fileHash": row.get::<_, String>(3)?,
@@ -612,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_completed_only_marker_without_duplicate_history() {
+    fn upgrades_released_state_with_provenance_and_distinct_current_history() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -629,66 +626,58 @@ mod tests {
                     llm_used INTEGER NOT NULL
                  );
                  INSERT INTO runs VALUES (
-                    1, '2026-01-01', 'refreshed-legacy-one.xlsx', 'legacy-one',
-                    1, 1, 0, 0, 'legacy-one-out.xlsx', 10, 0
-                 );
-                 INSERT INTO runs VALUES (
-                    2, '2026-01-02', 'refreshed-legacy-two.xlsx', 'legacy-two',
-                    1, 1, 0, 0, 'legacy-two-out.xlsx', 11, 0
+                    7, '2026-01-01', 'legacy.xlsx', 'legacy',
+                    1, 1, 0, 0, 'legacy-out.xlsx', 10, 0
                  );",
             )
             .unwrap();
         drop(connection);
         let database_before = std::fs::read(&database_path).unwrap();
         let current_path = layout.root.join("history/runs.jsonl");
-        std::fs::create_dir_all(current_path.parent().unwrap()).unwrap();
-        let current_bytes = concat!(
-            "{\"id\":1,\"startedAt\":\"2026-01-01\",\"fileName\":\"stale-legacy-one.xlsx\"}\n",
-            "{\"id\":2,\"startedAt\":\"2026-01-02\",\"fileName\":\"stale-legacy-two.xlsx\"}\n",
-            "{\"id\":900,\"startedAt\":\"2026-01-03\",\"fileName\":\"current.xlsx\"}\n",
-            "{\"startedAt\":\"2026-01-04\",\"fileName\":\"missing-id.xlsx\"}\n",
-            "{\"id\":\"1\",\"startedAt\":\"2026-01-05\",\"fileName\":\"malformed-id.xlsx\"}\n"
-        )
-        .as_bytes();
-        std::fs::write(&current_path, current_bytes).unwrap();
-        std::fs::write(
-            layout.root.join("migrations.json"),
-            br#"{"completed":["legacy-sqlite-v1","legacy-env-v1"]}"#,
-        )
-        .unwrap();
+        assert!(!current_path.exists());
+        assert!(!layout.root.join("migrations.json").exists());
 
         migrate_legacy_state(&layout).unwrap();
 
         assert_eq!(std::fs::read(&database_path).unwrap(), database_before);
-        assert_eq!(std::fs::read(&current_path).unwrap(), current_bytes);
-        let history = HistoryStore::new(current_path).list().unwrap();
+        let legacy: serde_json::Value = serde_json::from_str(
+            std::fs::read_to_string(layout.root.join("history/legacy-runs.jsonl"))
+                .unwrap()
+                .trim(),
+        )
+        .unwrap();
+        assert_eq!(legacy["id"], -7);
+        assert_eq!(legacy["legacyId"], 7);
+
+        let store = HistoryStore::new(current_path.clone());
+        store
+            .record(&serde_json::json!({
+                "id": -7,
+                "startedAt": "2026-01-02",
+                "fileName": "current.xlsx"
+            }))
+            .unwrap();
+        let current_before_reimport = std::fs::read(&current_path).unwrap();
+        migrate_legacy_state(&layout).unwrap();
+
+        assert_eq!(
+            std::fs::read(&current_path).unwrap(),
+            current_before_reimport
+        );
+        let history = store.list().unwrap();
         assert_eq!(
             history
                 .iter()
                 .map(|record| record["fileName"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec![
-                "malformed-id.xlsx",
-                "missing-id.xlsx",
-                "current.xlsx",
-                "refreshed-legacy-two.xlsx",
-                "refreshed-legacy-one.xlsx",
-            ]
+            vec!["current.xlsx", "legacy.xlsx"]
         );
-        assert_eq!(
-            history
-                .iter()
-                .filter(|record| record["id"].as_i64() == Some(1))
-                .count(),
-            1
-        );
-        assert_eq!(
-            history
-                .iter()
-                .filter(|record| record["id"].as_i64() == Some(2))
-                .count(),
-            1
-        );
+        let current_id = history[0]["id"].as_i64().unwrap();
+        assert!((1..=9_007_199_254_740_991).contains(&current_id));
+        assert_ne!(current_id, 7);
+        assert_ne!(current_id, -7);
+        assert_eq!(history[1]["id"], -7);
+        assert_eq!(history[1]["legacyId"], 7);
     }
 
     #[test]
@@ -901,7 +890,8 @@ mod tests {
         let history =
             std::fs::read_to_string(layout.root.join("history/legacy-runs.jsonl")).unwrap();
         let record: serde_json::Value = serde_json::from_str(history.trim()).unwrap();
-        assert_eq!(record["id"], 91);
+        assert_eq!(record["id"], -91);
+        assert_eq!(record["legacyId"], 91);
         assert_eq!(record["fileName"], "wal.xlsx");
         assert_eq!(legacy_sqlite_family(&layout.root), before);
         drop(writer);
@@ -1068,7 +1058,7 @@ mod tests {
                 .iter()
                 .map(|record| record["id"].as_i64().unwrap())
                 .collect::<Vec<_>>(),
-            vec![1]
+            vec![-1]
         );
         let first_state: serde_json::Value =
             serde_json::from_slice(&std::fs::read(layout.root.join("migrations.json")).unwrap())
@@ -1087,7 +1077,7 @@ mod tests {
                 .iter()
                 .map(|record| record["id"].as_i64().unwrap())
                 .collect::<Vec<_>>(),
-            vec![2, 1]
+            vec![-2, -1]
         );
         let refreshed_state: serde_json::Value =
             serde_json::from_slice(&std::fs::read(layout.root.join("migrations.json")).unwrap())
@@ -1154,7 +1144,7 @@ mod tests {
                 .into_iter()
                 .map(|record| record["id"].as_i64().unwrap())
                 .collect::<Vec<_>>(),
-            vec![1]
+            vec![-1]
         );
 
         writer.execute_batch("ROLLBACK;").unwrap();
@@ -1199,7 +1189,7 @@ mod tests {
             .unwrap();
         let current_path = layout.root.join("history/runs.jsonl");
         let history = HistoryStore::new(current_path.clone());
-        history
+        let current_id = history
             .record(&serde_json::json!({
                 "id": 900,
                 "startedAt": "2026-05-03",
@@ -1260,7 +1250,7 @@ mod tests {
                 .into_iter()
                 .map(|record| record["id"].as_i64().unwrap())
                 .collect::<Vec<_>>(),
-            vec![900, 2, 1]
+            vec![current_id, -2, -1]
         );
         drop(writer);
     }

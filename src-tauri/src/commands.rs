@@ -842,14 +842,7 @@ fn record_run_in(layout: &crate::storage::DataLayout, entry: Value) -> Result<i6
     if trace_json.len() > 256 * 1024 {
         return Err("Run trace exceeds the 256 KB limit".into());
     }
-    let id = entry.get("id").and_then(Value::as_i64).unwrap_or_else(|| {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as i64)
-            .unwrap_or(0)
-    });
     let record = json!({
-        "id": id,
         "startedAt": entry.get("startedAt").and_then(Value::as_str).unwrap_or(""),
         "fileName": entry.get("fileName").and_then(Value::as_str).unwrap_or(""),
         "fileHash": entry.get("fileHash").and_then(Value::as_str).unwrap_or(""),
@@ -871,8 +864,7 @@ fn record_run_in(layout: &crate::storage::DataLayout, entry: Value) -> Result<i6
         "memoryApplied": entry.get("memoryApplied").and_then(Value::as_i64).unwrap_or(0),
     });
     crate::storage::history::HistoryStore::new(layout.root.join("history").join("runs.jsonl"))
-        .record(&record)?;
-    Ok(id)
+        .record(&record)
 }
 
 #[tauri::command]
@@ -1218,7 +1210,7 @@ mod history_storage_tests {
     use serde_json::json;
 
     #[test]
-    fn records_and_lists_runs_without_creating_a_sqlite_database() {
+    fn replaces_a_caller_supplied_run_id_without_creating_a_sqlite_database() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -1226,7 +1218,7 @@ mod history_storage_tests {
         let id = record_run_in(
             &layout,
             json!({
-                "id": 42,
+                "id": -7,
                 "startedAt": "2026-01-03",
                 "fileName": "tower.xlsx",
                 "provider": "offline"
@@ -1234,10 +1226,11 @@ mod history_storage_tests {
         )
         .unwrap();
 
-        assert_eq!(id, 42);
+        assert!((1..=9_007_199_254_740_991).contains(&id));
         let records = list_runs_in(&layout).unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["id"], 42);
+        assert_eq!(records[0]["id"], id);
+        assert_ne!(records[0]["id"], -7);
         assert_eq!(records[0]["fileName"], "tower.xlsx");
         assert!(layout.root.join("history/runs.jsonl").exists());
         assert!(!layout.root.join("history.sqlite").exists());
