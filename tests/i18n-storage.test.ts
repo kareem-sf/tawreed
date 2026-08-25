@@ -22,4 +22,28 @@ describe('i18n locale storage', () => {
     await i18n.changeLanguage('en');
     expect(storage.setItem).toHaveBeenCalledWith('tawreed-locale', 'en');
   });
+
+  it('falls back to English in Node without touching global localStorage', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    let accessed = false;
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        accessed = true;
+        throw new Error('global localStorage should not be accessed');
+      },
+    });
+
+    try {
+      const { default: i18n } = await import('../src/i18n');
+      expect(i18n.language).toBe('en');
+      expect(accessed).toBe(false);
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, 'localStorage', originalDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'localStorage');
+      }
+    }
+  });
 });
