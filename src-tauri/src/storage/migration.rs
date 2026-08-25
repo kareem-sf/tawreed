@@ -2,12 +2,14 @@ use super::{atomic_write_json, DataLayout};
 use rusqlite::OpenFlags;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const LEGACY_SQLITE_MIGRATION: &str = "legacy-sqlite-v1";
 const LEGACY_ENV_MIGRATION: &str = "legacy-env-v1";
+const MAX_SNAPSHOT_ATTEMPTS: usize = 3;
 
 #[derive(Default, Deserialize, Serialize)]
 struct MigrationState {
@@ -19,8 +21,66 @@ struct LegacySqliteSnapshot {
     database: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FileFingerprint {
+    length: u64,
+    sha256: [u8; 32],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MetadataSignal {
+    length: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LegacySqliteFingerprint {
+    database: FileFingerprint,
+    wal: Option<FileFingerprint>,
+    shm: Option<MetadataSignal>,
+    journal: Option<MetadataSignal>,
+}
+
 impl LegacySqliteSnapshot {
-    fn create(source: &Path) -> Result<Self, String> {
+    fn create<F>(source: &Path, after_database_copy: &mut F) -> Result<Self, String>
+    where
+        F: FnMut(usize) -> Result<(), String>,
+    {
+        for attempt in 0..MAX_SNAPSHOT_ATTEMPTS {
+            let before = LegacySqliteFingerprint::capture(source)?;
+            let snapshot = Self::create_empty()?;
+            std::fs::copy(source, &snapshot.database)
+                .map_err(|error| format!("copy legacy sqlite snapshot: {error}"))?;
+            after_database_copy(attempt)?;
+
+            let copied_wal = sqlite_sidecar(&snapshot.database, "-wal");
+            let wal_copy_stable = match &before.wal {
+                Some(_) => match std::fs::copy(sqlite_sidecar(source, "-wal"), &copied_wal) {
+                    Ok(_) => true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => {
+                        return Err(format!("copy legacy sqlite WAL snapshot: {error}"));
+                    }
+                },
+                None => true,
+            };
+            let after = LegacySqliteFingerprint::capture(source)?;
+            let copied_database = fingerprint_file(&snapshot.database)
+                .map_err(|error| format!("fingerprint copied legacy sqlite: {error}"))?;
+            let copied_wal = fingerprint_optional_file(&copied_wal)
+                .map_err(|error| format!("fingerprint copied legacy sqlite WAL: {error}"))?;
+            if wal_copy_stable
+                && before == after
+                && copied_database == before.database
+                && copied_wal == before.wal
+            {
+                return Ok(snapshot);
+            }
+        }
+        Err("legacy_sqlite_unstable".into())
+    }
+
+    fn create_empty() -> Result<Self, String> {
         static NEXT_SNAPSHOT: AtomicU64 = AtomicU64::new(0);
 
         let sequence = NEXT_SNAPSHOT.fetch_add(1, Ordering::Relaxed);
@@ -34,13 +94,6 @@ impl LegacySqliteSnapshot {
             database: directory.join("history.sqlite"),
             directory,
         };
-        std::fs::copy(source, &snapshot.database)
-            .map_err(|error| format!("copy legacy sqlite snapshot: {error}"))?;
-        let source_wal = sqlite_sidecar(source, "-wal");
-        if source_wal.exists() {
-            std::fs::copy(&source_wal, sqlite_sidecar(&snapshot.database, "-wal"))
-                .map_err(|error| format!("copy legacy sqlite WAL snapshot: {error}"))?;
-        }
         Ok(snapshot)
     }
 
@@ -64,7 +117,69 @@ fn sqlite_sidecar(database: &Path, suffix: &str) -> PathBuf {
     path.into()
 }
 
+impl LegacySqliteFingerprint {
+    fn capture(database: &Path) -> Result<Self, String> {
+        Ok(Self {
+            database: fingerprint_file(database)
+                .map_err(|error| format!("fingerprint legacy sqlite: {error}"))?,
+            wal: fingerprint_optional_file(&sqlite_sidecar(database, "-wal"))
+                .map_err(|error| format!("fingerprint legacy sqlite WAL: {error}"))?,
+            shm: metadata_signal(&sqlite_sidecar(database, "-shm"))
+                .map_err(|error| format!("inspect legacy sqlite SHM: {error}"))?,
+            journal: metadata_signal(&sqlite_sidecar(database, "-journal"))
+                .map_err(|error| format!("inspect legacy sqlite journal: {error}"))?,
+        })
+    }
+}
+
+fn fingerprint_optional_file(path: &Path) -> std::io::Result<Option<FileFingerprint>> {
+    match fingerprint_file(path) {
+        Ok(fingerprint) => Ok(Some(fingerprint)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn fingerprint_file(path: &Path) -> std::io::Result<FileFingerprint> {
+    let mut file = std::fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    let mut sha256 = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        sha256.update(&buffer[..read]);
+    }
+    Ok(FileFingerprint {
+        length,
+        sha256: sha256.finalize().into(),
+    })
+}
+
+fn metadata_signal(path: &Path) -> std::io::Result<Option<MetadataSignal>> {
+    match std::fs::metadata(path) {
+        Ok(metadata) => Ok(Some(MetadataSignal {
+            length: metadata.len(),
+            modified: metadata.modified().ok(),
+        })),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub fn migrate_legacy_state(layout: &DataLayout) -> Result<(), String> {
+    migrate_legacy_state_with_snapshot_hook(layout, |_| Ok(()))
+}
+
+fn migrate_legacy_state_with_snapshot_hook<F>(
+    layout: &DataLayout,
+    mut after_database_copy: F,
+) -> Result<(), String>
+where
+    F: FnMut(usize) -> Result<(), String>,
+{
     layout.ensure()?;
     let state_path = layout.root.join("migrations.json");
     let mut state = load_state(&state_path)?;
@@ -83,7 +198,7 @@ pub fn migrate_legacy_state(layout: &DataLayout) -> Result<(), String> {
     if !sqlite_complete {
         let database_path = layout.root.join("history.sqlite");
         if database_path.exists() {
-            let snapshot = LegacySqliteSnapshot::create(&database_path)?;
+            let snapshot = LegacySqliteSnapshot::create(&database_path, &mut after_database_copy)?;
             import_runs(
                 snapshot.database(),
                 &layout.root.join("history").join("runs.jsonl"),
@@ -313,7 +428,7 @@ fn atomic_write_jsonl(path: &Path, values: &[Value]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::migrate_legacy_state;
+    use super::{migrate_legacy_state, migrate_legacy_state_with_snapshot_hook};
     use crate::storage::DataLayout;
     use std::collections::BTreeMap;
 
@@ -563,6 +678,59 @@ mod tests {
         assert_eq!(record["id"], 91);
         assert_eq!(record["fileName"], "wal.xlsx");
         assert_eq!(legacy_sqlite_family(&layout.root), before);
+        drop(writer);
+    }
+
+    #[test]
+    fn rejects_a_snapshot_when_checkpoint_changes_family_during_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let database_path = layout.root.join("history.sqlite");
+        let writer = rusqlite::Connection::open(&database_path).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA wal_autocheckpoint = 0;
+                 CREATE TABLE runs (
+                    id INTEGER PRIMARY KEY, started_at TEXT NOT NULL,
+                    file_name TEXT NOT NULL, file_hash TEXT NOT NULL,
+                    item_count INTEGER NOT NULL, package_count INTEGER NOT NULL,
+                    error_count INTEGER NOT NULL, warning_count INTEGER NOT NULL,
+                    output_file TEXT NOT NULL, duration_ms INTEGER NOT NULL,
+                    llm_used INTEGER NOT NULL
+                 );
+                 INSERT INTO runs VALUES (
+                    1, '2026-03-01', 'base.xlsx', 'base-hash', 1, 1, 0, 0,
+                    'base-out.xlsx', 10, 0
+                 );",
+            )
+            .unwrap();
+
+        let error = migrate_legacy_state_with_snapshot_hook(&layout, |attempt| {
+            writer
+                .execute(
+                    "INSERT INTO runs VALUES (
+                        ?1, '2026-03-02', 'racing.xlsx', 'racing-hash', 1, 1, 0, 0,
+                        'racing-out.xlsx', 11, 0
+                    )",
+                    [100 + attempt as i64],
+                )
+                .map_err(|error| error.to_string())?;
+            writer
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert_eq!(error, "legacy_sqlite_unstable");
+        assert!(!layout.root.join("history/runs.jsonl").exists());
+        assert!(!layout
+            .rules
+            .join("legacy-classification-memory.jsonl")
+            .exists());
+        assert!(!layout.root.join("migrations.json").exists());
         drop(writer);
     }
 }
