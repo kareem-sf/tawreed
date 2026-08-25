@@ -180,7 +180,7 @@ fn valid_official_release_url(asset: &RuntimeAsset, version: &Version) -> bool {
     !filename.is_empty() && !filename.contains('/') && filename != "." && filename != ".."
 }
 
-fn valid_entrypoint(entrypoint: &str) -> bool {
+pub(crate) fn valid_entrypoint(entrypoint: &str) -> bool {
     if entrypoint.is_empty() || entrypoint.starts_with('/') || entrypoint.contains('\\') {
         return false;
     }

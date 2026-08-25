@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub struct DataLayout {
     pub root: PathBuf,
     pub runtime: PathBuf,
+    pub runtime_versions: PathBuf,
     pub assets: PathBuf,
     pub projects: PathBuf,
     pub rules: PathBuf,
@@ -23,6 +24,7 @@ impl DataLayout {
     pub fn from_root(root: PathBuf) -> Self {
         Self {
             runtime: root.join("runtime"),
+            runtime_versions: root.join("runtime").join("versions"),
             assets: root.join("assets"),
             projects: root.join("projects"),
             rules: root.join("rules"),
@@ -39,6 +41,7 @@ impl DataLayout {
         for path in [
             &self.root,
             &self.runtime,
+            &self.runtime_versions,
             &self.assets,
             &self.projects,
             &self.rules,

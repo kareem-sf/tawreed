@@ -23,6 +23,7 @@ mod tests {
 
         for path in [
             &layout.runtime,
+            &layout.runtime_versions,
             &layout.assets,
             &layout.projects,
             &layout.rules,
