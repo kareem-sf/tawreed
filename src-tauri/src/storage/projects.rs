@@ -1,6 +1,6 @@
-use super::atomic_write_json;
+use super::secure_dir::SecureDir;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 const PROJECT_STATUS_ACTIVE: &str = "active";
@@ -13,8 +13,28 @@ pub struct ProjectSummary {
     pub id: String,
     pub name: String,
     pub status: String,
-    pub created_at_ms: u64,
     pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectRecord {
+    id: String,
+    name: String,
+    status: String,
+    created_at_ms: u64,
+    updated_at_ms: u64,
+}
+
+impl ProjectRecord {
+    fn summary(&self) -> ProjectSummary {
+        ProjectSummary {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            status: self.status.clone(),
+            updated_at_ms: self.updated_at_ms,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,19 +77,19 @@ impl ProjectStore {
 
         for _ in 0..8 {
             let id = Uuid::new_v4().to_string();
-            let project_directory = root.join(&id);
-            match std::fs::create_dir(&project_directory) {
+            match root.create_dir(&id) {
                 Ok(()) => {
-                    let project_directory = existing_directory_inside(&root, &project_directory)?;
-                    let summary = ProjectSummary {
+                    let project_directory =
+                        root.open_dir(&id).map_err(|_| "unsafe_project_path")?;
+                    let record = ProjectRecord {
                         id,
                         name: name.clone(),
                         status: PROJECT_STATUS_ACTIVE.to_string(),
                         created_at_ms,
                         updated_at_ms: created_at_ms,
                     };
-                    self.write_project(&root, &project_directory, &summary)?;
-                    return Ok(summary);
+                    self.write_project(&project_directory, &record)?;
+                    return Ok(record.summary());
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(_) => return Err("create_project_failed".into()),
@@ -81,34 +101,23 @@ impl ProjectStore {
 
     pub fn list(&self) -> Result<Vec<ProjectSummary>, String> {
         let root = self.root_directory()?;
-        let entries = std::fs::read_dir(&root).map_err(|_| "read_projects_failed")?;
         let mut projects = Vec::new();
 
-        for entry in entries {
-            let entry = entry.map_err(|_| "read_projects_failed")?;
-            let path = entry.path();
-            let metadata = std::fs::symlink_metadata(&path).map_err(|_| "read_projects_failed")?;
-            if metadata.file_type().is_symlink() {
-                return Err("unsafe_project_path".into());
-            }
-            if !metadata.is_dir() {
-                continue;
-            }
-            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+        for entry in root.entries().map_err(|_| "read_projects_failed")? {
+            let Some(id) = entry.to_str() else {
                 continue;
             };
-            let Ok(id) = validate_id(&name) else {
+            let Ok(id) = validate_id(id) else {
                 continue;
             };
-            let project_directory = existing_directory_inside(&root, &path)?;
-            projects.push(self.read_project(&root, &project_directory, &id)?);
+            let project_directory = root.open_dir(&id).map_err(|_| "unsafe_project_path")?;
+            projects.push(self.read_project(&project_directory, &id)?.summary());
         }
 
         projects.sort_by(|left, right| {
             right
                 .updated_at_ms
                 .cmp(&left.updated_at_ms)
-                .then_with(|| right.created_at_ms.cmp(&left.created_at_ms))
                 .then_with(|| left.id.cmp(&right.id))
         });
         Ok(projects)
@@ -117,55 +126,52 @@ impl ProjectStore {
     pub fn load(&self, id: &str) -> Result<ProjectSummary, String> {
         let id = validate_id(id)?;
         let root = self.root_directory()?;
-        let project_directory = existing_directory_inside(&root, &root.join(&id))?;
-        self.read_project(&root, &project_directory, &id)
+        let project_directory = open_project_directory(&root, &id)?;
+        run_test_after_project_open_hook();
+        Ok(self.read_project(&project_directory, &id)?.summary())
     }
 
     pub fn save_checkpoint(&self, id: &str, checkpoint: &Checkpoint) -> Result<(), String> {
         validate_checkpoint(checkpoint)?;
         let id = validate_id(id)?;
         let root = self.root_directory()?;
-        let project_directory = existing_directory_inside(&root, &root.join(&id))?;
-        self.read_project(&root, &project_directory, &id)?;
-
-        let checkpoints = project_directory.join("checkpoints");
-        let checkpoints = ensure_directory_inside(&root, &checkpoints)?;
-        let checkpoint_path = checkpoints.join(format!("{}.json", checkpoint.sequence));
-        ensure_write_target_inside(&root, &checkpoint_path)?;
-        atomic_write_json(&checkpoint_path, checkpoint)
+        let project_directory = open_project_directory(&root, &id)?;
+        run_test_after_project_open_hook();
+        self.read_project(&project_directory, &id)?;
+        let checkpoints = project_directory
+            .open_or_create_dir("checkpoints")
+            .map_err(|_| "unsafe_project_path")?;
+        run_test_after_checkpoint_open_hook();
+        checkpoints
+            .atomic_write_json(&format!("{}.json", checkpoint.sequence), checkpoint)
             .map_err(|_| "write_checkpoint_failed".to_string())
     }
 
     pub fn latest_checkpoint(&self, id: &str) -> Result<Option<Checkpoint>, String> {
         let id = validate_id(id)?;
         let root = self.root_directory()?;
-        let project_directory = existing_directory_inside(&root, &root.join(&id))?;
-        self.read_project(&root, &project_directory, &id)?;
-        let checkpoints = project_directory.join("checkpoints");
-        let checkpoints = match existing_directory_inside(&root, &checkpoints) {
+        let project_directory = open_project_directory(&root, &id)?;
+        run_test_after_project_open_hook();
+        self.read_project(&project_directory, &id)?;
+        let checkpoints = match project_directory.open_dir("checkpoints") {
             Ok(path) => path,
-            Err(error) if error == "project_not_found" => return Ok(None),
-            Err(error) => return Err(error),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err("unsafe_project_path".into()),
         };
-        let entries = std::fs::read_dir(checkpoints).map_err(|_| "read_checkpoints_failed")?;
         let mut latest = None;
 
-        for entry in entries {
-            let entry = entry.map_err(|_| "read_checkpoints_failed")?;
-            let path = entry.path();
-            let metadata =
-                std::fs::symlink_metadata(&path).map_err(|_| "read_checkpoints_failed")?;
-            if metadata.file_type().is_symlink() {
-                return Err("unsafe_project_path".into());
-            }
-            if !metadata.is_file() {
-                continue;
-            }
-            let Some(sequence) = checkpoint_sequence(entry.file_name().as_ref()) else {
+        for entry in checkpoints
+            .entries()
+            .map_err(|_| "read_checkpoints_failed")?
+        {
+            let Some(sequence) = checkpoint_sequence(&entry) else {
                 continue;
             };
-            let path = existing_file_inside(&root, &path)?;
-            let checkpoint = std::fs::read(path)
+            let Some(name) = entry.to_str() else {
+                continue;
+            };
+            let checkpoint = checkpoints
+                .read_bytes(name)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<Checkpoint>(&bytes).ok());
             let Some(checkpoint) = checkpoint else {
@@ -187,13 +193,13 @@ impl ProjectStore {
 
     fn read_project(
         &self,
-        root: &Path,
-        project_directory: &Path,
+        project_directory: &SecureDir,
         expected_id: &str,
-    ) -> Result<ProjectSummary, String> {
-        let project_path = existing_file_inside(root, &project_directory.join("project.json"))?;
-        let bytes = std::fs::read(project_path).map_err(|_| "read_project_failed")?;
-        let project: ProjectSummary =
+    ) -> Result<ProjectRecord, String> {
+        let bytes = project_directory
+            .read_bytes("project.json")
+            .map_err(|_| "read_project_failed")?;
+        let project: ProjectRecord =
             serde_json::from_slice(&bytes).map_err(|_| "invalid_project_record")?;
         validate_project_record(&project, expected_id)?;
         Ok(project)
@@ -201,18 +207,16 @@ impl ProjectStore {
 
     fn write_project(
         &self,
-        root: &Path,
-        project_directory: &Path,
-        project: &ProjectSummary,
+        project_directory: &SecureDir,
+        project: &ProjectRecord,
     ) -> Result<(), String> {
-        let project_path = project_directory.join("project.json");
-        ensure_write_target_inside(root, &project_path)?;
-        atomic_write_json(&project_path, project).map_err(|_| "write_project_failed".to_string())
+        project_directory
+            .atomic_write_json("project.json", project)
+            .map_err(|_| "write_project_failed".to_string())
     }
 
-    fn root_directory(&self) -> Result<PathBuf, String> {
-        std::fs::create_dir_all(&self.root).map_err(|_| "create_project_store_failed")?;
-        existing_directory(&self.root, "unsafe_project_path")
+    fn root_directory(&self) -> Result<SecureDir, String> {
+        SecureDir::open_root(&self.root).map_err(|_| "create_project_store_failed".into())
     }
 }
 
@@ -226,12 +230,16 @@ fn validate_name(name: &str) -> Result<String, String> {
 }
 
 fn validate_id(id: &str) -> Result<String, String> {
-    Uuid::parse_str(id)
-        .map(|parsed| parsed.to_string())
-        .map_err(|_| "invalid_project_id".into())
+    let parsed = Uuid::parse_str(id).map_err(|_| "invalid_project_id")?;
+    let canonical = parsed.to_string();
+    if id == canonical {
+        Ok(canonical)
+    } else {
+        Err("invalid_project_id".into())
+    }
 }
 
-fn validate_project_record(project: &ProjectSummary, expected_id: &str) -> Result<(), String> {
+fn validate_project_record(project: &ProjectRecord, expected_id: &str) -> Result<(), String> {
     if validate_id(&project.id).as_deref() != Ok(expected_id)
         || project.status != PROJECT_STATUS_ACTIVE
         || validate_name(&project.name).is_err()
@@ -262,79 +270,14 @@ fn checkpoint_sequence(name: &std::ffi::OsStr) -> Option<u64> {
     (sequence.to_string() == name.strip_suffix(".json")?).then_some(sequence)
 }
 
-fn ensure_directory_inside(root: &Path, path: &Path) -> Result<PathBuf, String> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err("unsafe_project_path".into());
-            }
-            existing_directory_inside(root, path)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::create_dir(path).map_err(|_| "create_project_directory_failed")?;
-            existing_directory_inside(root, path)
-        }
-        Err(_) => Err("unsafe_project_path".into()),
-    }
-}
-
-fn existing_directory_inside(root: &Path, path: &Path) -> Result<PathBuf, String> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err("project_not_found".into());
-        }
-        Err(_) => return Err("unsafe_project_path".into()),
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err("unsafe_project_path".into());
-    }
-    let path = std::fs::canonicalize(path).map_err(|_| "unsafe_project_path")?;
-    if path.starts_with(root) {
-        Ok(path)
-    } else {
-        Err("unsafe_project_path".into())
-    }
-}
-
-fn existing_directory(path: &Path, error: &str) -> Result<PathBuf, String> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|_| error.to_string())?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(error.into());
-    }
-    std::fs::canonicalize(path).map_err(|_| error.into())
-}
-
-fn existing_file_inside(root: &Path, path: &Path) -> Result<PathBuf, String> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| -> String {
+fn open_project_directory(root: &SecureDir, id: &str) -> Result<SecureDir, String> {
+    root.open_dir(id).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             "project_not_found".into()
         } else {
             "unsafe_project_path".into()
         }
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("unsafe_project_path".into());
-    }
-    let path = std::fs::canonicalize(path).map_err(|_| "unsafe_project_path")?;
-    if path.starts_with(root) {
-        Ok(path)
-    } else {
-        Err("unsafe_project_path".into())
-    }
-}
-
-fn ensure_write_target_inside(root: &Path, path: &Path) -> Result<(), String> {
-    if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err("unsafe_project_path".into());
-        }
-        let path = std::fs::canonicalize(path).map_err(|_| "unsafe_project_path")?;
-        if !path.starts_with(root) {
-            return Err("unsafe_project_path".into());
-        }
-    }
-    Ok(())
+    })
 }
 
 fn now_ms() -> u64 {
@@ -344,8 +287,50 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+#[cfg(all(test, unix))]
+thread_local! {
+    static TEST_AFTER_PROJECT_OPEN_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(all(test, unix))]
+thread_local! {
+    static TEST_AFTER_CHECKPOINT_OPEN_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(all(test, unix))]
+fn set_test_after_project_open_hook(hook: impl FnOnce() + 'static) {
+    TEST_AFTER_PROJECT_OPEN_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(all(test, unix))]
+fn set_test_after_checkpoint_open_hook(hook: impl FnOnce() + 'static) {
+    TEST_AFTER_CHECKPOINT_OPEN_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+fn run_test_after_project_open_hook() {
+    #[cfg(all(test, unix))]
+    TEST_AFTER_PROJECT_OPEN_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+fn run_test_after_checkpoint_open_hook() {
+    #[cfg(all(test, unix))]
+    TEST_AFTER_CHECKPOINT_OPEN_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use super::{set_test_after_checkpoint_open_hook, set_test_after_project_open_hook};
     use super::{Checkpoint, ProjectStore};
     use crate::storage::DataLayout;
 
@@ -358,6 +343,30 @@ mod tests {
         let created = store.create("Project Atlas").unwrap();
         assert_eq!(store.list().unwrap()[0].id, created.id);
         assert_eq!(store.load(&created.id).unwrap().name, "Project Atlas");
+    }
+
+    #[test]
+    fn project_summary_serialization_omits_persisted_creation_time() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ProjectStore::new(root.path().join("projects"));
+
+        let serialized = serde_json::to_value(store.create("Atlas").unwrap()).unwrap();
+
+        assert!(serialized.get("createdAtMs").is_none());
+        assert_eq!(
+            serialized
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([
+                "id".to_string(),
+                "name".to_string(),
+                "status".to_string(),
+                "updatedAtMs".to_string(),
+            ])
+        );
     }
 
     #[test]
@@ -476,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn lists_projects_with_noncanonical_but_valid_uuid_directory_names() {
+    fn skips_noncanonical_uuid_directory_names_and_every_listed_id_reopens() {
         let root = tempfile::tempdir().unwrap();
         let store = ProjectStore::new(root.path().join("projects"));
         let project = store.create("Atlas").unwrap();
@@ -487,7 +496,114 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(store.list().unwrap()[0].id, project.id);
+        assert!(store.list().unwrap().is_empty());
+
+        let canonical = store.create("Canonical").unwrap();
+        for listed in store.list().unwrap() {
+            assert_eq!(store.load(&listed.id).unwrap().id, listed.id);
+        }
+        assert_eq!(store.load(&canonical.id).unwrap().id, canonical.id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_write_stays_in_the_opened_project_directory_after_a_parent_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = ProjectStore::new(root.path().join("projects"));
+        let project = store.create("Atlas").unwrap();
+        let project_path = root.path().join("projects").join(&project.id);
+        let held_path = root
+            .path()
+            .join("projects")
+            .join(format!("{}.held", project.id));
+        let hook_project_path = project_path.clone();
+        let hook_held_path = held_path.clone();
+        let outside_path = outside.path().to_path_buf();
+
+        set_test_after_project_open_hook(move || {
+            std::fs::rename(&hook_project_path, &hook_held_path).unwrap();
+            symlink(&outside_path, &hook_project_path).unwrap();
+        });
+
+        store
+            .save_checkpoint(&project.id, &Checkpoint::new("run-1", "safe", 1))
+            .unwrap();
+
+        assert!(held_path.join("checkpoints").join("1.json").is_file());
+        assert!(!outside.path().join("checkpoints").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_write_stays_in_the_opened_checkpoint_directory_after_a_parent_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = ProjectStore::new(root.path().join("projects"));
+        let project = store.create("Atlas").unwrap();
+        store
+            .save_checkpoint(&project.id, &Checkpoint::new("run-1", "first", 1))
+            .unwrap();
+        let checkpoints = root
+            .path()
+            .join("projects")
+            .join(&project.id)
+            .join("checkpoints");
+        let held_checkpoints = checkpoints.with_file_name("checkpoints.held");
+        let hook_checkpoints = checkpoints.clone();
+        let hook_held_checkpoints = held_checkpoints.clone();
+        let outside_path = outside.path().to_path_buf();
+
+        set_test_after_checkpoint_open_hook(move || {
+            std::fs::rename(&hook_checkpoints, &hook_held_checkpoints).unwrap();
+            symlink(&outside_path, &hook_checkpoints).unwrap();
+        });
+
+        store
+            .save_checkpoint(&project.id, &Checkpoint::new("run-1", "second", 2))
+            .unwrap();
+
+        assert!(held_checkpoints.join("2.json").is_file());
+        assert!(!outside.path().join("2.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_read_uses_the_opened_directory_after_a_parent_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = ProjectStore::new(root.path().join("projects"));
+        let project = store.create("Atlas").unwrap();
+        let project_path = root.path().join("projects").join(&project.id);
+        let held_path = root
+            .path()
+            .join("projects")
+            .join(format!("{}.held", project.id));
+        let hook_project_path = project_path.clone();
+        let hook_held_path = held_path.clone();
+        let outside_path = outside.path().to_path_buf();
+
+        std::fs::write(
+            outside.path().join("project.json"),
+            format!(
+                "{{\"id\":\"{}\",\"name\":\"Outside\",\"status\":\"active\",\"createdAtMs\":1,\"updatedAtMs\":1}}",
+                project.id
+            ),
+        )
+        .unwrap();
+        set_test_after_project_open_hook(move || {
+            std::fs::rename(&hook_project_path, &hook_held_path).unwrap();
+            symlink(&outside_path, &hook_project_path).unwrap();
+        });
+
+        assert_eq!(store.load(&project.id).unwrap().name, "Atlas");
+        assert!(held_path.join("project.json").is_file());
     }
 
     #[cfg(unix)]

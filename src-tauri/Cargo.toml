@@ -26,6 +26,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 semver = "1"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
+cap-std = "4.0.3"
+cap-fs-ext = "4.0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
