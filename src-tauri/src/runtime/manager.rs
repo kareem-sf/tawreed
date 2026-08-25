@@ -141,6 +141,8 @@ pub struct RuntimeManager<
     bootstrap: B,
     status: std::sync::Arc<std::sync::Mutex<RuntimeBootstrapStatus>>,
     operation: std::sync::Arc<std::sync::Mutex<OperationState>>,
+    #[cfg(test)]
+    same_kind_follower_registration: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 #[derive(Clone)]
@@ -193,6 +195,23 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
                 generation: 0,
                 in_flight: None,
             })),
+            #[cfg(test)]
+            same_kind_follower_registration: std::sync::Mutex::new(None),
+        }
+    }
+
+    #[cfg(test)]
+    fn arm_test_same_kind_follower_registration(&self) -> tokio::sync::oneshot::Receiver<()> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let previous = lock_unpoison(&self.same_kind_follower_registration).replace(sender);
+        assert!(previous.is_none(), "follower registration already armed");
+        receiver
+    }
+
+    #[cfg(test)]
+    fn mark_test_same_kind_follower_registered(&self) {
+        if let Some(sender) = lock_unpoison(&self.same_kind_follower_registration).take() {
+            let _ = sender.send(());
         }
     }
 
@@ -343,6 +362,10 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
             let Some((same_kind, generation, mut receiver)) = waiting else {
                 continue;
             };
+            #[cfg(test)]
+            if same_kind {
+                self.mark_test_same_kind_follower_registered();
+            }
             if receiver.borrow().is_none() && receiver.changed().await.is_err() {
                 let mut state = lock_unpoison(&self.operation);
                 if state
@@ -957,6 +980,11 @@ mod tests {
         installer.ensure(&previous).await.unwrap();
         let current = source.asset();
         installer.ensure(&current).await.unwrap();
+        let state_before: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(layout.runtime.join("runtime-state.json")).unwrap(),
+        )
+        .unwrap();
+        let generation_before = state_before["generation"].as_u64().unwrap();
         let manager = Arc::new(RuntimeManager::with_components(
             installer,
             FakeBootstrap {
@@ -985,9 +1013,12 @@ mod tests {
         entered_receiver
             .recv_timeout(std::time::Duration::from_secs(2))
             .unwrap();
+        let follower_registered = manager.arm_test_same_kind_follower_registration();
         let follower_manager = manager.clone();
         let follower = tokio::spawn(async move { follower_manager.rollback().await });
-        tokio::task::yield_now().await;
+        follower_registered
+            .await
+            .expect("rollback follower did not register");
 
         caller.abort();
         release_sender.send(()).unwrap();
@@ -999,15 +1030,23 @@ mod tests {
         let _ = caller.await;
         std::fs::rename(held_metadata, restored_metadata).unwrap();
 
-        assert!(entrypoint.to_string_lossy().contains("0.9.0"));
-        assert_eq!(manager.status().await.version.as_deref(), Some("0.9.0"));
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &std::fs::read(layout.runtime.join("runtime-state.json")).unwrap()
-            )
-            .unwrap()["current"]["version"],
-            "0.9.0"
+            entrypoint,
+            layout
+                .runtime_versions
+                .join("0.9.0")
+                .join(health_entrypoint())
         );
+        let status = manager.status().await;
+        assert_eq!(status.phase, "ready");
+        assert_eq!(status.version.as_deref(), Some("0.9.0"));
+        let state: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(layout.runtime.join("runtime-state.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(state["current"]["version"], "0.9.0");
+        assert_eq!(state["previous"]["version"], "1.0.0");
+        assert_eq!(state["generation"].as_u64(), Some(generation_before + 1));
     }
 
     #[derive(Clone)]
