@@ -167,8 +167,7 @@ impl ConnectionStore {
     }
 
     fn write(&self, file: &ConnectionFile) -> Result<(), String> {
-        atomic_write_json(&self.path, file)?;
-        set_owner_only_permissions(&self.path)
+        atomic_write_json(&self.path, file)
     }
 }
 
@@ -205,19 +204,6 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
-}
-
-#[cfg(unix)]
-fn set_owner_only_permissions(path: &std::path::Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        .map_err(|error| format!("restrict connections permissions: {error}"))
-}
-
-#[cfg(not(unix))]
-fn set_owner_only_permissions(_path: &std::path::Path) -> Result<(), String> {
-    Ok(())
 }
 
 #[cfg(test)]

@@ -55,6 +55,33 @@ mod tests {
         );
     }
 
+    fn assert_failed_replace_cleans_temporary_file() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("settings.json");
+        std::fs::create_dir(&path).unwrap();
+        let temporary_path = root
+            .path()
+            .join(format!(".settings.json.{}.tmp", std::process::id()));
+
+        let error =
+            atomic_write_json(&path, &serde_json::json!({ "secret": "value" })).unwrap_err();
+
+        assert!(error.contains("replace json"));
+        assert!(!temporary_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_replace_cleans_owner_only_temporary_file_on_unix() {
+        assert_failed_replace_cleans_temporary_file();
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn failed_replace_cleans_temporary_file_on_this_host() {
+        assert_failed_replace_cleans_temporary_file();
+    }
+
     #[test]
     fn jsonl_append_writes_one_document_per_line() {
         let root = tempfile::tempdir().unwrap();
