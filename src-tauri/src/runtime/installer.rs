@@ -250,10 +250,89 @@ struct RuntimeFs {
     staging: SecureDir,
 }
 
+struct VersionLease {
+    _file: std::fs::File,
+}
+
+struct StageGuard {
+    parent: SecureDir,
+    name: String,
+    directory: Option<SecureDir>,
+    identity: Option<crate::storage::secure_dir::FileIdentity>,
+    promoted: bool,
+}
+
+impl StageGuard {
+    fn create(parent: &SecureDir, version: &str) -> Result<Self, String> {
+        let name = format!(".runtime-{version}-{}.tmp", uuid::Uuid::new_v4());
+        let parent = parent.try_clone().map_err(|_| "runtime_staging_failed")?;
+        parent
+            .create_dir(&name)
+            .map_err(|_| "runtime_staging_failed")?;
+        let mut guard = Self {
+            parent,
+            name,
+            directory: None,
+            identity: None,
+            promoted: false,
+        };
+        let directory = guard
+            .parent
+            .open_private_dir(&guard.name)
+            .map_err(|_| "runtime_staging_failed")?;
+        let identity = directory.identity().map_err(|_| "runtime_staging_failed")?;
+        guard.directory = Some(directory);
+        guard.identity = Some(identity);
+        Ok(guard)
+    }
+
+    fn directory(&self) -> Result<&SecureDir, String> {
+        self.directory
+            .as_ref()
+            .ok_or_else(|| "runtime_staging_failed".to_string())
+    }
+
+    fn promote(mut self, versions: &SecureDir, version: &str) -> Result<SecureDir, String> {
+        drop(self.directory.take());
+        self.parent
+            .rename_to(&self.name, versions, version)
+            .map_err(|_| "runtime_activation_failed")?;
+        self.promoted = true;
+        run_test_after_promotion_before_reopen_hook();
+        let promoted = versions
+            .open_private_dir(version)
+            .map_err(|_| "runtime_activation_failed")?;
+        if promoted
+            .identity()
+            .map_err(|_| "runtime_activation_failed")?
+            != self
+                .identity
+                .ok_or_else(|| "runtime_staging_failed".to_string())?
+        {
+            return Err("runtime_promotion_identity_mismatch".into());
+        }
+        Ok(promoted)
+    }
+}
+
+impl Drop for StageGuard {
+    fn drop(&mut self) {
+        drop(self.directory.take());
+        if !self.promoted {
+            let _ = self.parent.remove_dir_all(&self.name);
+        }
+    }
+}
+
 pub struct PinnedEntrypoint {
     informational_path: PathBuf,
+    pins: std::sync::Arc<EntrypointPins>,
+}
+
+struct EntrypointPins {
     _version_directory: SecureDir,
     _executable: cap_std::fs::File,
+    _version_lease: Option<VersionLease>,
 }
 
 impl std::fmt::Debug for PinnedEntrypoint {
@@ -270,12 +349,16 @@ impl PinnedEntrypoint {
         version_directory: SecureDir,
         entrypoint: &str,
         informational_path: PathBuf,
+        version_lease: Option<VersionLease>,
     ) -> Result<Self, String> {
         let executable = open_entrypoint(&version_directory, entrypoint)?;
         Ok(Self {
             informational_path,
-            _version_directory: version_directory,
-            _executable: executable,
+            pins: std::sync::Arc::new(EntrypointPins {
+                _version_directory: version_directory,
+                _executable: executable,
+                _version_lease: version_lease,
+            }),
         })
     }
 
@@ -283,9 +366,9 @@ impl PinnedEntrypoint {
         &self.informational_path
     }
 
-    pub fn command(&self) -> Result<PinnedRuntimeCommand<'_>, String> {
+    pub fn command(&self) -> Result<PinnedRuntimeCommand, String> {
         #[cfg(unix)]
-        let inherited_executable = duplicate_inheritable_file(&self._executable)?;
+        let inherited_executable = duplicate_inheritable_file(&self.pins._executable)?;
         #[cfg(unix)]
         let command_path = {
             use std::os::fd::AsRawFd;
@@ -301,36 +384,72 @@ impl PinnedEntrypoint {
 
         Ok(PinnedRuntimeCommand {
             command: tokio::process::Command::new(command_path),
-            _entrypoint: self,
+            pins: self.pins.clone(),
             #[cfg(unix)]
             _inherited_executable: inherited_executable,
         })
     }
 }
 
-pub struct PinnedRuntimeCommand<'a> {
+pub struct PinnedRuntimeCommand {
     command: tokio::process::Command,
-    _entrypoint: &'a PinnedEntrypoint,
+    pins: std::sync::Arc<EntrypointPins>,
     #[cfg(unix)]
     _inherited_executable: std::fs::File,
 }
 
-impl PinnedRuntimeCommand<'_> {
+impl PinnedRuntimeCommand {
     pub fn command_mut(&mut self) -> &mut tokio::process::Command {
         &mut self.command
     }
 
-    pub fn spawn(&mut self) -> Result<tokio::process::Child, String> {
-        self.command
+    pub fn spawn(&mut self) -> Result<PinnedChild, String> {
+        self.command.kill_on_drop(true);
+        let child = self
+            .command
             .spawn()
-            .map_err(|_| "runtime_process_start_failed".to_string())
+            .map_err(|_| "runtime_process_start_failed".to_string())?;
+        Ok(PinnedChild {
+            child,
+            _pins: self.pins.clone(),
+        })
     }
 
     pub async fn output(&mut self) -> Result<std::process::Output, String> {
+        self.command.kill_on_drop(true);
         self.command
             .output()
             .await
             .map_err(|_| "runtime_process_start_failed".to_string())
+    }
+}
+
+pub struct PinnedChild {
+    child: tokio::process::Child,
+    _pins: std::sync::Arc<EntrypointPins>,
+}
+
+impl PinnedChild {
+    pub fn id(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    pub fn child_mut(&mut self) -> &mut tokio::process::Child {
+        &mut self.child
+    }
+
+    pub async fn wait(&mut self) -> Result<std::process::ExitStatus, String> {
+        self.child
+            .wait()
+            .await
+            .map_err(|_| "runtime_process_wait_failed".to_string())
+    }
+
+    pub async fn kill(&mut self) -> Result<(), String> {
+        self.child
+            .kill()
+            .await
+            .map_err(|_| "runtime_process_kill_failed".to_string())
     }
 }
 
@@ -399,6 +518,72 @@ impl RuntimeFs {
             .into_std();
         fs2::FileExt::lock_exclusive(&file).map_err(|_| "runtime_state_lock_failed")?;
         Ok(file)
+    }
+
+    async fn lock_version(&self, record: &RuntimeRecord) -> Result<VersionLease, String> {
+        let name = format!("runtime-version-{}-{}.lock", record.target, record.version);
+        let file = self
+            .runtime
+            .open_or_create_lock_file(&name)
+            .map_err(|_| "runtime_version_lock_failed")?
+            .into_std();
+        loop {
+            match fs2::FileExt::try_lock_exclusive(&file) {
+                Ok(()) => return Ok(VersionLease { _file: file }),
+                Err(error)
+                    if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(_) => return Err("runtime_version_lock_failed".into()),
+            }
+        }
+    }
+
+    async fn lock_versions(&self, records: &[RuntimeRecord]) -> Result<Vec<VersionLease>, String> {
+        let mut records = records.iter().collect::<Vec<_>>();
+        records.sort_by(|left, right| left.version.cmp(&right.version));
+        records.dedup_by(|left, right| left.version == right.version);
+        let mut leases = Vec::with_capacity(records.len());
+        for record in records {
+            leases.push(self.lock_version(record).await?);
+        }
+        Ok(leases)
+    }
+
+    fn cleanup_stale_staging(&self, version: &str) -> Result<(), String> {
+        let prefix = format!(".runtime-{version}-");
+        for entry in self
+            .staging
+            .entries()
+            .map_err(|_| "runtime_staging_failed")?
+        {
+            let Some(name) = entry.to_str() else {
+                continue;
+            };
+            let Some(identifier) = name
+                .strip_prefix(&prefix)
+                .and_then(|name| name.strip_suffix(".tmp"))
+            else {
+                continue;
+            };
+            if uuid::Uuid::parse_str(identifier).is_err() {
+                continue;
+            }
+            match self.staging.symlink_metadata(name) {
+                Ok(metadata) if metadata.is_dir() => self
+                    .staging
+                    .remove_dir_all(name)
+                    .map_err(|_| "runtime_staging_failed")?,
+                Ok(_) => self
+                    .staging
+                    .remove_file_or_symlink(name)
+                    .map_err(|_| "runtime_staging_failed")?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err("runtime_staging_failed".into()),
+            }
+        }
+        Ok(())
     }
 
     fn commit_activation(
@@ -493,6 +678,16 @@ impl RuntimeFs {
         }
     }
 
+    fn remove_version_if_unreferenced(&self, record: &RuntimeRecord) -> Result<(), String> {
+        run_test_before_orphan_delete_hook();
+        let _state_lock = self.lock_state()?;
+        let state = self.read_state_unlocked()?;
+        if state.current.as_ref() == Some(record) || state.previous.as_ref() == Some(record) {
+            return Err("runtime_version_referenced".into());
+        }
+        self.remove_version_entry(&record.version)
+    }
+
     fn active_path(&self, record: &RuntimeRecord) -> PathBuf {
         self.layout
             .runtime_versions
@@ -525,8 +720,10 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
             return Err("invalid_runtime_asset".into());
         }
         let fs = RuntimeFs::open(&self.layout)?;
-        let state = fs.read_state()?;
         let record = RuntimeRecord::from_asset(asset)?;
+        let _version_lease = fs.lock_version(&record).await?;
+        fs.cleanup_stale_staging(&record.version)?;
+        let state = fs.read_state()?;
 
         if state
             .current
@@ -535,6 +732,8 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
         {
             report_reuse_progress(progress);
             verify_installed_version(&fs, &record).await?;
+            run_test_after_current_health_hook();
+            publish_active_record(&fs, state.generation, record.clone())?;
             return Ok(fs.layout.runtime_versions.join(&record.version));
         }
 
@@ -550,11 +749,11 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
                             return Ok(fs.layout.runtime_versions.join(&record.version));
                         }
                         Err(error) if referenced => return Err(error),
-                        Err(_) => fs.remove_version_entry(&record.version)?,
+                        Err(_) => fs.remove_version_if_unreferenced(&record)?,
                     }
                 }
                 _ if referenced => return Err("invalid_runtime_metadata".into()),
-                _ => fs.remove_version_entry(&record.version)?,
+                _ => fs.remove_version_if_unreferenced(&record)?,
             }
         }
 
@@ -605,54 +804,45 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
             phase: InstallPhase::Activating,
             progress: 95.0,
         });
-        let staging_name = format!(".runtime-{}-{}.tmp", asset.version, uuid::Uuid::new_v4());
-        fs.staging
-            .create_dir(&staging_name)
-            .map_err(|_| "runtime_staging_failed")?;
-        let staging_root = fs
-            .staging
-            .open_private_dir(&staging_name)
-            .map_err(|_| "runtime_staging_failed")?;
-        if let Err(error) = extract_archive(&mut archive, &staging_root) {
-            drop(staging_root);
-            let _ = fs.staging.remove_dir_all(&staging_name);
-            return Err(error);
-        }
-        staging_root
+        let staging = StageGuard::create(&fs.staging, &asset.version)?;
+        extract_archive(&mut archive, staging.directory()?)?;
+        staging
+            .directory()?
             .atomic_write_json(RUNTIME_METADATA_FILE, &record)
             .map_err(|_| "runtime_metadata_write_failed")?;
 
         let staged_entrypoint_path = fs
             .layout
             .staging
-            .join(&staging_name)
+            .join(&staging.name)
             .join(&asset.entrypoint);
-        if let Err(error) =
-            run_health_check(&staging_root, &asset.entrypoint, &staged_entrypoint_path).await
-        {
-            drop(staging_root);
-            let _ = fs.staging.remove_dir_all(&staging_name);
-            return Err(error);
-        }
-        drop(staging_root);
+        run_health_check(
+            staging.directory()?,
+            &asset.entrypoint,
+            &staged_entrypoint_path,
+        )
+        .await?;
 
         if fs.version_exists(&asset.version)? {
-            let _ = fs.staging.remove_dir_all(&staging_name);
             return Err("runtime_version_already_exists".into());
         }
-        fs.staging
-            .rename_to(&staging_name, &fs.versions, &asset.version)
-            .map_err(|_| "runtime_activation_failed")?;
+        let promoted = staging.promote(&fs.versions, &asset.version)?;
         publish_active_record(&fs, state.generation, record)?;
+        drop(promoted);
         Ok(fs.layout.runtime_versions.join(&asset.version))
     }
 
-    pub fn active_entrypoint(&self) -> Result<PinnedEntrypoint, String> {
+    pub async fn active_entrypoint(&self) -> Result<PinnedEntrypoint, String> {
         let fs = RuntimeFs::open(&self.layout)?;
-        let record = fs
-            .read_state()?
+        let initial = fs.read_state()?;
+        let record = initial
             .current
             .ok_or_else(|| "runtime_not_installed".to_string())?;
+        let version_lease = fs.lock_version(&record).await?;
+        let current = fs.read_state()?.current;
+        if current.as_ref() != Some(&record) {
+            return Err("runtime_state_stale".into());
+        }
         validate_installed_record(&fs, &record)?;
         let version_directory = fs
             .versions
@@ -662,6 +852,7 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
             version_directory,
             &record.entrypoint,
             fs.active_path(&record),
+            Some(version_lease),
         )
     }
 
@@ -686,6 +877,9 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
             .previous
             .clone()
             .ok_or_else(|| "runtime_rollback_unavailable".to_string())?;
+        let _version_leases = fs
+            .lock_versions(&[current.clone(), previous.clone()])
+            .await?;
         validate_installed_record(&fs, &previous)?;
         let entrypoint = fs.active_path(&previous);
         let version_directory = fs
@@ -1053,6 +1247,7 @@ async fn run_health_check(
             .map_err(|_| "runtime_version_unavailable")?,
         entrypoint,
         ambient_entrypoint.to_path_buf(),
+        None,
     )?;
     let mut pinned_command = pinned_entrypoint.command()?;
     pinned_command
@@ -1064,21 +1259,33 @@ async fn run_health_check(
         .kill_on_drop(true);
     #[cfg(unix)]
     pinned_command.command_mut().process_group(0);
-    let mut child = pinned_command
+    let mut pinned_child = pinned_command
         .spawn()
         .map_err(|_| "runtime_health_check_failed".to_string())?;
-    let mut process_group = HealthProcessGroup::new(&child)?;
-    let stdout = child.stdout.take().ok_or("runtime_health_check_failed")?;
-    let stderr = child.stderr.take().ok_or("runtime_health_check_failed")?;
+    let mut process_group = HealthProcessGroup::new(&pinned_child.child)?;
+    let stdout = pinned_child
+        .child
+        .stdout
+        .take()
+        .ok_or("runtime_health_check_failed")?;
+    let stderr = pinned_child
+        .child
+        .stderr
+        .take()
+        .ok_or("runtime_health_check_failed")?;
     let operation = async {
         tokio::try_join!(
             read_capped_health_stream(stdout, MAX_HEALTH_STREAM_BYTES),
             read_capped_health_stream(stderr, MAX_HEALTH_STREAM_BYTES),
             async {
-                child
+                let status = pinned_child
+                    .child
                     .wait()
                     .await
-                    .map_err(|_| "runtime_health_check_failed".to_string())
+                    .map_err(|_| "runtime_health_check_failed".to_string())?;
+                #[cfg(unix)]
+                process_group.disarm();
+                Ok(status)
             }
         )
     };
@@ -1086,19 +1293,17 @@ async fn run_health_check(
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
             process_group.terminate();
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            let _ = pinned_child.kill().await;
+            let _ = pinned_child.wait().await;
             return Err(error);
         }
         Err(_) => {
             process_group.terminate();
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            let _ = pinned_child.kill().await;
+            let _ = pinned_child.wait().await;
             return Err("runtime_health_timeout".into());
         }
     };
-    #[cfg(unix)]
-    process_group.disarm();
     if !status.success() {
         return Err("runtime_health_check_failed".into());
     }
@@ -1213,6 +1418,8 @@ impl HealthProcessGroup {
 
     fn terminate(&mut self) {
         if self.armed {
+            #[cfg(test)]
+            TEST_PROCESS_GROUP_TERMINATIONS.with(|count| count.set(count.get() + 1));
             unsafe {
                 libc::kill(-self.process_group, libc::SIGKILL);
             }
@@ -1223,6 +1430,21 @@ impl HealthProcessGroup {
     fn disarm(&mut self) {
         self.armed = false;
     }
+}
+
+#[cfg(all(test, unix))]
+thread_local! {
+    static TEST_PROCESS_GROUP_TERMINATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(all(test, unix))]
+fn reset_test_process_group_terminations() {
+    TEST_PROCESS_GROUP_TERMINATIONS.with(|count| count.set(0));
+}
+
+#[cfg(all(test, unix))]
+fn test_process_group_terminations() -> usize {
+    TEST_PROCESS_GROUP_TERMINATIONS.with(std::cell::Cell::get)
 }
 
 #[cfg(unix)]
@@ -1287,6 +1509,12 @@ thread_local! {
         std::cell::RefCell::new(None);
     static TEST_BEFORE_STATE_PUBLISH_HOOK: std::cell::RefCell<Option<StatePublishHook>> =
         std::cell::RefCell::new(None);
+    static TEST_AFTER_PROMOTION_BEFORE_REOPEN_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+    static TEST_AFTER_CURRENT_HEALTH_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+    static TEST_BEFORE_ORPHAN_DELETE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
 }
 
 #[cfg(test)]
@@ -1297,6 +1525,21 @@ fn set_test_after_archive_verify_hook(hook: impl FnOnce() + 'static) {
 #[cfg(test)]
 fn set_test_before_state_publish_hook(hook: impl FnOnce() -> Result<(), String> + 'static) {
     TEST_BEFORE_STATE_PUBLISH_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn set_test_after_promotion_before_reopen_hook(hook: impl FnOnce() + 'static) {
+    TEST_AFTER_PROMOTION_BEFORE_REOPEN_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn set_test_after_current_health_hook(hook: impl FnOnce() + 'static) {
+    TEST_AFTER_CURRENT_HEALTH_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn set_test_before_orphan_delete_hook(hook: impl FnOnce() + 'static) {
+    TEST_BEFORE_ORPHAN_DELETE_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
 }
 
 fn run_test_after_archive_verify_hook() {
@@ -1319,6 +1562,33 @@ fn run_test_before_state_publish_hook() -> Result<(), String> {
     });
     #[cfg(not(test))]
     Ok(())
+}
+
+fn run_test_after_promotion_before_reopen_hook() {
+    #[cfg(test)]
+    TEST_AFTER_PROMOTION_BEFORE_REOPEN_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+fn run_test_after_current_health_hook() {
+    #[cfg(test)]
+    TEST_AFTER_CURRENT_HEALTH_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+fn run_test_before_orphan_delete_hook() {
+    #[cfg(test)]
+    TEST_BEFORE_ORPHAN_DELETE_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
 }
 
 pub(crate) fn current_target_key() -> Result<&'static str, String> {
@@ -1344,17 +1614,20 @@ pub(crate) fn current_target_key() -> Result<&'static str, String> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
-    use super::HealthProcessGroup;
     use super::{
         allowed_redirect_url, set_test_after_archive_verify_hook,
-        set_test_before_state_publish_hook, HttpRuntimeSource, RuntimeInstaller, RuntimeSource,
-        MAX_RUNTIME_STATE_BYTES, RUNTIME_STATE_FILE,
+        set_test_after_current_health_hook, set_test_after_promotion_before_reopen_hook,
+        set_test_before_orphan_delete_hook, set_test_before_state_publish_hook, HttpRuntimeSource,
+        RuntimeFs, RuntimeInstaller, RuntimeSource, MAX_RUNTIME_STATE_BYTES, RUNTIME_STATE_FILE,
+    };
+    #[cfg(unix)]
+    use super::{
+        reset_test_process_group_terminations, test_process_group_terminations, HealthProcessGroup,
     };
     use crate::runtime::manifest::RuntimeAsset;
     use crate::storage::DataLayout;
     use sha2::{Digest, Sha256};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone)]
@@ -1528,6 +1801,75 @@ mod tests {
         assert!(state["previous"]["version"] == "0.9.0" || state["previous"]["version"] == "1.0.0");
     }
 
+    #[test]
+    fn runtime_lock_child_process() {
+        let Ok(root) = std::env::var("TAWREED_TEST_RUNTIME_CHILD_ROOT") else {
+            return;
+        };
+        let version = std::env::var("TAWREED_TEST_RUNTIME_CHILD_VERSION").unwrap();
+        let layout = DataLayout::from_root(PathBuf::from(root));
+        let source = FakeRuntimeSource::healthy_archive();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime
+            .block_on(
+                RuntimeInstaller::new(layout, source.clone()).ensure(&asset_for(&source, &version)),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn cooperating_processes_serialize_version_lifecycle_and_state_generations() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+
+        let same_first = spawn_runtime_lock_child(&layout, "1.0.0");
+        let same_second = spawn_runtime_lock_child(&layout, "1.0.0");
+        assert_child_success(same_first);
+        assert_child_success(same_second);
+        assert_eq!(runtime_state(&layout)["generation"], 1);
+
+        let next_first = spawn_runtime_lock_child(&layout, "1.1.0");
+        let next_second = spawn_runtime_lock_child(&layout, "1.2.0");
+        assert_child_success(next_first);
+        assert_child_success(next_second);
+        let state = runtime_state(&layout);
+        assert_eq!(state["generation"], 3);
+        let current = state["current"]["version"].as_str().unwrap();
+        let previous = state["previous"]["version"].as_str().unwrap();
+        assert_ne!(current, previous);
+        assert!([current, previous].contains(&"1.1.0"));
+        assert!([current, previous].contains(&"1.2.0"));
+    }
+
+    fn spawn_runtime_lock_child(layout: &DataLayout, version: &str) -> std::process::Child {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "runtime::installer::tests::runtime_lock_child_process",
+                "--nocapture",
+            ])
+            .env("TAWREED_TEST_RUNTIME_CHILD_ROOT", &layout.root)
+            .env("TAWREED_TEST_RUNTIME_CHILD_VERSION", version)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
+    fn assert_child_success(child: std::process::Child) {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[tokio::test]
     async fn pins_verified_archive_handle_through_extraction() {
         let root = tempfile::tempdir().unwrap();
@@ -1558,6 +1900,131 @@ mod tests {
 
         assert!(active.join(health_entrypoint()).is_file());
         assert!(!active.join("attacker.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn promotion_rejects_a_substituted_destination_identity_before_state_commit() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "0.9.0"))
+            .await
+            .unwrap();
+        let promoted = layout.runtime_versions.join("1.0.0");
+        let held = layout.runtime_versions.join("1.0.0.held");
+        set_test_after_promotion_before_reopen_hook(move || {
+            std::fs::rename(&promoted, &held).unwrap();
+            std::fs::create_dir(&promoted).unwrap();
+        });
+
+        assert_eq!(
+            installer
+                .ensure(&asset_for(&source, "1.0.0"))
+                .await
+                .unwrap_err(),
+            "runtime_promotion_identity_mismatch"
+        );
+        assert_eq!(state_version(&layout, "current"), "0.9.0");
+    }
+
+    #[tokio::test]
+    async fn abort_during_staged_health_removes_the_actual_uuid_stage() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::from_bytes(runtime_archive_with_script(hanging_script()));
+        let installer = std::sync::Arc::new(RuntimeInstaller::new(layout.clone(), source.clone()));
+        let task_installer = installer.clone();
+        let asset = asset_for(&source, "1.0.0");
+        let task = tokio::spawn(async move { task_installer.ensure(&asset).await });
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if !generated_staging_directories(&layout, "1.0.0").is_empty() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        let _ = task.await;
+
+        assert!(generated_staging_directories(&layout, "1.0.0").is_empty());
+    }
+
+    #[tokio::test]
+    async fn current_fast_path_reconciles_a_concurrent_current_change_before_ready() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+        installer
+            .ensure(&asset_for(&source, "1.1.0"))
+            .await
+            .unwrap();
+        installer.rollback().await.unwrap();
+        let hook_layout = layout.clone();
+        set_test_after_current_health_hook(move || {
+            let fs = RuntimeFs::open(&hook_layout).unwrap();
+            let state = fs.read_state().unwrap();
+            let record = fs.read_version_metadata("1.1.0").unwrap();
+            fs.commit_activation(state.generation, record).unwrap();
+        });
+
+        installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
+    }
+
+    #[tokio::test]
+    async fn orphan_delete_rechecks_references_under_state_lock() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "0.9.0"))
+            .await
+            .unwrap();
+        set_test_before_state_publish_hook(|| Err("injected_state_write_failure".into()));
+        assert!(installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .is_err());
+        let orphan_entrypoint = layout
+            .runtime_versions
+            .join("1.0.0")
+            .join(health_entrypoint());
+        std::fs::remove_file(&orphan_entrypoint).unwrap();
+        let hook_layout = layout.clone();
+        set_test_before_orphan_delete_hook(move || {
+            let fs = RuntimeFs::open(&hook_layout).unwrap();
+            let state = fs.read_state().unwrap();
+            let record = fs.read_version_metadata("1.0.0").unwrap();
+            fs.commit_activation(state.generation, record).unwrap();
+        });
+
+        assert!(installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .is_err());
+
+        assert!(layout.runtime_versions.join("1.0.0").is_dir());
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
     }
 
     #[tokio::test]
@@ -1597,7 +2064,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            installer.active_entrypoint().unwrap_err(),
+            installer.active_entrypoint().await.unwrap_err(),
             "invalid_runtime_state"
         );
     }
@@ -1703,7 +2170,7 @@ mod tests {
             .ensure(&asset_for(&source, "1.0.0"))
             .await
             .unwrap();
-        let pinned = installer.active_entrypoint().unwrap();
+        let pinned = installer.active_entrypoint().await.unwrap();
         assert!(pinned.informational_path().ends_with(health_entrypoint()));
         #[cfg(windows)]
         assert!(std::fs::OpenOptions::new()
@@ -1720,6 +2187,34 @@ mod tests {
             std::str::from_utf8(&output.stdout).unwrap().trim(),
             "{\"status\":\"ok\",\"protocolVersion\":1}"
         );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn detached_child_retains_windows_pins_until_kill_and_wait() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout, source.clone());
+        let active = installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+        let path = active.join(health_entrypoint());
+        std::fs::write(&path, hanging_script()).unwrap();
+        let pinned = installer.active_entrypoint().await.unwrap();
+        let mut command = pinned.command().unwrap();
+        let mut child = command.spawn().unwrap();
+        drop(command);
+        drop(pinned);
+
+        assert!(std::fs::OpenOptions::new().write(true).open(&path).is_err());
+
+        child.kill().await.unwrap();
+        child.wait().await.unwrap();
+        drop(child);
+        assert!(std::fs::OpenOptions::new().write(true).open(path).is_ok());
     }
 
     #[tokio::test]
@@ -1836,10 +2331,7 @@ mod tests {
 
             assert_eq!(error, expected_error);
             assert!(!layout.runtime.join(RUNTIME_STATE_FILE).exists());
-            assert!(!layout
-                .staging
-                .join(format!("runtime-{}.tmp", asset.version))
-                .exists());
+            assert!(generated_staging_directories(&layout, &asset.version).is_empty());
         }
     }
 
@@ -1952,8 +2444,33 @@ mod tests {
                 "unsafe_runtime_archive",
                 "collision case {case} was not rejected during preflight"
             );
-            assert!(!layout.staging.join("runtime-1.0.0.tmp").exists());
+            assert!(generated_staging_directories(&layout, "1.0.0").is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn version_lease_cleans_only_matching_stale_uuid_stages() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let stale = layout
+            .staging
+            .join(format!(".runtime-1.0.0-{}.tmp", uuid::Uuid::new_v4()));
+        let unrelated = layout
+            .staging
+            .join(format!(".runtime-1.1.0-{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&stale).unwrap();
+        std::fs::create_dir(&unrelated).unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+
+        RuntimeInstaller::new(layout.clone(), source.clone())
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+
+        assert!(!stale.exists());
+        assert!(unrelated.exists());
+        assert!(generated_staging_directories(&layout, "1.0.0").is_empty());
     }
 
     #[tokio::test]
@@ -2069,6 +2586,8 @@ mod tests {
 
     #[tokio::test]
     async fn health_check_times_out_and_reaps_a_hung_process() {
+        #[cfg(unix)]
+        reset_test_process_group_terminations();
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -2082,6 +2601,8 @@ mod tests {
 
         assert_eq!(error, "runtime_health_timeout");
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        #[cfg(unix)]
+        assert_eq!(test_process_group_terminations(), 1);
     }
 
     #[tokio::test]
@@ -2107,6 +2628,8 @@ mod tests {
 
     #[tokio::test]
     async fn health_check_does_not_wait_forever_on_inherited_descendant_pipes() {
+        #[cfg(unix)]
+        reset_test_process_group_terminations();
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -2121,6 +2644,8 @@ mod tests {
 
         assert_eq!(error, "runtime_health_timeout");
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        #[cfg(unix)]
+        assert_eq!(test_process_group_terminations(), 0);
     }
 
     #[cfg(unix)]
@@ -2158,7 +2683,11 @@ mod tests {
         assert_eq!(state_version(&layout, "current"), "0.9.0");
         assert_eq!(state_version(&layout, "previous"), "1.0.0");
         assert_eq!(
-            installer.active_entrypoint().unwrap().informational_path(),
+            installer
+                .active_entrypoint()
+                .await
+                .unwrap()
+                .informational_path(),
             entrypoint.as_path()
         );
     }
@@ -2403,6 +2932,20 @@ mod tests {
     fn runtime_state(layout: &DataLayout) -> serde_json::Value {
         serde_json::from_slice(&std::fs::read(layout.runtime.join(RUNTIME_STATE_FILE)).unwrap())
             .unwrap()
+    }
+
+    fn generated_staging_directories(layout: &DataLayout, version: &str) -> Vec<PathBuf> {
+        let prefix = format!(".runtime-{version}-");
+        std::fs::read_dir(&layout.staging)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with(&prefix) && name.ends_with(".tmp")
+            })
+            .map(|entry| entry.path())
+            .collect()
     }
 
     #[cfg(unix)]

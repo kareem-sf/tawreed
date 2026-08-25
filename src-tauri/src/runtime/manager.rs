@@ -137,10 +137,12 @@ pub struct RuntimeManager<
     S: RuntimeSource = HttpRuntimeSource,
     B: RuntimeBootstrapSource = HttpRuntimeBootstrap,
 > {
-    installer: RuntimeInstaller<S>,
+    installer: std::sync::Arc<RuntimeInstaller<S>>,
     bootstrap: B,
-    status: tokio::sync::RwLock<RuntimeBootstrapStatus>,
-    operation: tokio::sync::Mutex<OperationState>,
+    status: std::sync::Arc<tokio::sync::RwLock<RuntimeBootstrapStatus>>,
+    operation: std::sync::Arc<tokio::sync::Mutex<OperationState>>,
+    #[cfg(test)]
+    rollback_commit_gate: std::sync::Arc<std::sync::Mutex<Option<RollbackCommitGate>>>,
 }
 
 #[derive(Clone)]
@@ -183,16 +185,20 @@ impl RuntimeManager<HttpRuntimeSource, HttpRuntimeBootstrap> {
     }
 }
 
-impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
+impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeManager<S, B> {
     pub fn with_components(installer: RuntimeInstaller<S>, bootstrap: B) -> Self {
         Self {
-            installer,
+            installer: std::sync::Arc::new(installer),
             bootstrap,
-            status: tokio::sync::RwLock::new(RuntimeBootstrapStatus::checking()),
-            operation: tokio::sync::Mutex::new(OperationState {
+            status: std::sync::Arc::new(tokio::sync::RwLock::new(
+                RuntimeBootstrapStatus::checking(),
+            )),
+            operation: std::sync::Arc::new(tokio::sync::Mutex::new(OperationState {
                 generation: 0,
                 in_flight: None,
-            }),
+            })),
+            #[cfg(test)]
+            rollback_commit_gate: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -230,12 +236,6 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
     where
         F: Fn(RuntimeBootstrapStatus) + Send + Sync,
     {
-        let current = self.status().await;
-        if current.phase == "ready" {
-            progress(current.clone());
-            return Ok(current);
-        }
-
         self.publish(RuntimeBootstrapStatus::checking(), progress)
             .await;
         let asset = match self.bootstrap.verified_asset().await {
@@ -299,8 +299,8 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         self.start(progress).await
     }
 
-    pub fn active_entrypoint(&self) -> Result<PinnedEntrypoint, String> {
-        self.installer.active_entrypoint()
+    pub async fn active_entrypoint(&self) -> Result<PinnedEntrypoint, String> {
+        self.installer.active_entrypoint().await
     }
 
     pub async fn rollback(&self) -> Result<PathBuf, String> {
@@ -310,21 +310,47 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
             OperationRole::Leader { generation, result } => (generation, result),
         };
         let (generation, result_sender) = generation;
-        let result = async {
-            let entrypoint = self.installer.rollback().await?;
-            let version = self.installer.active_version()?;
-            *self.status.write().await = RuntimeBootstrapStatus::ready(version);
-            Ok(entrypoint)
+        let mut receiver = result_sender.subscribe();
+        let installer = self.installer.clone();
+        let status = self.status.clone();
+        let operation = self.operation.clone();
+        #[cfg(test)]
+        let rollback_commit_gate = self.rollback_commit_gate.clone();
+        tokio::spawn(async move {
+            let result = match installer.rollback().await {
+                Ok(entrypoint) => {
+                    #[cfg(test)]
+                    run_test_after_rollback_commit_hook(&rollback_commit_gate).await;
+                    match installer.active_version() {
+                        Ok(version) => {
+                            *status.write().await = RuntimeBootstrapStatus::ready(version);
+                            Ok(entrypoint)
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            };
+            finish_shared_operation(
+                &operation,
+                OperationKind::Rollback,
+                generation,
+                result_sender,
+                CompletedOperation::Rollback(result),
+            )
+            .await;
+        });
+        if receiver.borrow().is_none() {
+            receiver
+                .changed()
+                .await
+                .map_err(|_| "runtime_operation_cancelled".to_string())?;
         }
-        .await;
-        self.finish_operation(
-            OperationKind::Rollback,
-            generation,
-            result_sender,
-            CompletedOperation::Rollback(result.clone()),
-        )
-        .await;
-        result
+        let completed = receiver.borrow().clone();
+        match completed {
+            Some(CompletedOperation::Rollback(result)) => result,
+            _ => Err("runtime_operation_cancelled".into()),
+        }
     }
 
     async fn begin_operation(&self, requested: OperationKind) -> OperationRole {
@@ -389,6 +415,31 @@ impl<S: RuntimeSource, B: RuntimeBootstrapSource> RuntimeManager<S, B> {
         *self.status.write().await = status.clone();
         progress(status);
     }
+
+    #[cfg(test)]
+    fn set_test_after_rollback_commit_gate(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Notify>,
+    ) {
+        *self.rollback_commit_gate.lock().unwrap() = Some((entered, release));
+    }
+}
+
+async fn finish_shared_operation(
+    operation: &std::sync::Arc<tokio::sync::Mutex<OperationState>>,
+    kind: OperationKind,
+    generation: u64,
+    result: tokio::sync::watch::Sender<Option<CompletedOperation>>,
+    completed: CompletedOperation,
+) {
+    let mut state = operation.lock().await;
+    if let Some(in_flight) = &state.in_flight {
+        if in_flight.kind == kind && in_flight.generation == generation {
+            result.send_replace(Some(completed));
+            state.in_flight = None;
+        }
+    }
 }
 
 fn public_error(internal: &str) -> (&'static str, bool) {
@@ -404,6 +455,8 @@ fn public_error(internal: &str) -> (&'static str, bool) {
         | "runtime_metadata_write_failed"
         | "runtime_version_unavailable"
         | "runtime_version_already_exists"
+        | "runtime_version_lock_failed"
+        | "runtime_version_referenced"
         | "runtime_state_lock_failed"
         | "runtime_state_stale"
         | "runtime_health_check_failed"
@@ -420,6 +473,7 @@ fn public_error(internal: &str) -> (&'static str, bool) {
         | "runtime_manifest_signature_too_large"
         | "runtime_asset_unavailable"
         | "runtime_platform_unsupported"
+        | "runtime_promotion_identity_mismatch"
         | "invalid_runtime_archive"
         | "unsafe_runtime_archive"
         | "runtime_archive_too_large"
@@ -460,6 +514,8 @@ fn internal_to_public(code: &str) -> &'static str {
         | "runtime_metadata_write_failed"
         | "runtime_version_unavailable"
         | "runtime_version_already_exists"
+        | "runtime_version_lock_failed"
+        | "runtime_version_referenced"
         | "runtime_state_lock_failed"
         | "runtime_state_stale" => "runtime_activation_failed",
         "runtime_manifest_download_failed" => "runtime_manifest_download_failed",
@@ -516,6 +572,23 @@ fn current_target() -> Result<RuntimeTarget, String> {
         "darwin-x86_64" => Ok(RuntimeTarget::DarwinX86_64),
         "darwin-aarch64" => Ok(RuntimeTarget::DarwinAarch64),
         _ => Err("runtime_platform_unsupported".into()),
+    }
+}
+
+#[cfg(test)]
+type RollbackCommitGate = (
+    std::sync::Arc<tokio::sync::Notify>,
+    std::sync::Arc<tokio::sync::Notify>,
+);
+
+#[cfg(test)]
+async fn run_test_after_rollback_commit_hook(
+    gate: &std::sync::Arc<std::sync::Mutex<Option<RollbackCommitGate>>>,
+) {
+    let gate = { gate.lock().unwrap().take() };
+    if let Some((entered, release)) = gate {
+        entered.notify_waiters();
+        release.notified().await;
     }
 }
 
@@ -656,16 +729,18 @@ mod tests {
             .await
             .unwrap();
 
-        let statuses = updates.lock().unwrap();
-        let phases = statuses.iter().map(|status| status.phase.clone()).fold(
-            Vec::new(),
-            |mut unique, phase| {
-                if unique.last() != Some(&phase) {
-                    unique.push(phase);
-                }
-                unique
-            },
-        );
+        let phases = {
+            let statuses = updates.lock().unwrap();
+            statuses.iter().map(|status| status.phase.clone()).fold(
+                Vec::new(),
+                |mut unique, phase| {
+                    if unique.last() != Some(&phase) {
+                        unique.push(phase);
+                    }
+                    unique
+                },
+            )
+        };
         assert_eq!(
             phases,
             vec![
@@ -683,6 +758,7 @@ mod tests {
             fixture
                 .manager
                 .active_entrypoint()
+                .await
                 .unwrap()
                 .informational_path(),
             fixture
@@ -930,6 +1006,52 @@ mod tests {
         assert!(first_path.to_string_lossy().contains("0.9.0"));
         assert_eq!(manager.status().await.version.as_deref(), Some("0.9.0"));
         assert_eq!(downloads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn caller_abort_after_rollback_commit_cannot_replay_the_swap() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeSource::new();
+        let installer = RuntimeInstaller::new(layout, source.clone());
+        let mut previous = source.asset();
+        previous.version = "0.9.0".into();
+        previous.url =
+            "https://github.com/kareem-sf/tawreed/releases/download/v0.9.0/runtime.zip".into();
+        installer.ensure(&previous).await.unwrap();
+        let current = source.asset();
+        installer.ensure(&current).await.unwrap();
+        let manager = Arc::new(RuntimeManager::with_components(
+            installer,
+            FakeBootstrap {
+                asset: current,
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+        ));
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        manager.set_test_after_rollback_commit_gate(entered.clone(), release.clone());
+        let entered_wait = entered.notified();
+        let caller_manager = manager.clone();
+        let caller = tokio::spawn(async move { caller_manager.rollback().await });
+        entered_wait.await;
+        let follower_manager = manager.clone();
+        let follower = tokio::spawn(async move { follower_manager.rollback().await });
+        tokio::task::yield_now().await;
+
+        caller.abort();
+        let _ = caller.await;
+        release.notify_waiters();
+        let entrypoint = tokio::time::timeout(std::time::Duration::from_secs(2), follower)
+            .await
+            .expect("rollback follower remained blocked")
+            .unwrap()
+            .unwrap();
+
+        assert!(entrypoint.to_string_lossy().contains("0.9.0"));
+        assert_eq!(manager.installer.active_version().unwrap(), "0.9.0");
+        assert_eq!(manager.status().await.version.as_deref(), Some("0.9.0"));
     }
 
     #[derive(Clone)]

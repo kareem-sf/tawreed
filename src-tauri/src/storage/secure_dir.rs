@@ -9,6 +9,12 @@ pub(crate) struct SecureDir {
     inner: Dir,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FileIdentity {
+    volume: u64,
+    file: u64,
+}
+
 impl SecureDir {
     pub(crate) fn open_root(path: &Path) -> std::io::Result<Self> {
         let parent = path.parent().ok_or_else(|| {
@@ -79,6 +85,47 @@ impl SecureDir {
         Ok(Self {
             inner: self.inner.try_clone()?,
         })
+    }
+
+    pub(crate) fn identity(&self) -> std::io::Result<FileIdentity> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            let metadata = self.inner.try_clone()?.into_std_file().metadata()?;
+            return Ok(FileIdentity {
+                volume: metadata.dev(),
+                file: metadata.ino(),
+            });
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::{
+                GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+            };
+
+            let mut information = BY_HANDLE_FILE_INFORMATION::default();
+            let read = unsafe {
+                GetFileInformationByHandle(
+                    self.inner.as_raw_handle().cast(),
+                    std::ptr::from_mut(&mut information),
+                )
+            };
+            if read == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            return Ok(FileIdentity {
+                volume: information.dwVolumeSerialNumber as u64,
+                file: ((information.nFileIndexHigh as u64) << 32)
+                    | information.nFileIndexLow as u64,
+            });
+        }
+        #[allow(unreachable_code)]
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "filesystem identity unsupported",
+        ))
     }
 
     pub(crate) fn create_dir(&self, name: &str) -> std::io::Result<()> {
