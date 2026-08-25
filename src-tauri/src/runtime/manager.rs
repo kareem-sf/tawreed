@@ -139,10 +139,8 @@ pub struct RuntimeManager<
 > {
     installer: std::sync::Arc<RuntimeInstaller<S>>,
     bootstrap: B,
-    status: std::sync::Arc<tokio::sync::RwLock<RuntimeBootstrapStatus>>,
-    operation: std::sync::Arc<tokio::sync::Mutex<OperationState>>,
-    #[cfg(test)]
-    rollback_commit_gate: std::sync::Arc<std::sync::Mutex<Option<RollbackCommitGate>>>,
+    status: std::sync::Arc<std::sync::Mutex<RuntimeBootstrapStatus>>,
+    operation: std::sync::Arc<std::sync::Mutex<OperationState>>,
 }
 
 #[derive(Clone)]
@@ -190,20 +188,16 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
         Self {
             installer: std::sync::Arc::new(installer),
             bootstrap,
-            status: std::sync::Arc::new(tokio::sync::RwLock::new(
-                RuntimeBootstrapStatus::checking(),
-            )),
-            operation: std::sync::Arc::new(tokio::sync::Mutex::new(OperationState {
+            status: std::sync::Arc::new(std::sync::Mutex::new(RuntimeBootstrapStatus::checking())),
+            operation: std::sync::Arc::new(std::sync::Mutex::new(OperationState {
                 generation: 0,
                 in_flight: None,
             })),
-            #[cfg(test)]
-            rollback_commit_gate: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
     pub async fn status(&self) -> RuntimeBootstrapStatus {
-        self.status.read().await.clone()
+        lock_unpoison(&self.status).clone()
     }
 
     pub async fn start<F>(&self, progress: F) -> Result<RuntimeBootstrapStatus, String>
@@ -227,8 +221,7 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
             generation,
             result_sender,
             CompletedOperation::Bootstrap(result.clone()),
-        )
-        .await;
+        );
         result
     }
 
@@ -236,19 +229,18 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
     where
         F: Fn(RuntimeBootstrapStatus) + Send + Sync,
     {
-        self.publish(RuntimeBootstrapStatus::checking(), progress)
-            .await;
+        self.publish(RuntimeBootstrapStatus::checking(), progress);
         let asset = match self.bootstrap.verified_asset().await {
             Ok(asset) => asset,
             Err(code) => {
                 let status = RuntimeBootstrapStatus::error(&code, None);
-                self.publish(status.clone(), progress).await;
+                self.publish(status.clone(), progress);
                 return Ok(status);
             }
         };
         if asset.version.len() > 40 || validate_asset(&asset).is_err() {
             let status = RuntimeBootstrapStatus::error("invalid_runtime_asset", None);
-            self.publish(status.clone(), progress).await;
+            self.publish(status.clone(), progress);
             return Ok(status);
         }
         let version = asset.version.clone();
@@ -265,7 +257,7 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
                     self.publish(
                         RuntimeBootstrapStatus::from_install_progress(event, &version),
                         progress,
-                    ).await;
+                    );
                 }
                 result = &mut installation => break result,
             }
@@ -274,19 +266,18 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
             self.publish(
                 RuntimeBootstrapStatus::from_install_progress(event, &version),
                 progress,
-            )
-            .await;
+            );
         }
 
         match result {
             Ok(_) => {
                 let status = RuntimeBootstrapStatus::ready(version);
-                self.publish(status.clone(), progress).await;
+                self.publish(status.clone(), progress);
                 Ok(status)
             }
             Err(code) => {
                 let status = RuntimeBootstrapStatus::error(&code, Some(version));
-                self.publish(status.clone(), progress).await;
+                self.publish(status.clone(), progress);
                 Ok(status)
             }
         }
@@ -310,96 +301,76 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
             OperationRole::Leader { generation, result } => (generation, result),
         };
         let (generation, result_sender) = generation;
-        let mut receiver = result_sender.subscribe();
-        let installer = self.installer.clone();
-        let status = self.status.clone();
-        let operation = self.operation.clone();
-        #[cfg(test)]
-        let rollback_commit_gate = self.rollback_commit_gate.clone();
-        tokio::spawn(async move {
-            let result = match installer.rollback().await {
-                Ok(entrypoint) => {
-                    #[cfg(test)]
-                    run_test_after_rollback_commit_hook(&rollback_commit_gate).await;
-                    match installer.active_version() {
-                        Ok(version) => {
-                            *status.write().await = RuntimeBootstrapStatus::ready(version);
-                            Ok(entrypoint)
-                        }
-                        Err(error) => Err(error),
-                    }
-                }
-                Err(error) => Err(error),
-            };
-            finish_shared_operation(
-                &operation,
-                OperationKind::Rollback,
-                generation,
-                result_sender,
-                CompletedOperation::Rollback(result),
-            )
-            .await;
-        });
-        if receiver.borrow().is_none() {
-            receiver
-                .changed()
-                .await
-                .map_err(|_| "runtime_operation_cancelled".to_string())?;
-        }
-        let completed = receiver.borrow().clone();
-        match completed {
-            Some(CompletedOperation::Rollback(result)) => result,
-            _ => Err("runtime_operation_cancelled".into()),
-        }
+        let result = match self.installer.rollback().await {
+            Ok(committed) => {
+                let entrypoint = committed.entrypoint;
+                *lock_unpoison(&self.status) = RuntimeBootstrapStatus::ready(committed.version);
+                Ok(entrypoint)
+            }
+            Err(error) => Err(error),
+        };
+        self.finish_operation(
+            OperationKind::Rollback,
+            generation,
+            result_sender,
+            CompletedOperation::Rollback(result.clone()),
+        );
+        result
     }
 
     async fn begin_operation(&self, requested: OperationKind) -> OperationRole {
         loop {
-            let mut state = self.operation.lock().await;
-            if let Some(in_flight) = &state.in_flight {
-                let same_kind = in_flight.kind == requested;
-                let generation = in_flight.generation;
-                let mut receiver = in_flight.result.clone();
-                drop(state);
-                if receiver.borrow().is_none() && receiver.changed().await.is_err() {
-                    let mut state = self.operation.lock().await;
-                    if state
-                        .in_flight
-                        .as_ref()
-                        .is_some_and(|operation| operation.generation == generation)
-                    {
-                        state.in_flight = None;
-                    }
-                    continue;
+            let waiting = {
+                let mut state = lock_unpoison(&self.operation);
+                if let Some(in_flight) = &state.in_flight {
+                    Some((
+                        in_flight.kind == requested,
+                        in_flight.generation,
+                        in_flight.result.clone(),
+                    ))
+                } else {
+                    state.generation = state.generation.checked_add(1).unwrap_or(1);
+                    let generation = state.generation;
+                    let (result, receiver) = tokio::sync::watch::channel(None);
+                    state.in_flight = Some(InFlightOperation {
+                        generation,
+                        kind: requested,
+                        result: receiver,
+                    });
+                    return OperationRole::Leader { generation, result };
                 }
-                let completed = receiver.borrow().clone();
-                if same_kind {
-                    if let Some(completed) = completed {
-                        return OperationRole::Follower(completed);
-                    }
+            };
+            let Some((same_kind, generation, mut receiver)) = waiting else {
+                continue;
+            };
+            if receiver.borrow().is_none() && receiver.changed().await.is_err() {
+                let mut state = lock_unpoison(&self.operation);
+                if state
+                    .in_flight
+                    .as_ref()
+                    .is_some_and(|operation| operation.generation == generation)
+                {
+                    state.in_flight = None;
                 }
                 continue;
             }
-            state.generation = state.generation.checked_add(1).unwrap_or(1);
-            let generation = state.generation;
-            let (result, receiver) = tokio::sync::watch::channel(None);
-            state.in_flight = Some(InFlightOperation {
-                generation,
-                kind: requested,
-                result: receiver,
-            });
-            return OperationRole::Leader { generation, result };
+            let completed = receiver.borrow().clone();
+            if same_kind {
+                if let Some(completed) = completed {
+                    return OperationRole::Follower(completed);
+                }
+            }
         }
     }
 
-    async fn finish_operation(
+    fn finish_operation(
         &self,
         kind: OperationKind,
         generation: u64,
         result: tokio::sync::watch::Sender<Option<CompletedOperation>>,
         completed: CompletedOperation,
     ) {
-        let mut state = self.operation.lock().await;
+        let mut state = lock_unpoison(&self.operation);
         if let Some(in_flight) = &state.in_flight {
             if in_flight.kind == kind && in_flight.generation == generation {
                 result.send_replace(Some(completed));
@@ -408,38 +379,19 @@ impl<S: RuntimeSource + 'static, B: RuntimeBootstrapSource + 'static> RuntimeMan
         }
     }
 
-    async fn publish<F>(&self, status: RuntimeBootstrapStatus, progress: &F)
+    fn publish<F>(&self, status: RuntimeBootstrapStatus, progress: &F)
     where
         F: Fn(RuntimeBootstrapStatus) + Send + Sync,
     {
-        *self.status.write().await = status.clone();
+        *lock_unpoison(&self.status) = status.clone();
         progress(status);
-    }
-
-    #[cfg(test)]
-    fn set_test_after_rollback_commit_gate(
-        &self,
-        entered: std::sync::Arc<tokio::sync::Notify>,
-        release: std::sync::Arc<tokio::sync::Notify>,
-    ) {
-        *self.rollback_commit_gate.lock().unwrap() = Some((entered, release));
     }
 }
 
-async fn finish_shared_operation(
-    operation: &std::sync::Arc<tokio::sync::Mutex<OperationState>>,
-    kind: OperationKind,
-    generation: u64,
-    result: tokio::sync::watch::Sender<Option<CompletedOperation>>,
-    completed: CompletedOperation,
-) {
-    let mut state = operation.lock().await;
-    if let Some(in_flight) = &state.in_flight {
-        if in_flight.kind == kind && in_flight.generation == generation {
-            result.send_replace(Some(completed));
-            state.in_flight = None;
-        }
-    }
+fn lock_unpoison<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn public_error(internal: &str) -> (&'static str, bool) {
@@ -572,23 +524,6 @@ fn current_target() -> Result<RuntimeTarget, String> {
         "darwin-x86_64" => Ok(RuntimeTarget::DarwinX86_64),
         "darwin-aarch64" => Ok(RuntimeTarget::DarwinAarch64),
         _ => Err("runtime_platform_unsupported".into()),
-    }
-}
-
-#[cfg(test)]
-type RollbackCommitGate = (
-    std::sync::Arc<tokio::sync::Notify>,
-    std::sync::Arc<tokio::sync::Notify>,
-);
-
-#[cfg(test)]
-async fn run_test_after_rollback_commit_hook(
-    gate: &std::sync::Arc<std::sync::Mutex<Option<RollbackCommitGate>>>,
-) {
-    let gate = { gate.lock().unwrap().take() };
-    if let Some((entered, release)) = gate {
-        entered.notify_waiters();
-        release.notified().await;
     }
 }
 
@@ -949,7 +884,7 @@ mod tests {
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
         let source = FakeSource::new();
-        let installer = RuntimeInstaller::new(layout, source.clone());
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
         let mut previous = source.asset();
         previous.version = "0.9.0".into();
         previous.url =
@@ -1008,13 +943,13 @@ mod tests {
         assert_eq!(downloads.load(Ordering::SeqCst), 2);
     }
 
-    #[tokio::test]
-    async fn caller_abort_after_rollback_commit_cannot_replay_the_swap() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn caller_abort_and_post_commit_validation_fault_cannot_replay_the_swap() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
         let source = FakeSource::new();
-        let installer = RuntimeInstaller::new(layout, source.clone());
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
         let mut previous = source.asset();
         previous.version = "0.9.0".into();
         previous.url =
@@ -1029,29 +964,50 @@ mod tests {
                 calls: Arc::new(AtomicUsize::new(0)),
             },
         ));
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(tokio::sync::Notify::new());
-        manager.set_test_after_rollback_commit_gate(entered.clone(), release.clone());
-        let entered_wait = entered.notified();
+        let restored_metadata = layout
+            .runtime_versions
+            .join("0.9.0")
+            .join("runtime-metadata.json");
+        let held_metadata = restored_metadata.with_extension("held");
+        let hook_held_metadata = held_metadata.clone();
+        let hook_restored_metadata = restored_metadata.clone();
+        let (entered_sender, entered_receiver) = std::sync::mpsc::sync_channel(0);
+        let (release_sender, release_receiver) = std::sync::mpsc::sync_channel(0);
+        manager
+            .installer
+            .set_test_after_rollback_commit_hook(move || {
+                std::fs::rename(hook_restored_metadata, hook_held_metadata).unwrap();
+                entered_sender.send(()).unwrap();
+                release_receiver.recv().unwrap();
+            });
         let caller_manager = manager.clone();
         let caller = tokio::spawn(async move { caller_manager.rollback().await });
-        entered_wait.await;
+        entered_receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
         let follower_manager = manager.clone();
         let follower = tokio::spawn(async move { follower_manager.rollback().await });
         tokio::task::yield_now().await;
 
         caller.abort();
-        let _ = caller.await;
-        release.notify_waiters();
+        release_sender.send(()).unwrap();
         let entrypoint = tokio::time::timeout(std::time::Duration::from_secs(2), follower)
             .await
             .expect("rollback follower remained blocked")
             .unwrap()
             .unwrap();
+        let _ = caller.await;
+        std::fs::rename(held_metadata, restored_metadata).unwrap();
 
         assert!(entrypoint.to_string_lossy().contains("0.9.0"));
-        assert_eq!(manager.installer.active_version().unwrap(), "0.9.0");
         assert_eq!(manager.status().await.version.as_deref(), Some("0.9.0"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(layout.runtime.join("runtime-state.json")).unwrap()
+            )
+            .unwrap()["current"]["version"],
+            "0.9.0"
+        );
     }
 
     #[derive(Clone)]

@@ -15,6 +15,46 @@ pub(crate) struct FileIdentity {
     file: u64,
 }
 
+pub(crate) fn file_identity(file: &cap_std::fs::File) -> std::io::Result<FileIdentity> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = file.try_clone()?.into_std().metadata()?;
+        return Ok(FileIdentity {
+            volume: metadata.dev(),
+            file: metadata.ino(),
+        });
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        let read = unsafe {
+            GetFileInformationByHandle(
+                file.as_raw_handle().cast(),
+                std::ptr::from_mut(&mut information),
+            )
+        };
+        if read == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        return Ok(FileIdentity {
+            volume: information.dwVolumeSerialNumber as u64,
+            file: ((information.nFileIndexHigh as u64) << 32) | information.nFileIndexLow as u64,
+        });
+    }
+    #[allow(unreachable_code)]
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "filesystem identity unsupported",
+    ))
+}
+
 impl SecureDir {
     pub(crate) fn open_root(path: &Path) -> std::io::Result<Self> {
         let parent = path.parent().ok_or_else(|| {

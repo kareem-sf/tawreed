@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use super::manifest::{valid_entrypoint, validate_asset, RuntimeAsset};
-use crate::storage::secure_dir::SecureDir;
+use crate::storage::secure_dir::{file_identity, FileIdentity, SecureDir};
 use crate::storage::DataLayout;
 
 const MAX_ARCHIVE_ENTRIES: usize = 10_000;
@@ -250,15 +250,22 @@ struct RuntimeFs {
     staging: SecureDir,
 }
 
+#[derive(Clone)]
 struct VersionLease {
-    _file: std::fs::File,
+    _file: std::sync::Arc<std::fs::File>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct RuntimeIdentity {
+    directory: FileIdentity,
+    entrypoint: FileIdentity,
 }
 
 struct StageGuard {
     parent: SecureDir,
     name: String,
     directory: Option<SecureDir>,
-    identity: Option<crate::storage::secure_dir::FileIdentity>,
+    identity: Option<FileIdentity>,
     promoted: bool,
 }
 
@@ -292,25 +299,50 @@ impl StageGuard {
             .ok_or_else(|| "runtime_staging_failed".to_string())
     }
 
-    fn promote(mut self, versions: &SecureDir, version: &str) -> Result<SecureDir, String> {
+    fn promote(
+        mut self,
+        versions: &SecureDir,
+        version: &str,
+        entrypoint: &str,
+        informational_path: PathBuf,
+        expected_identity: RuntimeIdentity,
+        version_lease: VersionLease,
+    ) -> Result<PromotedRuntime, String> {
+        let cleanup_versions = versions
+            .try_clone()
+            .map_err(|_| "runtime_activation_failed")?;
         drop(self.directory.take());
         self.parent
             .rename_to(&self.name, versions, version)
             .map_err(|_| "runtime_activation_failed")?;
         self.promoted = true;
+        let mut promoted = PromotedRuntime {
+            versions: Some(cleanup_versions),
+            version: version.to_string(),
+            pin: None,
+            preserve: false,
+            version_lease: Some(version_lease.clone()),
+        };
         run_test_after_promotion_before_reopen_hook();
-        let promoted = versions
+        let version_directory = versions
             .open_private_dir(version)
-            .map_err(|_| "runtime_activation_failed")?;
-        if promoted
-            .identity()
-            .map_err(|_| "runtime_activation_failed")?
-            != self
-                .identity
-                .ok_or_else(|| "runtime_staging_failed".to_string())?
+            .map_err(|_| "runtime_promotion_identity_mismatch")?;
+        let pin = PinnedEntrypoint::open(
+            version_directory,
+            entrypoint,
+            informational_path,
+            Some(version_lease),
+        )
+        .map_err(|_| "runtime_promotion_identity_mismatch")?;
+        if pin.identity() != expected_identity
+            || expected_identity.directory
+                != self
+                    .identity
+                    .ok_or_else(|| "runtime_staging_failed".to_string())?
         {
             return Err("runtime_promotion_identity_mismatch".into());
         }
+        promoted.pin = Some(pin);
         Ok(promoted)
     }
 }
@@ -324,6 +356,98 @@ impl Drop for StageGuard {
     }
 }
 
+struct PromotedRuntime {
+    versions: Option<SecureDir>,
+    version: String,
+    pin: Option<PinnedEntrypoint>,
+    preserve: bool,
+    version_lease: Option<VersionLease>,
+}
+
+impl PromotedRuntime {
+    fn pin(&self) -> Result<&PinnedEntrypoint, String> {
+        self.pin
+            .as_ref()
+            .ok_or_else(|| "runtime_promotion_identity_mismatch".to_string())
+    }
+
+    fn preserve(&mut self) {
+        self.preserve = true;
+    }
+}
+
+impl Drop for PromotedRuntime {
+    fn drop(&mut self) {
+        drop(self.pin.take());
+        if !self.preserve {
+            if let Some(versions) = self.versions.take() {
+                remove_directory_eventually(
+                    versions,
+                    self.version.clone(),
+                    self.version_lease.take(),
+                );
+            }
+        }
+    }
+}
+
+struct DeferredDirectoryCleanup {
+    parent: SecureDir,
+    name: String,
+    _version_lease: Option<VersionLease>,
+}
+
+impl DeferredDirectoryCleanup {
+    fn run(self) {
+        loop {
+            match self.parent.remove_dir_all(&self.name) {
+                Ok(()) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
+        }
+    }
+}
+
+fn remove_directory_eventually(
+    parent: SecureDir,
+    name: String,
+    version_lease: Option<VersionLease>,
+) {
+    match parent.remove_dir_all(&name) {
+        Ok(()) => return,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(_) => {}
+    }
+    let slot = std::sync::Arc::new(std::sync::Mutex::new(Some(DeferredDirectoryCleanup {
+        parent,
+        name,
+        _version_lease: version_lease,
+    })));
+    let thread_slot = slot.clone();
+    if std::thread::Builder::new()
+        .name("tawreed-runtime-cleanup".into())
+        .spawn(move || {
+            let cleanup = thread_slot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            if let Some(cleanup) = cleanup {
+                cleanup.run();
+            }
+        })
+        .is_err()
+    {
+        let cleanup = slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(cleanup) = cleanup {
+            cleanup.run();
+        }
+    }
+}
+
 pub struct PinnedEntrypoint {
     informational_path: PathBuf,
     pins: std::sync::Arc<EntrypointPins>,
@@ -333,6 +457,7 @@ struct EntrypointPins {
     _version_directory: SecureDir,
     _executable: cap_std::fs::File,
     _version_lease: Option<VersionLease>,
+    identity: RuntimeIdentity,
 }
 
 impl std::fmt::Debug for PinnedEntrypoint {
@@ -351,15 +476,28 @@ impl PinnedEntrypoint {
         informational_path: PathBuf,
         version_lease: Option<VersionLease>,
     ) -> Result<Self, String> {
+        let directory_identity = version_directory
+            .identity()
+            .map_err(|_| "runtime_version_unavailable")?;
         let executable = open_entrypoint(&version_directory, entrypoint)?;
+        let entrypoint_identity =
+            file_identity(&executable).map_err(|_| "runtime_version_unavailable")?;
         Ok(Self {
             informational_path,
             pins: std::sync::Arc::new(EntrypointPins {
                 _version_directory: version_directory,
                 _executable: executable,
                 _version_lease: version_lease,
+                identity: RuntimeIdentity {
+                    directory: directory_identity,
+                    entrypoint: entrypoint_identity,
+                },
             }),
         })
+    }
+
+    fn identity(&self) -> RuntimeIdentity {
+        self.pins.identity
     }
 
     pub fn informational_path(&self) -> &Path {
@@ -399,8 +537,73 @@ pub struct PinnedRuntimeCommand {
 }
 
 impl PinnedRuntimeCommand {
-    pub fn command_mut(&mut self) -> &mut tokio::process::Command {
-        &mut self.command
+    pub fn arg<S: AsRef<std::ffi::OsStr>>(&mut self, argument: S) -> &mut Self {
+        self.command.arg(argument);
+        self
+    }
+
+    pub fn args<I, S>(&mut self, arguments: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        self.command.args(arguments);
+        self
+    }
+
+    pub fn env<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        K: AsRef<std::ffi::OsStr>,
+        V: AsRef<std::ffi::OsStr>,
+    {
+        self.command.env(key, value);
+        self
+    }
+
+    pub fn envs<I, K, V>(&mut self, variables: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<std::ffi::OsStr>,
+        V: AsRef<std::ffi::OsStr>,
+    {
+        self.command.envs(variables);
+        self
+    }
+
+    pub fn env_remove<K: AsRef<std::ffi::OsStr>>(&mut self, key: K) -> &mut Self {
+        self.command.env_remove(key);
+        self
+    }
+
+    pub fn env_clear(&mut self) -> &mut Self {
+        self.command.env_clear();
+        self
+    }
+
+    pub fn current_dir<P: AsRef<Path>>(&mut self, directory: P) -> &mut Self {
+        self.command.current_dir(directory);
+        self
+    }
+
+    pub fn stdin(&mut self, configuration: std::process::Stdio) -> &mut Self {
+        self.command.stdin(configuration);
+        self
+    }
+
+    pub fn stdout(&mut self, configuration: std::process::Stdio) -> &mut Self {
+        self.command.stdout(configuration);
+        self
+    }
+
+    pub fn stderr(&mut self, configuration: std::process::Stdio) -> &mut Self {
+        self.command.stderr(configuration);
+        self
+    }
+
+    #[cfg(unix)]
+    fn process_group(&mut self, process_group: i32) -> &mut Self {
+        self.command.process_group(process_group);
+        self
     }
 
     pub fn spawn(&mut self) -> Result<PinnedChild, String> {
@@ -410,46 +613,170 @@ impl PinnedRuntimeCommand {
             .spawn()
             .map_err(|_| "runtime_process_start_failed".to_string())?;
         Ok(PinnedChild {
-            child,
-            _pins: self.pins.clone(),
+            child: Some(child),
+            pins: Some(self.pins.clone()),
+            #[cfg(test)]
+            reaper_gate: take_test_child_reaper_gate(),
         })
-    }
-
-    pub async fn output(&mut self) -> Result<std::process::Output, String> {
-        self.command.kill_on_drop(true);
-        self.command
-            .output()
-            .await
-            .map_err(|_| "runtime_process_start_failed".to_string())
     }
 }
 
 pub struct PinnedChild {
-    child: tokio::process::Child,
-    _pins: std::sync::Arc<EntrypointPins>,
+    child: Option<tokio::process::Child>,
+    pins: Option<std::sync::Arc<EntrypointPins>>,
+    #[cfg(test)]
+    reaper_gate: Option<ChildReaperTestGate>,
+}
+
+#[cfg(test)]
+type ChildReaperTestGate = std::sync::Arc<(std::sync::Mutex<(bool, bool)>, std::sync::Condvar)>;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CHILD_REAPER_GATE: std::cell::RefCell<Option<ChildReaperTestGate>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_test_child_reaper_gate(gate: ChildReaperTestGate) {
+    TEST_CHILD_REAPER_GATE.with(|slot| *slot.borrow_mut() = Some(gate));
+}
+
+#[cfg(test)]
+fn take_test_child_reaper_gate() -> Option<ChildReaperTestGate> {
+    TEST_CHILD_REAPER_GATE.with(|slot| slot.borrow_mut().take())
 }
 
 impl PinnedChild {
     pub fn id(&self) -> Option<u32> {
-        self.child.id()
+        self.child.as_ref().and_then(tokio::process::Child::id)
     }
 
-    pub fn child_mut(&mut self) -> &mut tokio::process::Child {
-        &mut self.child
+    pub fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>, String> {
+        self.child_mut_internal()?
+            .try_wait()
+            .map_err(|_| "runtime_process_wait_failed".to_string())
+    }
+
+    pub fn take_stdin(&mut self) -> Option<tokio::process::ChildStdin> {
+        self.child.as_mut()?.stdin.take()
+    }
+
+    pub fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        self.child.as_mut()?.stdout.take()
+    }
+
+    pub fn take_stderr(&mut self) -> Option<tokio::process::ChildStderr> {
+        self.child.as_mut()?.stderr.take()
     }
 
     pub async fn wait(&mut self) -> Result<std::process::ExitStatus, String> {
-        self.child
+        self.child_mut_internal()?
             .wait()
             .await
             .map_err(|_| "runtime_process_wait_failed".to_string())
     }
 
     pub async fn kill(&mut self) -> Result<(), String> {
-        self.child
+        self.child_mut_internal()?
             .kill()
             .await
             .map_err(|_| "runtime_process_kill_failed".to_string())
+    }
+
+    pub fn start_kill(&mut self) -> Result<(), String> {
+        self.child_mut_internal()?
+            .start_kill()
+            .map_err(|_| "runtime_process_kill_failed".to_string())
+    }
+
+    fn child_mut_internal(&mut self) -> Result<&mut tokio::process::Child, String> {
+        self.child
+            .as_mut()
+            .ok_or_else(|| "runtime_process_unavailable".to_string())
+    }
+
+    #[cfg(windows)]
+    fn raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+        self.child.as_ref()?.raw_handle()
+    }
+}
+
+struct ChildReaperPayload {
+    child: tokio::process::Child,
+    _pins: std::sync::Arc<EntrypointPins>,
+    #[cfg(test)]
+    gate: Option<ChildReaperTestGate>,
+}
+
+impl ChildReaperPayload {
+    fn reap(mut self) {
+        #[cfg(test)]
+        if let Some(gate) = self.gate.take() {
+            let (state, condition) = &*gate;
+            let mut state = state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.0 = true;
+            condition.notify_all();
+            while !state.1 {
+                state = condition
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+        }
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) | Err(_) => {
+                    let _ = self.child.start_kill();
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for PinnedChild {
+    fn drop(&mut self) {
+        let (Some(mut child), Some(pins)) = (self.child.take(), self.pins.take()) else {
+            return;
+        };
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        let _ = child.start_kill();
+        let payload = ChildReaperPayload {
+            child,
+            _pins: pins,
+            #[cfg(test)]
+            gate: self.reaper_gate.take(),
+        };
+        let slot = std::sync::Arc::new(std::sync::Mutex::new(Some(payload)));
+        let thread_slot = slot.clone();
+        // An OS thread keeps child and pins alive even when Tokio is absent or shutting down.
+        // The shared slot preserves ownership for synchronous reaping if thread creation fails.
+        if std::thread::Builder::new()
+            .name("tawreed-runtime-child-reaper".into())
+            .spawn(move || {
+                let payload = thread_slot
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                if let Some(payload) = payload {
+                    payload.reap();
+                }
+            })
+            .is_err()
+        {
+            let payload = slot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            if let Some(payload) = payload {
+                payload.reap();
+            }
+        }
     }
 }
 
@@ -521,7 +848,7 @@ impl RuntimeFs {
     }
 
     async fn lock_version(&self, record: &RuntimeRecord) -> Result<VersionLease, String> {
-        let name = format!("runtime-version-{}-{}.lock", record.target, record.version);
+        let name = format!("runtime-version-{}.lock", record.version);
         let file = self
             .runtime
             .open_or_create_lock_file(&name)
@@ -529,7 +856,11 @@ impl RuntimeFs {
             .into_std();
         loop {
             match fs2::FileExt::try_lock_exclusive(&file) {
-                Ok(()) => return Ok(VersionLease { _file: file }),
+                Ok(()) => {
+                    return Ok(VersionLease {
+                        _file: std::sync::Arc::new(file),
+                    })
+                }
                 Err(error)
                     if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
                 {
@@ -590,8 +921,12 @@ impl RuntimeFs {
         &self,
         expected_generation: u64,
         record: RuntimeRecord,
+        pinned_entrypoint: &PinnedEntrypoint,
     ) -> Result<(), String> {
         let _lock = self.lock_state()?;
+        run_test_after_promoted_health_before_commit_hook();
+        let _rechecked_entrypoint =
+            self.reopen_matching_entrypoint(&record, pinned_entrypoint.identity())?;
         let state = self.read_state_unlocked()?;
         if state.generation < expected_generation {
             return Err("runtime_state_stale".into());
@@ -616,8 +951,11 @@ impl RuntimeFs {
         expected_generation: u64,
         expected_current: RuntimeRecord,
         expected_previous: RuntimeRecord,
+        pinned_entrypoint: &PinnedEntrypoint,
     ) -> Result<(), String> {
         let _lock = self.lock_state()?;
+        let _rechecked_entrypoint =
+            self.reopen_matching_entrypoint(&expected_previous, pinned_entrypoint.identity())?;
         let state = self.read_state_unlocked()?;
         if state.generation != expected_generation
             || state.current.as_ref() != Some(&expected_current)
@@ -682,10 +1020,40 @@ impl RuntimeFs {
         run_test_before_orphan_delete_hook();
         let _state_lock = self.lock_state()?;
         let state = self.read_state_unlocked()?;
-        if state.current.as_ref() == Some(record) || state.previous.as_ref() == Some(record) {
+        if state
+            .current
+            .as_ref()
+            .is_some_and(|current| current.version == record.version)
+            || state
+                .previous
+                .as_ref()
+                .is_some_and(|previous| previous.version == record.version)
+        {
             return Err("runtime_version_referenced".into());
         }
         self.remove_version_entry(&record.version)
+    }
+
+    fn reopen_matching_entrypoint(
+        &self,
+        record: &RuntimeRecord,
+        expected_identity: RuntimeIdentity,
+    ) -> Result<PinnedEntrypoint, String> {
+        let version_directory = self
+            .versions
+            .open_private_dir(&record.version)
+            .map_err(|_| "runtime_promotion_identity_mismatch")?;
+        let pin = PinnedEntrypoint::open(
+            version_directory,
+            &record.entrypoint,
+            self.active_path(record),
+            None,
+        )
+        .map_err(|_| "runtime_promotion_identity_mismatch")?;
+        if pin.identity() != expected_identity {
+            return Err("runtime_promotion_identity_mismatch".into());
+        }
+        Ok(pin)
     }
 
     fn active_path(&self, record: &RuntimeRecord) -> PathBuf {
@@ -699,11 +1067,24 @@ impl RuntimeFs {
 pub struct RuntimeInstaller<S> {
     layout: DataLayout,
     source: S,
+    #[cfg(test)]
+    rollback_commit_hook: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedRuntime {
+    pub version: String,
+    pub entrypoint: PathBuf,
 }
 
 impl<S: RuntimeSource> RuntimeInstaller<S> {
     pub fn new(layout: DataLayout, source: S) -> Self {
-        Self { layout, source }
+        Self {
+            layout,
+            source,
+            #[cfg(test)]
+            rollback_commit_hook: std::sync::Mutex::new(None),
+        }
     }
 
     pub async fn ensure(&self, asset: &RuntimeAsset) -> Result<PathBuf, String> {
@@ -721,7 +1102,7 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
         }
         let fs = RuntimeFs::open(&self.layout)?;
         let record = RuntimeRecord::from_asset(asset)?;
-        let _version_lease = fs.lock_version(&record).await?;
+        let version_lease = fs.lock_version(&record).await?;
         fs.cleanup_stale_staging(&record.version)?;
         let state = fs.read_state()?;
 
@@ -731,21 +1112,32 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
             .is_some_and(|current| current == &record)
         {
             report_reuse_progress(progress);
-            verify_installed_version(&fs, &record).await?;
+            let pinned_entrypoint = verify_installed_version(&fs, &record).await?;
             run_test_after_current_health_hook();
-            publish_active_record(&fs, state.generation, record.clone())?;
+            publish_active_record(&fs, state.generation, record.clone(), &pinned_entrypoint)?;
             return Ok(fs.layout.runtime_versions.join(&record.version));
         }
 
         if fs.version_exists(&record.version)? {
-            let referenced =
-                state.current.as_ref() == Some(&record) || state.previous.as_ref() == Some(&record);
+            let referenced = state
+                .current
+                .as_ref()
+                .is_some_and(|current| current.version == record.version)
+                || state
+                    .previous
+                    .as_ref()
+                    .is_some_and(|previous| previous.version == record.version);
             match fs.read_version_metadata(&record.version) {
                 Ok(metadata) if metadata == record => {
                     match verify_installed_version(&fs, &record).await {
-                        Ok(()) => {
+                        Ok(pinned_entrypoint) => {
                             report_reuse_progress(progress);
-                            publish_active_record(&fs, state.generation, record.clone())?;
+                            publish_active_record(
+                                &fs,
+                                state.generation,
+                                record.clone(),
+                                &pinned_entrypoint,
+                            )?;
                             return Ok(fs.layout.runtime_versions.join(&record.version));
                         }
                         Err(error) if referenced => return Err(error),
@@ -810,25 +1202,46 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
             .directory()?
             .atomic_write_json(RUNTIME_METADATA_FILE, &record)
             .map_err(|_| "runtime_metadata_write_failed")?;
-
         let staged_entrypoint_path = fs
             .layout
             .staging
             .join(&staging.name)
             .join(&asset.entrypoint);
-        run_health_check(
-            staging.directory()?,
+        let staged_entrypoint = PinnedEntrypoint::open(
+            staging
+                .directory()?
+                .try_clone()
+                .map_err(|_| "runtime_staging_failed")?,
             &asset.entrypoint,
-            &staged_entrypoint_path,
-        )
-        .await?;
+            staged_entrypoint_path,
+            None,
+        )?;
+        let staged_identity = staged_entrypoint.identity();
+        #[cfg(windows)]
+        drop(staged_entrypoint);
 
         if fs.version_exists(&asset.version)? {
             return Err("runtime_version_already_exists".into());
         }
-        let promoted = staging.promote(&fs.versions, &asset.version)?;
-        publish_active_record(&fs, state.generation, record)?;
-        drop(promoted);
+        let mut promoted = staging.promote(
+            &fs.versions,
+            &asset.version,
+            &asset.entrypoint,
+            fs.active_path(&record),
+            staged_identity,
+            version_lease,
+        )?;
+        #[cfg(unix)]
+        drop(staged_entrypoint);
+        run_health_check(promoted.pin()?).await?;
+        match publish_active_record(&fs, state.generation, record, promoted.pin()?) {
+            Ok(()) => promoted.preserve(),
+            Err(error) if error == "runtime_promotion_identity_mismatch" => return Err(error),
+            Err(error) => {
+                promoted.preserve();
+                return Err(error);
+            }
+        }
         Ok(fs.layout.runtime_versions.join(&asset.version))
     }
 
@@ -856,17 +1269,7 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
         )
     }
 
-    pub(crate) fn active_version(&self) -> Result<String, String> {
-        let fs = RuntimeFs::open(&self.layout)?;
-        let record = fs
-            .read_state()?
-            .current
-            .ok_or_else(|| "runtime_not_installed".to_string())?;
-        validate_installed_record(&fs, &record)?;
-        Ok(record.version)
-    }
-
-    pub async fn rollback(&self) -> Result<PathBuf, String> {
+    pub async fn rollback(&self) -> Result<CommittedRuntime, String> {
         let fs = RuntimeFs::open(&self.layout)?;
         let state = fs.read_state()?;
         let current = state
@@ -886,9 +1289,36 @@ impl<S: RuntimeSource> RuntimeInstaller<S> {
             .versions
             .open_private_dir(&previous.version)
             .map_err(|_| "runtime_version_unavailable")?;
-        run_health_check(&version_directory, &previous.entrypoint, &entrypoint).await?;
-        fs.commit_rollback(state.generation, current, previous)?;
-        Ok(entrypoint)
+        let pinned_entrypoint = PinnedEntrypoint::open(
+            version_directory,
+            &previous.entrypoint,
+            entrypoint.clone(),
+            None,
+        )?;
+        run_health_check(&pinned_entrypoint).await?;
+        let version = previous.version.clone();
+        fs.commit_rollback(state.generation, current, previous, &pinned_entrypoint)?;
+        #[cfg(test)]
+        if let Some(hook) = self
+            .rollback_commit_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            hook();
+        }
+        Ok(CommittedRuntime {
+            version,
+            entrypoint,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_after_rollback_commit_hook(&self, hook: impl FnOnce() + Send + 'static) {
+        *self
+            .rollback_commit_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(hook));
     }
 }
 
@@ -909,8 +1339,9 @@ fn publish_active_record(
     fs: &RuntimeFs,
     expected_generation: u64,
     record: RuntimeRecord,
+    pinned_entrypoint: &PinnedEntrypoint,
 ) -> Result<(), String> {
-    fs.commit_activation(expected_generation, record)
+    fs.commit_activation(expected_generation, record, pinned_entrypoint)
 }
 
 fn validate_record(record: &RuntimeRecord) -> Result<(), String> {
@@ -946,18 +1377,23 @@ fn validate_installed_record(fs: &RuntimeFs, record: &RuntimeRecord) -> Result<(
     Ok(())
 }
 
-async fn verify_installed_version(fs: &RuntimeFs, record: &RuntimeRecord) -> Result<(), String> {
+async fn verify_installed_version(
+    fs: &RuntimeFs,
+    record: &RuntimeRecord,
+) -> Result<PinnedEntrypoint, String> {
     validate_installed_record(fs, record)?;
     let version_directory = fs
         .versions
         .open_private_dir(&record.version)
         .map_err(|_| "runtime_version_unavailable")?;
-    run_health_check(
-        &version_directory,
+    let pinned_entrypoint = PinnedEntrypoint::open(
+        version_directory,
         &record.entrypoint,
-        &fs.active_path(record),
-    )
-    .await
+        fs.active_path(record),
+        None,
+    )?;
+    run_health_check(&pinned_entrypoint).await?;
+    Ok(pinned_entrypoint)
 }
 
 fn report_download_progress(
@@ -1223,11 +1659,7 @@ fn unsafe_unix_file_type(mode: Option<u32>, entry_kind: ArchiveEntryKind) -> boo
     }
 }
 
-async fn run_health_check(
-    version_directory: &SecureDir,
-    entrypoint: &str,
-    ambient_entrypoint: &Path,
-) -> Result<(), String> {
+async fn run_health_check(pinned_entrypoint: &PinnedEntrypoint) -> Result<(), String> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct HealthStatus {
@@ -1236,42 +1668,24 @@ async fn run_health_check(
     }
 
     const MAX_HEALTH_STREAM_BYTES: usize = 4 * 1024;
-    #[cfg(test)]
-    const HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
-    #[cfg(not(test))]
-    const HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-    let pinned_entrypoint = PinnedEntrypoint::open(
-        version_directory
-            .try_clone()
-            .map_err(|_| "runtime_version_unavailable")?,
-        entrypoint,
-        ambient_entrypoint.to_path_buf(),
-        None,
-    )?;
     let mut pinned_command = pinned_entrypoint.command()?;
     pinned_command
-        .command_mut()
         .arg("--health-check")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
+        .stderr(std::process::Stdio::piped());
     #[cfg(unix)]
-    pinned_command.command_mut().process_group(0);
+    pinned_command.process_group(0);
     let mut pinned_child = pinned_command
         .spawn()
         .map_err(|_| "runtime_health_check_failed".to_string())?;
-    let mut process_group = HealthProcessGroup::new(&pinned_child.child)?;
+    let mut process_group = HealthProcessGroup::new(&pinned_child)?;
     let stdout = pinned_child
-        .child
-        .stdout
-        .take()
+        .take_stdout()
         .ok_or("runtime_health_check_failed")?;
     let stderr = pinned_child
-        .child
-        .stderr
-        .take()
+        .take_stderr()
         .ok_or("runtime_health_check_failed")?;
     let operation = async {
         tokio::try_join!(
@@ -1279,7 +1693,6 @@ async fn run_health_check(
             read_capped_health_stream(stderr, MAX_HEALTH_STREAM_BYTES),
             async {
                 let status = pinned_child
-                    .child
                     .wait()
                     .await
                     .map_err(|_| "runtime_health_check_failed".to_string())?;
@@ -1289,7 +1702,7 @@ async fn run_health_check(
             }
         )
     };
-    let (stdout, stderr, status) = match tokio::time::timeout(HEALTH_TIMEOUT, operation).await {
+    let (stdout, stderr, status) = match tokio::time::timeout(health_timeout(), operation).await {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
             process_group.terminate();
@@ -1325,6 +1738,29 @@ async fn run_health_check(
     Ok(())
 }
 
+#[cfg(not(test))]
+fn health_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(30)
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_HEALTH_TIMEOUT: std::cell::Cell<Option<std::time::Duration>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn health_timeout() -> std::time::Duration {
+    TEST_HEALTH_TIMEOUT
+        .with(std::cell::Cell::take)
+        .unwrap_or_else(|| std::time::Duration::from_secs(5))
+}
+
+#[cfg(test)]
+fn set_test_health_timeout(timeout: std::time::Duration) {
+    TEST_HEALTH_TIMEOUT.with(|value| value.set(Some(timeout)));
+}
+
 #[cfg(unix)]
 fn duplicate_inheritable_file(file: &cap_std::fs::File) -> Result<std::fs::File, String> {
     use std::os::fd::{AsRawFd, FromRawFd};
@@ -1347,7 +1783,7 @@ unsafe impl Send for HealthProcessGroup {}
 
 #[cfg(windows)]
 impl HealthProcessGroup {
-    fn new(child: &tokio::process::Child) -> Result<Self, String> {
+    fn new(child: &PinnedChild) -> Result<Self, String> {
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
             SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -1408,7 +1844,7 @@ struct HealthProcessGroup {
 
 #[cfg(unix)]
 impl HealthProcessGroup {
-    fn new(child: &tokio::process::Child) -> Result<Self, String> {
+    fn new(child: &PinnedChild) -> Result<Self, String> {
         let process_group = child.id().ok_or("runtime_health_check_failed")? as i32;
         Ok(Self {
             process_group,
@@ -1511,6 +1947,8 @@ thread_local! {
         std::cell::RefCell::new(None);
     static TEST_AFTER_PROMOTION_BEFORE_REOPEN_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         std::cell::RefCell::new(None);
+    static TEST_AFTER_PROMOTED_HEALTH_BEFORE_COMMIT_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
     static TEST_AFTER_CURRENT_HEALTH_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         std::cell::RefCell::new(None);
     static TEST_BEFORE_ORPHAN_DELETE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
@@ -1530,6 +1968,12 @@ fn set_test_before_state_publish_hook(hook: impl FnOnce() -> Result<(), String> 
 #[cfg(test)]
 fn set_test_after_promotion_before_reopen_hook(hook: impl FnOnce() + 'static) {
     TEST_AFTER_PROMOTION_BEFORE_REOPEN_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn set_test_after_promoted_health_before_commit_hook(hook: impl FnOnce() + 'static) {
+    TEST_AFTER_PROMOTED_HEALTH_BEFORE_COMMIT_HOOK
+        .with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
 }
 
 #[cfg(test)]
@@ -1567,6 +2011,15 @@ fn run_test_before_state_publish_hook() -> Result<(), String> {
 fn run_test_after_promotion_before_reopen_hook() {
     #[cfg(test)]
     TEST_AFTER_PROMOTION_BEFORE_REOPEN_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+fn run_test_after_promoted_health_before_commit_hook() {
+    #[cfg(test)]
+    TEST_AFTER_PROMOTED_HEALTH_BEFORE_COMMIT_HOOK.with(|slot| {
         if let Some(hook) = slot.borrow_mut().take() {
             hook();
         }
@@ -1616,9 +2069,11 @@ pub(crate) fn current_target_key() -> Result<&'static str, String> {
 mod tests {
     use super::{
         allowed_redirect_url, set_test_after_archive_verify_hook,
-        set_test_after_current_health_hook, set_test_after_promotion_before_reopen_hook,
-        set_test_before_orphan_delete_hook, set_test_before_state_publish_hook, HttpRuntimeSource,
-        RuntimeFs, RuntimeInstaller, RuntimeSource, MAX_RUNTIME_STATE_BYTES, RUNTIME_STATE_FILE,
+        set_test_after_current_health_hook, set_test_after_promoted_health_before_commit_hook,
+        set_test_after_promotion_before_reopen_hook, set_test_before_orphan_delete_hook,
+        set_test_before_state_publish_hook, set_test_child_reaper_gate, set_test_health_timeout,
+        HttpRuntimeSource, RuntimeFs, RuntimeInstaller, RuntimeSource, MAX_RUNTIME_STATE_BYTES,
+        RUNTIME_STATE_FILE,
     };
     #[cfg(unix)]
     use super::{
@@ -1806,68 +2261,339 @@ mod tests {
         let Ok(root) = std::env::var("TAWREED_TEST_RUNTIME_CHILD_ROOT") else {
             return;
         };
+        let mode = std::env::var("TAWREED_TEST_RUNTIME_CHILD_MODE").unwrap();
         let version = std::env::var("TAWREED_TEST_RUNTIME_CHILD_VERSION").unwrap();
         let layout = DataLayout::from_root(PathBuf::from(root));
-        let source = FakeRuntimeSource::healthy_archive();
+        layout.ensure().unwrap();
+        write_child_barrier("TAWREED_TEST_RUNTIME_CHILD_EXECUTED");
+        write_child_barrier("TAWREED_TEST_RUNTIME_CHILD_ATTEMPTED");
+        let fs = RuntimeFs::open(&layout).unwrap();
+        let target = std::env::var("TAWREED_TEST_RUNTIME_CHILD_TARGET")
+            .unwrap_or_else(|_| current_target_key().to_string());
+        let record = child_runtime_record(&version, &target);
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
-        runtime
-            .block_on(
-                RuntimeInstaller::new(layout, source.clone()).ensure(&asset_for(&source, &version)),
-            )
-            .unwrap();
+        match mode.as_str() {
+            "version" => {
+                probe_child_lock(
+                    fs.runtime
+                        .open_or_create_lock_file(&format!(
+                            "runtime-version-{}.lock",
+                            record.version
+                        ))
+                        .unwrap()
+                        .into_std(),
+                );
+                let lease = runtime.block_on(fs.lock_version(&record)).unwrap();
+                write_child_barrier("TAWREED_TEST_RUNTIME_CHILD_ACQUIRED");
+                wait_for_child_release();
+                drop(lease);
+            }
+            "state" => {
+                probe_child_lock(
+                    fs.runtime
+                        .open_or_create_lock_file(super::RUNTIME_STATE_LOCK_FILE)
+                        .unwrap()
+                        .into_std(),
+                );
+                let state_lock = fs.lock_state().unwrap();
+                write_child_barrier("TAWREED_TEST_RUNTIME_CHILD_ACQUIRED");
+                wait_for_child_release();
+                let state = fs.read_state_unlocked().unwrap();
+                let generation = state.generation.checked_add(1).unwrap();
+                fs.write_state_unlocked(&super::RuntimeState {
+                    schema_version: 1,
+                    generation,
+                    previous: state.current,
+                    current: Some(record),
+                })
+                .unwrap();
+                drop(state_lock);
+            }
+            _ => panic!("unknown runtime child mode"),
+        }
     }
 
     #[test]
-    fn cooperating_processes_serialize_version_lifecycle_and_state_generations() {
+    fn cooperating_processes_prove_version_and_state_lock_contention() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
+        let barriers = root.path().join("barriers");
+        std::fs::create_dir(&barriers).unwrap();
 
-        let same_first = spawn_runtime_lock_child(&layout, "1.0.0");
-        let same_second = spawn_runtime_lock_child(&layout, "1.0.0");
-        assert_child_success(same_first);
-        assert_child_success(same_second);
-        assert_eq!(runtime_state(&layout)["generation"], 1);
+        let version_first = spawn_runtime_lock_child(
+            &layout,
+            &barriers,
+            "version-first",
+            "version",
+            "1.0.0",
+            "darwin-x86_64",
+            true,
+        );
+        wait_for_path(&version_first.acquired);
+        let mut version_second = spawn_runtime_lock_child(
+            &layout,
+            &barriers,
+            "version-second",
+            "version",
+            "1.0.0",
+            "darwin-aarch64",
+            false,
+        );
+        wait_for_path(&version_second.attempted);
+        wait_for_either(&version_second.contended, &version_second.acquired);
+        assert!(version_second.contended.exists());
+        assert!(!version_second.acquired.exists());
+        assert!(version_second
+            .child
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .unwrap()
+            .is_none());
+        release_child(&version_first);
+        assert_child_success(version_first);
+        wait_for_path(&version_second.acquired);
+        assert_child_success(version_second);
 
-        let next_first = spawn_runtime_lock_child(&layout, "1.1.0");
-        let next_second = spawn_runtime_lock_child(&layout, "1.2.0");
-        assert_child_success(next_first);
-        assert_child_success(next_second);
+        let state_first = spawn_runtime_lock_child(
+            &layout,
+            &barriers,
+            "state-first",
+            "state",
+            "1.1.0",
+            current_target_key(),
+            true,
+        );
+        wait_for_path(&state_first.acquired);
+        let mut state_second = spawn_runtime_lock_child(
+            &layout,
+            &barriers,
+            "state-second",
+            "state",
+            "1.2.0",
+            current_target_key(),
+            false,
+        );
+        wait_for_path(&state_second.attempted);
+        wait_for_either(&state_second.contended, &state_second.acquired);
+        assert!(state_second.contended.exists());
+        assert!(!state_second.acquired.exists());
+        assert!(state_second
+            .child
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .unwrap()
+            .is_none());
+        release_child(&state_first);
+        assert_child_success(state_first);
+        wait_for_path(&state_second.acquired);
+        assert_child_success(state_second);
         let state = runtime_state(&layout);
-        assert_eq!(state["generation"], 3);
-        let current = state["current"]["version"].as_str().unwrap();
-        let previous = state["previous"]["version"].as_str().unwrap();
-        assert_ne!(current, previous);
-        assert!([current, previous].contains(&"1.1.0"));
-        assert!([current, previous].contains(&"1.2.0"));
+        assert_eq!(state["generation"], 2);
+        assert_eq!(state["current"]["version"], "1.2.0");
+        assert_eq!(state["previous"]["version"], "1.1.0");
     }
 
-    fn spawn_runtime_lock_child(layout: &DataLayout, version: &str) -> std::process::Child {
-        std::process::Command::new(std::env::current_exe().unwrap())
+    struct RuntimeLockChild {
+        child: Option<std::process::Child>,
+        attempted: PathBuf,
+        contended: PathBuf,
+        acquired: PathBuf,
+        release: Option<PathBuf>,
+        executed: PathBuf,
+        token: String,
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_runtime_lock_child(
+        layout: &DataLayout,
+        barriers: &Path,
+        name: &str,
+        mode: &str,
+        version: &str,
+        target: &str,
+        hold: bool,
+    ) -> RuntimeLockChild {
+        let attempted = barriers.join(format!("{name}.attempted"));
+        let contended = barriers.join(format!("{name}.contended"));
+        let acquired = barriers.join(format!("{name}.acquired"));
+        let executed = barriers.join(format!("{name}.executed"));
+        let release = hold.then(|| barriers.join(format!("{name}.release")));
+        let token = format!("{name}-{}", uuid::Uuid::new_v4());
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
             .args([
                 "--exact",
                 "runtime::installer::tests::runtime_lock_child_process",
                 "--nocapture",
             ])
             .env("TAWREED_TEST_RUNTIME_CHILD_ROOT", &layout.root)
+            .env("TAWREED_TEST_RUNTIME_CHILD_MODE", mode)
             .env("TAWREED_TEST_RUNTIME_CHILD_VERSION", version)
+            .env("TAWREED_TEST_RUNTIME_CHILD_TARGET", target)
+            .env("TAWREED_TEST_RUNTIME_CHILD_ATTEMPTED", &attempted)
+            .env("TAWREED_TEST_RUNTIME_CHILD_CONTENDED", &contended)
+            .env("TAWREED_TEST_RUNTIME_CHILD_ACQUIRED", &acquired)
+            .env("TAWREED_TEST_RUNTIME_CHILD_EXECUTED", &executed)
+            .env("TAWREED_TEST_RUNTIME_CHILD_TOKEN", &token)
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap()
+            .stderr(std::process::Stdio::piped());
+        if let Some(release) = &release {
+            command.env("TAWREED_TEST_RUNTIME_CHILD_RELEASE", release);
+        }
+        RuntimeLockChild {
+            child: Some(command.spawn().unwrap()),
+            attempted,
+            contended,
+            acquired,
+            release,
+            executed,
+            token,
+        }
     }
 
-    fn assert_child_success(child: std::process::Child) {
-        let output = child.wait_with_output().unwrap();
+    impl Drop for RuntimeLockChild {
+        fn drop(&mut self) {
+            let Some(mut child) = self.child.take() else {
+                return;
+            };
+            if let Some(release) = &self.release {
+                if !release.exists() {
+                    let _ = std::fs::write(release, b"release");
+                }
+            }
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
+    fn assert_child_success(mut child: RuntimeLockChild) {
+        let output = child.child.take().unwrap().wait_with_output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
             output.status.success(),
             "child failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
+            stdout,
             String::from_utf8_lossy(&output.stderr)
         );
+        assert_eq!(stdout.matches("running 1 test").count(), 1, "{stdout}");
+        assert_eq!(
+            stdout
+                .matches("test runtime::installer::tests::runtime_lock_child_process ... ok")
+                .count(),
+            1,
+            "{stdout}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&child.executed).unwrap(),
+            child.token
+        );
+    }
+
+    fn child_runtime_record(version: &str, target: &str) -> super::RuntimeRecord {
+        super::RuntimeRecord {
+            version: version.into(),
+            target: target.into(),
+            entrypoint: health_entrypoint().into(),
+            sha256: "a".repeat(64),
+            size: 1,
+        }
+    }
+
+    fn test_pin_for_record(
+        fs: &RuntimeFs,
+        record: &super::RuntimeRecord,
+    ) -> super::PinnedEntrypoint {
+        let directory = fs.versions.open_private_dir(&record.version).unwrap();
+        super::PinnedEntrypoint::open(directory, &record.entrypoint, fs.active_path(record), None)
+            .unwrap()
+    }
+
+    fn write_child_barrier(variable: &str) {
+        use std::io::Write;
+
+        let path = std::env::var_os(variable).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
+        file.write_all(
+            std::env::var("TAWREED_TEST_RUNTIME_CHILD_TOKEN")
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        file.sync_all().unwrap();
+    }
+
+    fn probe_child_lock(file: std::fs::File) {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => fs2::FileExt::unlock(&file).unwrap(),
+            Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                write_child_barrier("TAWREED_TEST_RUNTIME_CHILD_CONTENDED");
+            }
+            Err(error) => panic!("unexpected lock probe error: {error}"),
+        }
+    }
+
+    fn wait_for_child_release() {
+        let Some(path) = std::env::var_os("TAWREED_TEST_RUNTIME_CHILD_RELEASE") else {
+            return;
+        };
+        wait_for_path(Path::new(&path));
+    }
+
+    fn release_child(child: &RuntimeLockChild) {
+        std::fs::write(child.release.as_ref().unwrap(), b"release").unwrap();
+    }
+
+    fn wait_for_path(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !path.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {}",
+                path.display()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    fn wait_for_either(first: &Path, second: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !first.exists() && !second.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {} or {}",
+                first.display(),
+                second.display()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(windows)]
+    fn wait_until_path_is_writable(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if std::fs::OpenOptions::new().write(true).open(path).is_ok() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {} to become writable",
+                path.display()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     #[tokio::test]
@@ -1903,7 +2629,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn promotion_rejects_a_substituted_destination_identity_before_state_commit() {
+    async fn promotion_rejects_health_passing_entrypoint_substitution_and_retry_is_clean() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "0.9.0"))
+            .await
+            .unwrap();
+        let promoted_entrypoint = layout
+            .runtime_versions
+            .join("1.0.0")
+            .join(health_entrypoint());
+        let verified_entrypoint = promoted_entrypoint.with_extension("verified");
+        let attacker_marker = root.path().join("attacker-ran");
+        let malicious = health_passing_marker_script(&attacker_marker);
+        set_test_after_promotion_before_reopen_hook(move || {
+            std::fs::rename(&promoted_entrypoint, verified_entrypoint).unwrap();
+            std::fs::write(promoted_entrypoint, malicious).unwrap();
+        });
+
+        assert_eq!(
+            installer
+                .ensure(&asset_for(&source, "1.0.0"))
+                .await
+                .unwrap_err(),
+            "runtime_promotion_identity_mismatch"
+        );
+        assert_eq!(state_version(&layout, "current"), "0.9.0");
+        assert!(!layout.runtime_versions.join("1.0.0").exists());
+
+        let active = installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
+        assert_eq!(
+            std::fs::read_to_string(active.join(health_entrypoint())).unwrap(),
+            health_script(true)
+        );
+        assert!(!attacker_marker.exists());
+    }
+
+    #[tokio::test]
+    async fn promotion_rejects_whole_directory_substitution_and_retry_is_clean() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -1915,9 +2687,17 @@ mod tests {
             .unwrap();
         let promoted = layout.runtime_versions.join("1.0.0");
         let held = layout.runtime_versions.join("1.0.0.held");
+        let entrypoint = health_entrypoint().to_string();
         set_test_after_promotion_before_reopen_hook(move || {
             std::fs::rename(&promoted, &held).unwrap();
-            std::fs::create_dir(&promoted).unwrap();
+            let replacement_entrypoint = promoted.join(&entrypoint);
+            std::fs::create_dir_all(replacement_entrypoint.parent().unwrap()).unwrap();
+            std::fs::hard_link(held.join(&entrypoint), replacement_entrypoint).unwrap();
+            std::fs::copy(
+                held.join(super::RUNTIME_METADATA_FILE),
+                promoted.join(super::RUNTIME_METADATA_FILE),
+            )
+            .unwrap();
         });
 
         assert_eq!(
@@ -1928,10 +2708,70 @@ mod tests {
             "runtime_promotion_identity_mismatch"
         );
         assert_eq!(state_version(&layout, "current"), "0.9.0");
+        assert!(!layout.runtime_versions.join("1.0.0").exists());
+
+        installer
+            .ensure(&asset_for(&source, "1.0.0"))
+            .await
+            .unwrap();
+
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
     }
 
     #[tokio::test]
-    async fn abort_during_staged_health_removes_the_actual_uuid_stage() {
+    async fn promoted_health_pin_survives_the_commit_boundary_recheck() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let installer = RuntimeInstaller::new(layout.clone(), source.clone());
+        installer
+            .ensure(&asset_for(&source, "0.9.0"))
+            .await
+            .unwrap();
+        let promoted_entrypoint = layout
+            .runtime_versions
+            .join("1.0.0")
+            .join(health_entrypoint());
+        let verified_entrypoint = promoted_entrypoint.with_extension("verified");
+        let attempted = Arc::new(AtomicBool::new(false));
+        let substituted = Arc::new(AtomicBool::new(false));
+        let hook_attempted = attempted.clone();
+        let hook_substituted = substituted.clone();
+        set_test_after_promoted_health_before_commit_hook(move || {
+            hook_attempted.store(true, Ordering::SeqCst);
+            if std::fs::rename(&promoted_entrypoint, &verified_entrypoint).is_ok() {
+                std::fs::write(
+                    &promoted_entrypoint,
+                    health_passing_marker_script(&promoted_entrypoint.with_extension("ran")),
+                )
+                .unwrap();
+                hook_substituted.store(true, Ordering::SeqCst);
+            }
+        });
+
+        let result = installer.ensure(&asset_for(&source, "1.0.0")).await;
+
+        assert!(attempted.load(Ordering::SeqCst));
+        #[cfg(windows)]
+        {
+            assert!(!substituted.load(Ordering::SeqCst));
+            result.unwrap();
+            assert_eq!(state_version(&layout, "current"), "1.0.0");
+        }
+        #[cfg(unix)]
+        {
+            assert!(substituted.load(Ordering::SeqCst));
+            assert_eq!(result.unwrap_err(), "runtime_promotion_identity_mismatch");
+            assert_eq!(state_version(&layout, "current"), "0.9.0");
+            assert!(!layout.runtime_versions.join("1.0.0").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn abort_during_promoted_health_removes_the_candidate_and_uuid_stage() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -1943,7 +2783,7 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                if !generated_staging_directories(&layout, "1.0.0").is_empty() {
+                if layout.runtime_versions.join("1.0.0").is_dir() {
                     break;
                 }
                 tokio::task::yield_now().await;
@@ -1954,7 +2794,80 @@ mod tests {
         task.abort();
         let _ = task.await;
 
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while layout.runtime_versions.join("1.0.0").exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         assert!(generated_staging_directories(&layout, "1.0.0").is_empty());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cancellation_cleanup_retains_version_lease_until_candidate_is_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::from_bytes(runtime_archive_with_script(hanging_script()));
+        let installer = Arc::new(RuntimeInstaller::new(layout.clone(), source.clone()));
+        let gate = Arc::new((
+            std::sync::Mutex::new((false, false)),
+            std::sync::Condvar::new(),
+        ));
+        set_test_child_reaper_gate(gate.clone());
+        let task_installer = installer.clone();
+        let asset = asset_for(&source, "1.0.0");
+        let task = tokio::spawn(async move { task_installer.ensure(&asset).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !layout.runtime_versions.join("1.0.0").exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        task.abort();
+        let _ = task.await;
+        let (state, condition) = &*gate;
+        let entered = state.lock().unwrap();
+        let (mut entered, timeout) = condition
+            .wait_timeout_while(entered, std::time::Duration::from_secs(2), |state| !state.0)
+            .unwrap();
+        assert!(!timeout.timed_out(), "child reaper did not take ownership");
+        assert!(layout.runtime_versions.join("1.0.0").exists());
+
+        let barriers = root.path().join("cleanup-barriers");
+        std::fs::create_dir(&barriers).unwrap();
+        let mut contender = spawn_runtime_lock_child(
+            &layout,
+            &barriers,
+            "cleanup-contender",
+            "version",
+            "1.0.0",
+            current_target_key(),
+            false,
+        );
+        wait_for_path(&contender.attempted);
+        wait_for_either(&contender.contended, &contender.acquired);
+        assert!(contender.contended.exists());
+        assert!(!contender.acquired.exists());
+        assert!(contender
+            .child
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .unwrap()
+            .is_none());
+
+        entered.1 = true;
+        condition.notify_all();
+        drop(entered);
+        wait_for_path(&contender.acquired);
+
+        assert!(!layout.runtime_versions.join("1.0.0").exists());
+        assert_child_success(contender);
     }
 
     #[tokio::test]
@@ -1978,7 +2891,9 @@ mod tests {
             let fs = RuntimeFs::open(&hook_layout).unwrap();
             let state = fs.read_state().unwrap();
             let record = fs.read_version_metadata("1.1.0").unwrap();
-            fs.commit_activation(state.generation, record).unwrap();
+            let pin = test_pin_for_record(&fs, &record);
+            fs.commit_activation(state.generation, record, &pin)
+                .unwrap();
         });
 
         installer
@@ -2013,9 +2928,16 @@ mod tests {
         let hook_layout = layout.clone();
         set_test_before_orphan_delete_hook(move || {
             let fs = RuntimeFs::open(&hook_layout).unwrap();
-            let state = fs.read_state().unwrap();
+            let _state_lock = fs.lock_state().unwrap();
+            let state = fs.read_state_unlocked().unwrap();
             let record = fs.read_version_metadata("1.0.0").unwrap();
-            fs.commit_activation(state.generation, record).unwrap();
+            fs.write_state_unlocked(&super::RuntimeState {
+                schema_version: 1,
+                generation: state.generation + 1,
+                previous: state.current,
+                current: Some(record),
+            })
+            .unwrap();
         });
 
         assert!(installer
@@ -2025,6 +2947,42 @@ mod tests {
 
         assert!(layout.runtime_versions.join("1.0.0").is_dir());
         assert_eq!(state_version(&layout, "current"), "1.0.0");
+    }
+
+    #[tokio::test]
+    async fn orphan_cleanup_preserves_same_version_referenced_with_different_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let installed_source = FakeRuntimeSource::healthy_archive();
+        let installed_asset = asset_for(&installed_source, "1.0.0");
+        RuntimeInstaller::new(layout.clone(), installed_source)
+            .ensure(&installed_asset)
+            .await
+            .unwrap();
+        let installed_entrypoint = layout
+            .runtime_versions
+            .join("1.0.0")
+            .join(health_entrypoint());
+        let installed_bytes = std::fs::read(&installed_entrypoint).unwrap();
+        let requested_source = FakeRuntimeSource::from_bytes(archive_with_files(&[
+            (health_entrypoint(), health_script(true).as_bytes()),
+            ("agent/different-metadata.txt", b"different"),
+        ]));
+
+        let error = RuntimeInstaller::new(layout.clone(), requested_source.clone())
+            .ensure(&asset_for(&requested_source, "1.0.0"))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, "invalid_runtime_metadata");
+        assert_eq!(state_version(&layout, "current"), "1.0.0");
+        assert_eq!(
+            std::fs::read(installed_entrypoint).unwrap(),
+            installed_bytes
+        );
+        assert!(layout.runtime_versions.join("1.0.0").is_dir());
+        assert!(requested_source.requested_offsets().is_empty());
     }
 
     #[tokio::test]
@@ -2179,12 +3137,27 @@ mod tests {
             .is_err());
 
         let mut command = pinned.command().unwrap();
-        command.command_mut().arg("--health-check");
-        let output = command.output().await.unwrap();
+        command
+            .arg("--health-check")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        assert!(child.id().is_some());
+        let _ = child.try_wait().unwrap();
+        let stdout = child.take_stdout().unwrap();
+        let stderr = child.take_stderr().unwrap();
+        let (stdout, stderr, status) = tokio::try_join!(
+            read_test_stream(stdout),
+            read_test_stream(stderr),
+            child.wait()
+        )
+        .unwrap();
 
-        assert!(output.status.success());
+        assert!(status.success());
+        assert!(stderr.is_empty());
         assert_eq!(
-            std::str::from_utf8(&output.stdout).unwrap().trim(),
+            std::str::from_utf8(&stdout).unwrap().trim(),
             "{\"status\":\"ok\",\"protocolVersion\":1}"
         );
     }
@@ -2215,6 +3188,52 @@ mod tests {
         child.wait().await.unwrap();
         drop(child);
         assert!(std::fs::OpenOptions::new().write(true).open(path).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dropped_child_reaper_retains_pins_without_an_active_runtime() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::from_root(root.path().join(".tawreed"));
+        layout.ensure().unwrap();
+        let source = FakeRuntimeSource::healthy_archive();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let installer = RuntimeInstaller::new(layout, source.clone());
+        let active = runtime
+            .block_on(installer.ensure(&asset_for(&source, "1.0.0")))
+            .unwrap();
+        let path = active.join(health_entrypoint());
+        let ready = root.path().join("child-ready");
+        std::fs::write(&path, ready_then_hang_script(&ready)).unwrap();
+        let pinned = runtime.block_on(installer.active_entrypoint()).unwrap();
+        let mut command = pinned.command().unwrap();
+        let gate = Arc::new((
+            std::sync::Mutex::new((false, false)),
+            std::sync::Condvar::new(),
+        ));
+        set_test_child_reaper_gate(gate.clone());
+        let child = command.spawn().unwrap();
+        drop(command);
+        drop(pinned);
+        wait_for_path(&ready);
+        drop(runtime);
+
+        drop(child);
+
+        let (state, condition) = &*gate;
+        let entered = state.lock().unwrap();
+        let (mut entered, timeout) = condition
+            .wait_timeout_while(entered, std::time::Duration::from_secs(2), |state| !state.0)
+            .unwrap();
+        assert!(!timeout.timed_out(), "child reaper did not take ownership");
+        assert!(std::fs::OpenOptions::new().write(true).open(&path).is_err());
+        entered.1 = true;
+        condition.notify_all();
+        drop(entered);
+        wait_until_path_is_writable(&path);
     }
 
     #[tokio::test]
@@ -2588,6 +3607,7 @@ mod tests {
     async fn health_check_times_out_and_reaps_a_hung_process() {
         #[cfg(unix)]
         reset_test_process_group_terminations();
+        set_test_health_timeout(std::time::Duration::from_millis(400));
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -2630,6 +3650,7 @@ mod tests {
     async fn health_check_does_not_wait_forever_on_inherited_descendant_pipes() {
         #[cfg(unix)]
         reset_test_process_group_terminations();
+        set_test_health_timeout(std::time::Duration::from_millis(400));
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::from_root(root.path().join(".tawreed"));
         layout.ensure().unwrap();
@@ -2677,9 +3698,10 @@ mod tests {
             .await
             .unwrap();
 
-        let entrypoint = installer.rollback().await.unwrap();
+        let committed = installer.rollback().await.unwrap();
 
-        assert!(entrypoint.ends_with(health_entrypoint()));
+        assert_eq!(committed.version, "0.9.0");
+        assert!(committed.entrypoint.ends_with(health_entrypoint()));
         assert_eq!(state_version(&layout, "current"), "0.9.0");
         assert_eq!(state_version(&layout, "previous"), "1.0.0");
         assert_eq!(
@@ -2688,7 +3710,7 @@ mod tests {
                 .await
                 .unwrap()
                 .informational_path(),
-            entrypoint.as_path()
+            committed.entrypoint.as_path()
         );
     }
 
@@ -3001,6 +4023,14 @@ mod tests {
         "@echo off\r\nping -n 4 127.0.0.1 >nul\r\necho {\"status\":\"ok\",\"protocolVersion\":1}\r\n"
     }
 
+    #[cfg(windows)]
+    fn ready_then_hang_script(ready: &Path) -> String {
+        format!(
+            "@echo off\r\necho ready>\"{}\"\r\nping -n 6 127.0.0.1 >nul\r\n",
+            ready.display()
+        )
+    }
+
     #[cfg(not(windows))]
     fn hanging_script() -> &'static str {
         "#!/bin/sh\nsleep 3\nprintf '%s\\n' '{\"status\":\"ok\",\"protocolVersion\":1}'\n"
@@ -3056,6 +4086,19 @@ mod tests {
             .unwrap()
     }
 
+    async fn read_test_stream<R: tokio::io::AsyncRead + Unpin>(
+        mut stream: R,
+    ) -> Result<Vec<u8>, String> {
+        use tokio::io::AsyncReadExt;
+
+        let mut bytes = Vec::new();
+        stream
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(bytes)
+    }
+
     fn serve_once(
         status: &'static str,
         headers: &'static [(&'static str, &'static str)],
@@ -3109,6 +4152,22 @@ mod tests {
         } else {
             "@echo off\r\necho {\"status\":\"error\",\"protocolVersion\":1}\r\nexit /b 1\r\n"
         }
+    }
+
+    #[cfg(windows)]
+    fn health_passing_marker_script(marker: &Path) -> String {
+        format!(
+            "@echo off\r\necho attacker>\"{}\"\r\necho {{\"status\":\"ok\",\"protocolVersion\":1}}\r\nexit /b 0\r\n",
+            marker.display()
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn health_passing_marker_script(marker: &Path) -> String {
+        format!(
+            "#!/bin/sh\nprintf attacker >'{}'\nprintf '%s\\n' '{{\"status\":\"ok\",\"protocolVersion\":1}}'\n",
+            marker.display()
+        )
     }
 
     #[cfg(not(windows))]
