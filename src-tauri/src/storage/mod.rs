@@ -4,6 +4,7 @@ pub mod history;
 mod json;
 mod layout;
 pub mod migration;
+pub mod projects;
 
 pub use json::{append_jsonl, atomic_write_json};
 pub use layout::DataLayout;
