@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod agent;
 mod codex;
 mod commands;
 mod platform_commands;
@@ -8,7 +9,7 @@ pub mod storage;
 mod store;
 mod update;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn main() {
     tauri::Builder::default()
@@ -51,6 +52,9 @@ fn main() {
             platform_commands::create_project,
             platform_commands::list_projects,
             platform_commands::latest_project_checkpoint,
+            platform_commands::agent_health,
+            platform_commands::agent_request,
+            platform_commands::agent_cancel,
             update::check_for_update,
             update::open_update_release,
         ])
@@ -64,11 +68,26 @@ fn main() {
                 eprintln!("[tawreed] runtime layout failed: {error}");
                 "runtime_internal_error".to_string()
             })?;
-            let runtime_manager = runtime::RuntimeManager::new(layout).map_err(|error| {
+            let runtime_manager =
+                runtime::RuntimeManager::new(layout.clone()).map_err(|error| {
+                    eprintln!("[tawreed] runtime manager failed: {error}");
+                    "runtime_internal_error".to_string()
+                })?;
+            app.manage(runtime_manager);
+            let events_app = app.handle().clone();
+            let agent_runtime = runtime::RuntimeManager::new(layout.clone()).map_err(|error| {
                 eprintln!("[tawreed] runtime manager failed: {error}");
                 "runtime_internal_error".to_string()
             })?;
-            app.manage(runtime_manager);
+            let supervisor = agent::AgentSupervisor::new(
+                env!("CARGO_PKG_VERSION").to_string(),
+                layout.root,
+                Box::new(agent::StandardKernelLauncher::new(agent_runtime)),
+                std::sync::Arc::new(move |event| {
+                    let _ = events_app.emit("agent://event", event);
+                }),
+            );
+            app.manage(supervisor);
             app.manage(info);
             Ok(())
         })
