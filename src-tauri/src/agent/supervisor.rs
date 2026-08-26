@@ -230,18 +230,18 @@ impl AgentSupervisor {
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
-        self.ensure_started().await?;
+        self.start().await?;
         let id = allocate_request_id(&self.next_id)?;
         match self.dispatch(id, method, params.clone()).await {
             Ok(reply) => Ok(reply),
-            Err(DispatchFailure::Write(_)) => {
+            Err(DispatchFailure::Write(failed_generation, _)) => {
                 // The request never reached the kernel; respawn once and try again.
-                self.expire_current_process().await;
-                self.ensure_started().await?;
+                self.expire_generation(failed_generation).await;
+                self.start().await?;
                 let retried_id = allocate_request_id(&self.next_id)?;
                 match self.dispatch(retried_id, method, params).await {
                     Ok(reply) => Ok(reply),
-                    Err(DispatchFailure::Write(error)) | Err(DispatchFailure::Reply(error)) => {
+                    Err(DispatchFailure::Write(_, error)) | Err(DispatchFailure::Reply(error)) => {
                         Err(error)
                     }
                 }
@@ -250,7 +250,8 @@ impl AgentSupervisor {
         }
     }
 
-    pub async fn ensure_started(&self) -> Result<(), String> {
+    /// Spawns and handshakes the kernel unless a healthy instance already runs.
+    pub async fn start(&self) -> Result<(), String> {
         let mut slot = self.process.lock().await;
         if slot.is_some() {
             return Ok(());
@@ -352,20 +353,32 @@ impl AgentSupervisor {
         let mut slot = self.process.lock().await;
         let process = slot
             .as_mut()
-            .ok_or_else(|| DispatchFailure::Write("agent_not_running".into()))?;
+            .ok_or_else(|| DispatchFailure::Write(None, "agent_not_running".into()))?;
         let receiver = dispatch_locked(process, id, method, params).await?;
         drop(slot);
         receiver.await.map_err(DispatchFailure::Reply)
     }
 
-    async fn expire_current_process(&self) {
+    /// Clears the slot only when it still holds the failed generation; a newer,
+    /// healthy restart must survive concurrent retriers.
+    async fn expire_generation(&self, expected: Option<u64>) {
+        let Some(expected) = expected else {
+            return;
+        };
         let mut slot = self.process.lock().await;
-        *slot = None;
+        if slot
+            .as_ref()
+            .is_some_and(|current| current.generation == expected)
+        {
+            *slot = None;
+        }
     }
 }
 
 enum DispatchFailure {
-    Write(String),
+    /// The request never reached the kernel; carries the generation that failed
+    /// (`None` when nothing was running).
+    Write(Option<u64>, String),
     Reply(String),
 }
 
@@ -378,7 +391,7 @@ async fn dispatch_locked(
     let receiver = process
         .router
         .register(id)
-        .map_err(DispatchFailure::Write)?;
+        .map_err(|error| DispatchFailure::Write(Some(process.generation), error))?;
     let request = AgentRequest {
         jsonrpc: JSONRPC_VERSION,
         id,
@@ -387,7 +400,7 @@ async fn dispatch_locked(
     };
     if let Err(error) = write_request_line(&mut process.stdin, request).await {
         process.router.abandon(id);
-        return Err(DispatchFailure::Write(error));
+        return Err(DispatchFailure::Write(Some(process.generation), error));
     }
     Ok(receiver)
 }
@@ -473,7 +486,7 @@ async fn verify_health(process: &mut AgentProcess, next_id: &AtomicU64) -> Resul
 
 fn failure_code(failure: DispatchFailure) -> String {
     match failure {
-        DispatchFailure::Write(error) | DispatchFailure::Reply(error) => error,
+        DispatchFailure::Write(_, error) | DispatchFailure::Reply(error) => error,
     }
 }
 
@@ -844,7 +857,7 @@ rl.on('line', (line) => {
     #[tokio::test]
     async fn transparently_restarts_the_kernel_after_an_unexpected_exit() {
         let fixture = kernel_fixture(FAKE_KERNEL_SCRIPT);
-        bounded(fixture.supervisor.ensure_started()).await.unwrap();
+        bounded(fixture.supervisor.start()).await.unwrap();
 
         let crash = bounded(fixture.supervisor.request("exit_without_reply", json!({}))).await;
         assert_eq!(crash.unwrap_err(), "agent_process_exited");
@@ -868,9 +881,30 @@ rl.on('line', (line) => {
     }
 
     #[tokio::test]
+    async fn expiry_only_evicts_the_failed_generation() {
+        let fixture = kernel_fixture(FAKE_KERNEL_SCRIPT);
+        bounded(fixture.supervisor.start()).await.unwrap();
+        assert_eq!(fixture.supervisor.running_generation().await, Some(1));
+
+        // Retrier A expires the dead first generation and restarts as generation 2.
+        fixture.supervisor.expire_generation(Some(1)).await;
+        bounded(fixture.supervisor.start()).await.unwrap();
+        assert_eq!(fixture.supervisor.running_generation().await, Some(2));
+
+        // Retrier B's stale eviction for generation 1 must spare healthy generation 2.
+        fixture.supervisor.expire_generation(Some(1)).await;
+        assert_eq!(fixture.supervisor.running_generation().await, Some(2));
+
+        // A not-running failure never evicts a kernel another task started meanwhile.
+        fixture.supervisor.expire_generation(None).await;
+        assert_eq!(fixture.supervisor.running_generation().await, Some(2));
+        assert_eq!(fixture.spawns.load(AtomicOrdering::SeqCst), 2);
+    }
+
+    #[tokio::test]
     async fn stop_closes_stdin_and_terminates_the_child_within_the_outer_deadline() {
         let fixture = kernel_fixture(FAKE_KERNEL_SCRIPT);
-        bounded(fixture.supervisor.ensure_started()).await.unwrap();
+        bounded(fixture.supervisor.start()).await.unwrap();
 
         bounded(fixture.supervisor.stop()).await.unwrap();
 
