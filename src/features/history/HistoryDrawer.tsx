@@ -3,7 +3,26 @@ import { ActionIcon, ScrollArea, Table, Text, Tooltip } from '@mantine/core';
 import { FileSpreadsheet, FolderOpen, Sparkles, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { listRuns, openGeneratedFolder, openWorkbook } from '../../bridge';
+import { resolvedLocale, type LocaleSource } from '../../i18n/locale';
 import type { RunRecord } from '../../../shared/types';
+
+export interface HistoryTimestamp {
+  tooltip: string;
+  date: string;
+  time: string;
+}
+
+export function formatHistoryTimestamp(
+  date: Date,
+  source: LocaleSource | null | undefined,
+): HistoryTimestamp {
+  const locale = resolvedLocale(source ?? {});
+  return {
+    tooltip: date.toLocaleString(locale),
+    date: date.toLocaleDateString(locale),
+    time: date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
+  };
+}
 
 export default function HistoryDrawer({ opened }: { opened: boolean }) {
   const { t, i18n } = useTranslation();
@@ -37,14 +56,14 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
         </Table.Thead>
         <Table.Tbody>
           {runs.map((run) => {
-            const date = new Date(run.startedAt);
+            const timestamp = formatHistoryTimestamp(new Date(run.startedAt), i18n);
             return (
               <Table.Tr key={run.id}>
                 <Table.Td>
-                  <Tooltip label={date.toLocaleString(i18n.language)} openDelay={220}>
+                  <Tooltip label={timestamp.tooltip} openDelay={220}>
                     <div className="whitespace-nowrap text-[10px] leading-4 text-zinc-500">
-                      <div>{date.toLocaleDateString(i18n.language)}</div>
-                      <div>{date.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div>{timestamp.date}</div>
+                      <div>{timestamp.time}</div>
                     </div>
                   </Tooltip>
                 </Table.Td>
