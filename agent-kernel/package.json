@@ -1,0 +1,13 @@
+{
+  "name": "@tawreed/agent-kernel",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "allowScripts": {},
+  "dependencies": {
+    "@openai/codex-sdk": "0.149.1",
+    "zod": "3.24.0"
+  }
+}

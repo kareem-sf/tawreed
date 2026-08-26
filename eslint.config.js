@@ -7,6 +7,8 @@ export default tseslint.config(
   {
     ignores: [
       'dist/**',
+      'agent-kernel/dist/**',
+      'agent-kernel/node_modules/**',
       'node_modules/**',
       'public/**',
       'src-tauri/**',

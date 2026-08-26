@@ -2,7 +2,7 @@ const { readFileSync, readdirSync, statSync } = require('node:fs');
 const { dirname, extname, join, normalize, relative, resolve } = require('node:path');
 
 const root = resolve(__dirname, '..');
-const sourceRoots = ['src', 'engine', 'shared', 'tests'];
+const sourceRoots = ['src', 'engine', 'shared', 'agent-kernel/src', 'tests'];
 const sourceExtensions = new Set(['.ts', '.tsx']);
 const errors = [];
 
@@ -80,6 +80,7 @@ function detectCycles() {
 function detectUnreachable() {
   const entries = files.filter((path) => projectPath(path).startsWith('tests/'));
   for (const entry of [
+    'agent-kernel/src/index.ts',
     'src/main.tsx',
     'src/workers/boq.worker.ts',
   ]) {
@@ -146,7 +147,9 @@ function enforceBoundaries() {
   for (const path of files) {
     const name = projectPath(path);
     const lines = readFileSync(path, 'utf8').split(/\r?\n/).length;
-    const budget = budgets.get(name) ?? (name.startsWith('src/') ? 500 : null);
+    const budget = budgets.get(name) ?? (
+      name.startsWith('src/') || name.startsWith('agent-kernel/src/') ? 500 : null
+    );
     if (budget !== null && budget !== undefined && lines > budget) {
       errors.push(`Module-size budget exceeded: ${name} has ${lines} lines (limit ${budget})`);
     }
