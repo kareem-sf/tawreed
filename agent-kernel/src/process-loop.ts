@@ -2,22 +2,23 @@ import { TextDecoder } from 'node:util';
 import type { Writable } from 'node:stream';
 import { AgentKernel } from './kernel';
 import {
-  AgentEventLimitError,
   MAX_ACTIVE_RUNS,
   MAX_CANCEL_REQUESTS,
   MAX_CONTROL_REQUESTS,
   MAX_INPUT_LINE_BYTES,
   MAX_QUEUED_WRITER_BYTES,
-  WRITER_EMERGENCY_RESERVED_BYTES,
   WRITER_RESERVED_BYTES,
-  checkedJsonBytes,
   errorResponse,
   requestIdSchema,
   requestSchema,
-  type AgentNotification,
   type RpcRequest,
   type RpcResponse,
 } from './protocol';
+import {
+  SerializedWriter,
+  WriterSaturatedError,
+  type ResponseLane,
+} from './serialized-writer';
 
 export interface ProcessLoopOptions {
   input: AsyncIterable<Buffer | string>;
@@ -44,127 +45,6 @@ function positiveInteger(value: number | undefined, fallback: number): number {
     : fallback;
 }
 
-function serializeLine(value: unknown): Buffer {
-  return Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
-}
-
-function serializedLineBytes(value: unknown): number {
-  const jsonBytes = checkedJsonBytes(value);
-  if (jsonBytes === null || jsonBytes >= Number.MAX_SAFE_INTEGER) {
-    throw new Error('writer serialization failed');
-  }
-  return jsonBytes + 1;
-}
-
-type ResponseLane = 'normal' | 'terminal' | 'emergency';
-
-class WriterSaturatedError extends Error {
-  constructor() {
-    super('writer saturated');
-    this.name = 'WriterSaturatedError';
-  }
-}
-
-class SerializedWriter {
-  private tail = Promise.resolve();
-  private queuedBytes = 0;
-  private readonly spaceWaiters = new Set<() => void>();
-  private failure: Error | null = null;
-  private peakBytes = 0;
-  private readonly emergencyReservedBytes: number;
-
-  constructor(
-    private readonly output: Writable,
-    private readonly maximumBytes: number,
-    private readonly reservedBytes: number,
-  ) {
-    this.emergencyReservedBytes = Math.min(
-      WRITER_EMERGENCY_RESERVED_BYTES,
-      reservedBytes,
-    );
-  }
-
-  get peakQueuedBytes(): number {
-    return this.peakBytes;
-  }
-
-  enqueueEvent(notification: AgentNotification): void {
-    const bytes = serializeLine(notification);
-    const eventMaximum = this.maximumFor('normal');
-    if (
-      this.failure !== null
-      || bytes.length > eventMaximum
-      || this.queuedBytes > eventMaximum - bytes.length
-    ) {
-      throw new AgentEventLimitError();
-    }
-    this.reserve(bytes.length);
-    this.queueReserved(bytes);
-  }
-
-  async enqueueResponse(response: RpcResponse, lane: ResponseLane): Promise<void> {
-    const byteLength = serializedLineBytes(response);
-    const laneMaximum = this.maximumFor(lane);
-    if (byteLength > laneMaximum) throw new Error('writer response limit');
-    if (this.failure !== null) throw this.failure;
-    if (lane === 'emergency' && this.queuedBytes > laneMaximum - byteLength) {
-      throw new WriterSaturatedError();
-    }
-    while (this.queuedBytes > laneMaximum - byteLength) {
-      if (this.failure !== null) throw this.failure;
-      await new Promise<void>((resolveSpace) => this.spaceWaiters.add(resolveSpace));
-    }
-    if (this.failure !== null) throw this.failure;
-    this.reserve(byteLength);
-    try {
-      const bytes = serializeLine(response);
-      if (bytes.length !== byteLength) throw new Error('writer serialization changed');
-      this.queueReserved(bytes);
-    } catch (error) {
-      this.release(byteLength);
-      throw error;
-    }
-  }
-
-  async flush(): Promise<void> {
-    await this.tail;
-    if (this.failure !== null) throw this.failure;
-  }
-
-  private reserve(bytes: number): void {
-    this.queuedBytes += bytes;
-    this.peakBytes = Math.max(this.peakBytes, this.queuedBytes);
-  }
-
-  private maximumFor(lane: ResponseLane): number {
-    if (lane === 'normal') return this.maximumBytes - this.reservedBytes;
-    if (lane === 'terminal') return this.maximumBytes - this.emergencyReservedBytes;
-    return this.maximumBytes;
-  }
-
-  private queueReserved(bytes: Buffer): void {
-    const operation = this.tail.then(() => new Promise<void>((resolveWrite, rejectWrite) => {
-      this.output.write(bytes, (error) => {
-        if (error) rejectWrite(error);
-        else resolveWrite();
-      });
-    }));
-    this.tail = operation.then(
-      () => this.release(bytes.length),
-      (error: Error) => {
-        this.failure = error;
-        this.release(bytes.length);
-      },
-    );
-  }
-
-  private release(bytes: number): void {
-    this.queuedBytes -= bytes;
-    for (const waiter of this.spaceWaiters) waiter();
-    this.spaceWaiters.clear();
-  }
-}
-
 function recoverRequestId(value: unknown): number | null {
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'id')) return null;
   const id = requestIdSchema.safeParse((value as { id?: unknown }).id);
@@ -173,6 +53,7 @@ function recoverRequestId(value: unknown): number | null {
 
 function responseLane(request: RpcRequest, response: RpcResponse): ResponseLane {
   if ('error' in response || request.method === 'turns.cancel') return 'emergency';
+  if (request.method === 'kernel.health') return 'health';
   return request.method === 'turns.run' ? 'terminal' : 'normal';
 }
 
@@ -216,11 +97,6 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
   const requestedReserve = positiveInteger(options.writerReservedBytes, WRITER_RESERVED_BYTES);
   const writerReservedBytes = Math.min(requestedReserve, maxQueuedWriterBytes - 1);
   const shutdownGraceMs = positiveInteger(options.shutdownGraceMs, 2_000);
-  const writer = new SerializedWriter(
-    options.output,
-    maxQueuedWriterBytes,
-    writerReservedBytes,
-  );
   const tasks = new Set<Promise<void>>();
   let activeRunRequests = 0;
   let activeControlRequests = 0;
@@ -235,6 +111,14 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
     wakePendingInput?.();
   };
 
+  const writer = new SerializedWriter(
+    options.output,
+    maxQueuedWriterBytes,
+    writerReservedBytes,
+    requestForcedShutdown,
+  );
+
+  try {
   const nextInputOrForced = async (iterator: AsyncIterator<Buffer | string>) => {
     if (forcedByWriterBackpressure) return forcedInput;
     let wakeInput!: () => void;
@@ -262,10 +146,13 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
     await writer.enqueueResponse(response, responseLane(rpcRequest, response));
   };
 
-  const launch = (rpcRequest: RpcRequest, kind: 'run' | 'control' | 'cancel') => {
+  const launch = (
+    rpcRequest: RpcRequest,
+    kind: 'run' | 'control' | 'cancel',
+  ) => {
     if (kind === 'run') activeRunRequests += 1;
     else if (kind === 'control') activeControlRequests += 1;
-    else activeCancelRequests += 1;
+    else if (kind === 'cancel') activeCancelRequests += 1;
     const task = execute(rpcRequest).catch((error: unknown) => {
       if (error instanceof WriterSaturatedError) requestForcedShutdown();
       writeDiagnostic(options.diagnostics, 'Agent response write failed.');
@@ -274,7 +161,7 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
     void task.finally(() => {
       if (kind === 'run') activeRunRequests -= 1;
       else if (kind === 'control') activeControlRequests -= 1;
-      else activeCancelRequests -= 1;
+      else if (kind === 'cancel') activeCancelRequests -= 1;
       tasks.delete(task);
     });
   };
@@ -300,6 +187,10 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
       return;
     }
 
+    if (parsed.data.method === 'kernel.health') {
+      await execute(parsed.data);
+      return;
+    }
     if (parsed.data.method === 'turns.cancel') {
       if (activeCancelRequests >= maxCancelRequests) {
         requestForcedShutdown();
@@ -384,9 +275,14 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
       await handleLine(Buffer.from(lineBuffer.subarray(0, lineLength)));
     }
   } catch (error) {
-    if (!(error instanceof WriterSaturatedError)) throw error;
-    requestForcedShutdown();
-    writeDiagnostic(options.diagnostics, 'Agent response capacity was exhausted.');
+    if (error instanceof WriterSaturatedError) {
+      requestForcedShutdown();
+      writeDiagnostic(options.diagnostics, 'Agent response capacity was exhausted.');
+    } else if (forcedByWriterBackpressure) {
+      writeDiagnostic(options.diagnostics, 'Agent response write failed.');
+    } else {
+      throw error;
+    }
   } finally {
     if (!inputFinished && typeof inputIterator.return === 'function') {
       try {
@@ -400,23 +296,29 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
   options.kernel.requestCancellationForActiveRuns();
   const shutdownDeadline = Date.now() + shutdownGraceMs;
   const tasksDrained = await waitWithin([...tasks], shutdownGraceMs);
-  let writerDrained = false;
+  let writerFlushed = false;
   if (tasksDrained) {
     const flush = writer.flush();
-    writerDrained = await waitWithin(
+    const flushSettled = await waitWithin(
       [flush],
       Math.max(0, shutdownDeadline - Date.now()),
     );
-    if (writerDrained) {
+    if (flushSettled) {
       try {
         await flush;
+        writerFlushed = true;
       } catch {
         writeDiagnostic(options.diagnostics, 'Agent writer shutdown failed.');
       }
     }
   }
-  if (forcedByWriterBackpressure || !tasksDrained || !writerDrained) {
+  const forced = forcedByWriterBackpressure || !tasksDrained || !writerFlushed;
+  if (forced) {
+    await writer.abort();
     return { forced: true, peakQueuedWriterBytes: writer.peakQueuedBytes };
   }
   return { forced: false, peakQueuedWriterBytes: writer.peakQueuedBytes };
+  } finally {
+    writer.dispose();
+  }
 }

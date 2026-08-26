@@ -6,6 +6,7 @@ import {
   mkdtemp,
   readFile,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -44,6 +45,17 @@ const PROJECT_ID = '123e4567-e89b-42d3-a456-426614174000';
 const SECOND_PROJECT_ID = '123e4567-e89b-42d3-a456-426614174001';
 const temporaryDirectories: string[] = [];
 
+function validProjectRecord(id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    name: 'Project Atlas',
+    status: 'active',
+    createdAtMs: 1,
+    updatedAtMs: 1,
+    ...overrides,
+  };
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => (
     rm(path, { recursive: true, force: true })
@@ -67,7 +79,7 @@ async function makeDataRoot(projectIds: string[] = [PROJECT_ID]) {
   for (const id of projectIds) {
     const project = join(root, 'projects', id);
     await mkdir(project);
-    await writeFile(join(project, 'project.json'), JSON.stringify({ id }));
+    await writeFile(join(project, 'project.json'), JSON.stringify(validProjectRecord(id)));
   }
   return root;
 }
@@ -180,6 +192,52 @@ async function runLoop(
     ...options,
   });
   return { diagnostics, outcome, output, lines: parsedLines(output) };
+}
+
+function controlledOpenInput(firstChunk: Buffer | string) {
+  const secondRead = deferred<void>();
+  const secondValue = deferred<IteratorResult<Buffer | string>>();
+  const thirdRead = deferred<void>();
+  const finalValue = deferred<IteratorResult<Buffer | string>>();
+  const returned = deferred<void>();
+  let reads = 0;
+  const input: AsyncIterable<Buffer | string> = {
+    [Symbol.asyncIterator](): AsyncIterator<Buffer | string> {
+      return {
+        next: () => {
+          reads += 1;
+          if (reads === 1) return Promise.resolve({ done: false, value: firstChunk });
+          if (reads === 2) {
+            secondRead.resolve();
+            return secondValue.promise;
+          }
+          thirdRead.resolve();
+          return finalValue.promise;
+        },
+        return: async () => {
+          returned.resolve();
+          secondValue.resolve({ done: true, value: undefined });
+          finalValue.resolve({ done: true, value: undefined });
+          return { done: true, value: undefined };
+        },
+      };
+    },
+  };
+  return {
+    input,
+    secondRead: secondRead.promise,
+    pushSecond(value: Buffer | string) {
+      secondValue.resolve({ done: false, value });
+    },
+    stopped: Promise.race([
+      returned.promise.then(() => 'returned' as const),
+      thirdRead.promise.then(() => 'continued' as const),
+    ]),
+    finish() {
+      secondValue.resolve({ done: true, value: undefined });
+      finalValue.resolve({ done: true, value: undefined });
+    },
+  };
 }
 
 describe('protocol v1 schemas', () => {
@@ -392,10 +450,93 @@ describe('project context boundary', () => {
 
     await rm(projectPath);
     await mkdir(projectPath);
-    await writeFile(join(projectPath, 'project.json'), '{}');
+    await writeFile(
+      join(projectPath, 'project.json'),
+      JSON.stringify(validProjectRecord(PROJECT_ID)),
+    );
     await symlink(outside, join(projectPath, 'agent-workspace'), process.platform === 'win32' ? 'junction' : 'dir');
     await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID))
       .rejects.toThrow('project_context_invalid');
+  });
+
+  it('strictly rejects invalid Task 5 project records without creating a workspace', async () => {
+    const missingName = {
+      id: PROJECT_ID,
+      status: 'active',
+      createdAtMs: 1,
+      updatedAtMs: 1,
+    };
+    const cases: Array<[string, string | Buffer]> = [
+      ['malformed JSON', '{'],
+      ['invalid UTF-8', Buffer.from([0xff])],
+      ['oversized record', 'x'.repeat(4_097)],
+      ['missing field', JSON.stringify(missingName)],
+      ['extra field', JSON.stringify(validProjectRecord(PROJECT_ID, { extra: true }))],
+      ['mismatched id', JSON.stringify(validProjectRecord(SECOND_PROJECT_ID))],
+      ['padded name', JSON.stringify(validProjectRecord(PROJECT_ID, { name: ' Project Atlas ' }))],
+      ['blank name', JSON.stringify(validProjectRecord(PROJECT_ID, { name: '   ' }))],
+      ['oversized name', JSON.stringify(validProjectRecord(PROJECT_ID, { name: 'x'.repeat(161) }))],
+      ['inactive status', JSON.stringify(validProjectRecord(PROJECT_ID, { status: 'archived' }))],
+      ['negative creation', JSON.stringify(validProjectRecord(PROJECT_ID, { createdAtMs: -1 }))],
+      ['fractional update', JSON.stringify(validProjectRecord(PROJECT_ID, { updatedAtMs: 1.5 }))],
+      ['unsafe update', JSON.stringify(validProjectRecord(PROJECT_ID, {
+        updatedAtMs: Number.MAX_SAFE_INTEGER + 1,
+      }))],
+      ['reversed timestamps', JSON.stringify(validProjectRecord(PROJECT_ID, {
+        createdAtMs: 2,
+        updatedAtMs: 1,
+      }))],
+      ['duplicate id', `{"id":"wrong","id":"${PROJECT_ID}","name":"Project Atlas","status":"active","createdAtMs":1,"updatedAtMs":1}`],
+      ['escaped duplicate id', `{"\\u0069d":"wrong","id":"${PROJECT_ID}","name":"Project Atlas","status":"active","createdAtMs":1,"updatedAtMs":1}`],
+      ['duplicate name', `{"id":"${PROJECT_ID}","name":" Wrong ","name":"Project Atlas","status":"active","createdAtMs":1,"updatedAtMs":1}`],
+      ['duplicate status', `{"id":"${PROJECT_ID}","name":"Project Atlas","status":"archived","status":"active","createdAtMs":1,"updatedAtMs":1}`],
+      ['duplicate creation', `{"id":"${PROJECT_ID}","name":"Project Atlas","status":"active","createdAtMs":-1,"createdAtMs":1,"updatedAtMs":1}`],
+      ['duplicate update', `{"id":"${PROJECT_ID}","name":"Project Atlas","status":"active","createdAtMs":1,"updatedAtMs":-1,"updatedAtMs":1}`],
+    ];
+
+    for (const [label, contents] of cases) {
+      const dataRoot = await makeDataRoot();
+      const projectPath = join(dataRoot, 'projects', PROJECT_ID);
+      const workspacePath = join(projectPath, 'agent-workspace');
+      await writeFile(join(projectPath, 'project.json'), contents);
+
+      await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID), label)
+        .rejects.toThrow('project_context_invalid');
+      expect(await lstat(workspacePath).catch(() => null), label).toBeNull();
+    }
+  });
+
+  it('revalidates the project record after workspace creation and containment', async () => {
+    const dataRoot = await makeDataRoot();
+    const projectPath = join(dataRoot, 'projects', PROJECT_ID);
+    const workspacePath = join(projectPath, 'agent-workspace');
+
+    await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID, {
+      afterWorkspaceReady: async () => {
+        await writeFile(
+          join(projectPath, 'project.json'),
+          JSON.stringify(validProjectRecord(PROJECT_ID, { status: 'archived' })),
+        );
+      },
+    })).rejects.toThrow('project_context_invalid');
+    expect((await lstat(workspacePath)).isDirectory()).toBe(true);
+  });
+
+  it('rejects final project-record path replacement after reading the opened handle', async () => {
+    const dataRoot = await makeDataRoot();
+    const projectPath = join(dataRoot, 'projects', PROJECT_ID);
+    const projectRecord = join(projectPath, 'project.json');
+    const replacement = join(projectPath, 'replacement.json');
+    await writeFile(
+      replacement,
+      JSON.stringify(validProjectRecord(PROJECT_ID, { status: 'archived' })),
+    );
+
+    await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID, {
+      afterProjectRecordRead: async (phase) => {
+        if (phase === 'final') await rename(replacement, projectRecord);
+      },
+    })).rejects.toThrow('project_context_invalid');
   });
 });
 
@@ -460,6 +601,97 @@ describe('agent kernel dispatch', () => {
       { id: 'codex', authenticated: true, detail: 'available' },
       { id: 'gemini', authenticated: false, detail: 'unavailable' },
     ] });
+    expect(JSON.stringify(response)).not.toContain(leaked);
+  });
+
+  it('times out a hung provider health probe with a generic unavailable summary', async () => {
+    const healthStarted = deferred<void>();
+    const healthResult = deferred<{ authenticated: boolean; detail: string }>();
+    const provider = makeProvider({
+      health: async () => {
+        healthStarted.resolve();
+        return healthResult.promise;
+      },
+    });
+    const { kernel } = await initializedKernel([provider], {
+      providers: new Map(),
+      providerHealthTimeoutMs: 10,
+    });
+    vi.useFakeTimers();
+    let responsePromise: Promise<RpcResponse> | null = null;
+    try {
+      responsePromise = kernel.dispatch(request(2, 'connections.status', {}));
+      await healthStarted.promise;
+      const responses: RpcResponse[] = [];
+      void responsePromise.then((response) => responses.push(response));
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(responses).toHaveLength(1);
+      const completedResponse = responses[0];
+      if (completedResponse === undefined) throw new Error('health timeout did not settle');
+      expect(resultOf(completedResponse)).toEqual({
+        providers: [{ id: 'codex', authenticated: false, detail: 'unavailable' }],
+      });
+    } finally {
+      healthResult.resolve({ authenticated: true, detail: 'private detail' });
+      if (responsePromise !== null) await responsePromise;
+      vi.useRealTimers();
+    }
+  });
+
+  it('reuses one hung provider health probe across repeated timeouts', async () => {
+    const healthStarted = deferred<void>();
+    const healthResult = deferred<{ authenticated: boolean; detail: string }>();
+    let healthCalls = 0;
+    const provider = makeProvider({
+      health: async () => {
+        healthCalls += 1;
+        healthStarted.resolve();
+        return healthResult.promise;
+      },
+    });
+    const { kernel } = await initializedKernel([provider], {
+      providers: new Map(),
+      providerHealthTimeoutMs: 10,
+    });
+    vi.useFakeTimers();
+    let first: Promise<RpcResponse> | null = null;
+    let second: Promise<RpcResponse> | null = null;
+    try {
+      first = kernel.dispatch(request(2, 'connections.status', {}));
+      await healthStarted.promise;
+      await vi.advanceTimersByTimeAsync(10);
+      second = kernel.dispatch(request(3, 'connections.status', {}));
+      await Promise.resolve();
+
+      expect(healthCalls).toBe(1);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(resultOf(await first)).toEqual({
+        providers: [{ id: 'codex', authenticated: false, detail: 'unavailable' }],
+      });
+      expect(resultOf(await second)).toEqual({
+        providers: [{ id: 'codex', authenticated: false, detail: 'unavailable' }],
+      });
+    } finally {
+      healthResult.resolve({ authenticated: true, detail: 'private detail' });
+      await Promise.allSettled([first, second].filter((value) => value !== null));
+      vi.useRealTimers();
+    }
+  });
+
+  it('normalizes malformed provider health without exposing its detail', async () => {
+    const leaked = 'private malformed provider detail';
+    const provider = makeProvider({
+      health: async () => ({ authenticated: 'yes', detail: leaked }) as never,
+    });
+    const { kernel } = await initializedKernel([provider]);
+
+    const response = await kernel.dispatch(request(2, 'connections.status', {}));
+
+    expect(resultOf(response)).toEqual({
+      providers: [{ id: 'codex', authenticated: false, detail: 'unavailable' }],
+    });
     expect(JSON.stringify(response)).not.toContain(leaked);
   });
 
@@ -594,6 +826,132 @@ describe('agent kernel dispatch', () => {
     expect(resumeCalls).toBe(1);
   });
 
+  it('rejects a second run on the same session and releases the owning reservation', async () => {
+    const firstTurn = deferred<{ finalResponse: string }>();
+    const firstStarted = deferred<void>();
+    let runCalls = 0;
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async () => {
+        runCalls += 1;
+        if (runCalls === 1) {
+          firstStarted.resolve();
+          return firstTurn.promise;
+        }
+        return { finalResponse: 'after-release' };
+      },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const first = kernel.dispatch(request(3, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'run-one', prompt: 'Plan.',
+    }));
+    await firstStarted.promise;
+
+    const overlapping = await kernel.dispatch(request(4, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'run-two', prompt: 'Overlap.',
+    }));
+
+    expect(errorCodeOf(overlapping)).toBe('session_conflict');
+    expect(runCalls).toBe(1);
+    firstTurn.resolve({ finalResponse: 'first-finished' });
+    await first;
+    expect(resultOf(await kernel.dispatch(request(5, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'run-three', prompt: 'Retry.',
+    })))).toEqual({ runId: 'run-three', finalResponse: 'after-release' });
+  });
+
+  it('rejects resume and run overlap on the same session in either direction', async () => {
+    const resumeEntered = deferred<void>();
+    const releaseResume = deferred<void>();
+    const runEntered = deferred<void>();
+    const releaseRun = deferred<{ finalResponse: string }>();
+    let resumeCalls = 0;
+    let runCalls = 0;
+    let holdRun = false;
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      resumeSession: async () => {
+        resumeCalls += 1;
+        if (resumeCalls === 1) {
+          resumeEntered.resolve();
+          await releaseResume.promise;
+        }
+      },
+      runTurn: async () => {
+        runCalls += 1;
+        if (holdRun) {
+          runEntered.resolve();
+          return releaseRun.promise;
+        }
+        return { finalResponse: 'unexpected-overlap' };
+      },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const resuming = kernel.dispatch(request(3, 'sessions.resume', {
+      projectId: PROJECT_ID, provider: 'codex', sessionId: 'session-1',
+    }));
+    await resumeEntered.promise;
+
+    expect(errorCodeOf(await kernel.dispatch(request(4, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'during-resume', prompt: 'Plan.',
+    })))).toBe('session_conflict');
+    expect(runCalls).toBe(0);
+    releaseResume.resolve();
+    await resuming;
+
+    holdRun = true;
+    const running = kernel.dispatch(request(5, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'held-run', prompt: 'Plan.',
+    }));
+    await runEntered.promise;
+    expect(errorCodeOf(await kernel.dispatch(request(6, 'sessions.resume', {
+      projectId: PROJECT_ID, provider: 'codex', sessionId: 'session-1',
+    })))).toBe('session_conflict');
+    expect(resumeCalls).toBe(1);
+    releaseRun.resolve({ finalResponse: 'finished' });
+    await running;
+  });
+
+  it('keeps provider runs parallel across different sessions', async () => {
+    const turns = new Map<string, ReturnType<typeof deferred<{ finalResponse: string }>>>();
+    const bothStarted = deferred<void>();
+    const provider = makeProvider({
+      runTurn: (input) => {
+        const turn = deferred<{ finalResponse: string }>();
+        turns.set(input.sessionId, turn);
+        if (turns.size === 2) bothStarted.resolve();
+        return turn.promise;
+      },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    const firstSession = resultOf(await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }))) as { sessionId: string };
+    const secondSession = resultOf(await kernel.dispatch(request(3, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }))) as { sessionId: string };
+
+    const first = kernel.dispatch(request(4, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: firstSession.sessionId, runId: 'parallel-one', prompt: 'One.',
+    }));
+    const second = kernel.dispatch(request(5, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: secondSession.sessionId, runId: 'parallel-two', prompt: 'Two.',
+    }));
+    await bothStarted.promise;
+
+    expect(new Set(turns.keys())).toEqual(new Set([firstSession.sessionId, secondSession.sessionId]));
+    turns.get(firstSession.sessionId)?.resolve({ finalResponse: 'one' });
+    turns.get(secondSession.sessionId)?.resolve({ finalResponse: 'two' });
+    expect(resultOf(await first)).toEqual({ runId: 'parallel-one', finalResponse: 'one' });
+    expect(resultOf(await second)).toEqual({ runId: 'parallel-two', finalResponse: 'two' });
+  });
+
   it('passes the Tawreed-owned run id and ignores a provider-spoofed event id', async () => {
     let receivedRunId = '';
     const provider = makeProvider({
@@ -661,8 +1019,9 @@ describe('agent kernel dispatch', () => {
     const first = deferred<{ finalResponse: string }>();
     const started = deferred<void>();
     let calls = 0;
+    let sessions = 0;
     const provider = makeProvider({
-      startSession: async () => ({ sessionId: 'session-1' }),
+      startSession: async () => ({ sessionId: `session-${++sessions}` }),
       runTurn: async () => {
         calls += 1;
         if (calls === 1) {
@@ -678,6 +1037,9 @@ describe('agent kernel dispatch', () => {
     await kernel.dispatch(request(2, 'sessions.start', {
       projectId: PROJECT_ID, provider: 'codex',
     }));
+    await kernel.dispatch(request(7, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
     const firstRun = kernel.dispatch(request(3, 'turns.run', {
       projectId: PROJECT_ID, sessionId: 'session-1', runId: 'run-1', prompt: 'Plan.',
     }));
@@ -687,13 +1049,13 @@ describe('agent kernel dispatch', () => {
       projectId: PROJECT_ID, sessionId: 'session-1', runId: 'run-1', prompt: 'Again.',
     })))).toBe('run_conflict');
     expect(errorCodeOf(await kernel.dispatch(request(5, 'turns.run', {
-      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'run-2', prompt: 'Other.',
+      projectId: PROJECT_ID, sessionId: 'session-2', runId: 'run-2', prompt: 'Other.',
     })))).toBe('capacity_exceeded');
 
     first.reject(new Error('private provider detail'));
     expect(errorCodeOf(await firstRun)).toBe('provider_failed');
     expect(resultOf(await kernel.dispatch(request(6, 'turns.run', {
-      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'run-2', prompt: 'Retry.',
+      projectId: PROJECT_ID, sessionId: 'session-2', runId: 'run-2', prompt: 'Retry.',
     })))).toEqual({ runId: 'run-2', finalResponse: 'recovered' });
   });
 
@@ -728,6 +1090,73 @@ describe('agent kernel dispatch', () => {
       .toEqual({ runId: 'missing', cancelled: false });
     expect(resultOf(await running)).toEqual({ runId: 'run-1', finalResponse: 'cancelled' });
     expect(cancelled).toEqual(['run-1']);
+  });
+
+  it('awaits one memoized provider cancellation result across duplicate explicit cancels', async () => {
+    const turn = deferred<{ finalResponse: string }>();
+    const runStarted = deferred<void>();
+    const cancelStarted = deferred<void>();
+    const cancellation = deferred<boolean>();
+    let cancelCalls = 0;
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async () => {
+        runStarted.resolve();
+        return turn.promise;
+      },
+      cancel: async () => {
+        cancelCalls += 1;
+        cancelStarted.resolve();
+        return cancellation.promise;
+      },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const running = kernel.dispatch(request(3, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'shared-cancel', prompt: 'Plan.',
+    }));
+    await runStarted.promise;
+
+    const firstCancel = kernel.dispatch(request(4, 'turns.cancel', { runId: 'shared-cancel' }));
+    const secondCancel = kernel.dispatch(request(5, 'turns.cancel', { runId: 'shared-cancel' }));
+    await cancelStarted.promise;
+    expect(cancelCalls).toBe(1);
+    cancellation.resolve(false);
+
+    expect(resultOf(await firstCancel)).toEqual({ runId: 'shared-cancel', cancelled: false });
+    expect(resultOf(await secondCancel)).toEqual({ runId: 'shared-cancel', cancelled: false });
+    turn.resolve({ finalResponse: 'finished' });
+    await running;
+  });
+
+  it('normalizes an explicit provider cancellation rejection to cancelled false', async () => {
+    const turn = deferred<{ finalResponse: string }>();
+    const runStarted = deferred<void>();
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async () => {
+        runStarted.resolve();
+        return turn.promise;
+      },
+      cancel: async () => { throw new Error('private cancellation failure'); },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const running = kernel.dispatch(request(3, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'rejected-cancel', prompt: 'Plan.',
+    }));
+    await runStarted.promise;
+
+    const response = await kernel.dispatch(request(4, 'turns.cancel', { runId: 'rejected-cancel' }));
+
+    expect(resultOf(response)).toEqual({ runId: 'rejected-cancel', cancelled: false });
+    expect(JSON.stringify(response)).not.toContain('private cancellation failure');
+    turn.resolve({ finalResponse: 'finished' });
+    await running;
   });
 
   it('latches event-count overflow, cancels once, and wins even when the provider swallows emits', async () => {
@@ -877,6 +1306,365 @@ describe('agent kernel dispatch', () => {
 });
 
 describe('bounded concurrent NDJSON process loop', () => {
+  it('treats a callback write failure at finite EOF as a forced shutdown', async () => {
+    const callbackReady = deferred<(error?: Error | null) => void>();
+    const errorObserved = deferred<void>();
+    const output = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        this.chunks.push(Buffer.from(chunk));
+        callbackReady.resolve(callback);
+      }
+    }();
+    const externalErrorHandler = () => errorObserved.resolve();
+    output.on('error', externalErrorHandler);
+    try {
+      const loop = runProcessLoop({
+        input: Readable.from([encodedRequest({
+          jsonrpc: '2.0', id: 1, method: 'kernel.health', params: {},
+        })]),
+        output,
+        diagnostics: new CaptureWriter(),
+        kernel: new AgentKernel({ providers: new Map() }),
+        shutdownGraceMs: 50,
+      });
+      const callback = await callbackReady.promise;
+      callback(new Error('private stdout callback failure'));
+      await errorObserved.promise;
+
+      expect((await loop).forced).toBe(true);
+    } finally {
+      output.off('error', externalErrorHandler);
+    }
+  });
+
+  it('wakes an open input read when a stdout callback fails', async () => {
+    const callbackReady = deferred<(error?: Error | null) => void>();
+    const errorObserved = deferred<void>();
+    const input = controlledOpenInput(encodedRequest({
+      jsonrpc: '2.0', id: 2, method: 'kernel.health', params: {},
+    }));
+    const output = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        this.chunks.push(Buffer.from(chunk));
+        callbackReady.resolve(callback);
+      }
+    }();
+    const externalErrorHandler = () => errorObserved.resolve();
+    output.on('error', externalErrorHandler);
+    const loop = runProcessLoop({
+      input: input.input,
+      output,
+      diagnostics: new CaptureWriter(),
+      kernel: new AgentKernel({ providers: new Map() }),
+      shutdownGraceMs: 50,
+    });
+    try {
+      const callback = await callbackReady.promise;
+      await input.secondRead;
+      callback(new Error('private stdout callback failure'));
+      await errorObserved.promise;
+      input.pushSecond(encodedRequest({
+        jsonrpc: '2.0', id: 3, method: 'kernel.health', params: {},
+      }));
+
+      expect(await input.stopped).toBe('returned');
+      expect((await loop).forced).toBe(true);
+    } finally {
+      input.finish();
+      await loop;
+      output.off('error', externalErrorHandler);
+    }
+  });
+
+  it('wakes an open input read when stdout write throws synchronously', async () => {
+    const writeStarted = deferred<void>();
+    const runStarted = deferred<void>();
+    const turn = deferred<{ finalResponse: string }>();
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async () => {
+        runStarted.resolve();
+        return turn.promise;
+      },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const input = controlledOpenInput(encodedRequest({
+      jsonrpc: '2.0', id: 4, method: 'turns.run',
+      params: { projectId: PROJECT_ID, sessionId: 'session-1', runId: 'sync-write', prompt: 'Plan.' },
+    }));
+    const output = new class extends CaptureWriter {
+      override _write() {
+        writeStarted.resolve();
+        throw new Error('private synchronous stdout failure');
+      }
+    }();
+    const loop = runProcessLoop({
+      input: input.input,
+      output,
+      diagnostics: new CaptureWriter(),
+      kernel,
+      shutdownGraceMs: 50,
+    });
+    try {
+      await runStarted.promise;
+      await input.secondRead;
+      turn.resolve({ finalResponse: 'write now' });
+      await writeStarted.promise;
+      input.pushSecond(encodedRequest({
+        jsonrpc: '2.0', id: 5, method: 'kernel.health', params: {},
+      }));
+
+      expect(await input.stopped).toBe('returned');
+      expect((await loop).forced).toBe(true);
+    } finally {
+      turn.resolve({ finalResponse: 'cleanup' });
+      input.finish();
+      await loop;
+    }
+  });
+
+  it('contains a stdout error event without a callback and removes its listener', async () => {
+    const callbackReady = deferred<(error?: Error | null) => void>();
+    const input = controlledOpenInput(encodedRequest({
+      jsonrpc: '2.0', id: 6, method: 'kernel.health', params: {},
+    }));
+    const output = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        this.chunks.push(Buffer.from(chunk));
+        callbackReady.resolve(callback);
+      }
+    }();
+    const baselineListeners = output.listenerCount('error');
+    let heldCallback: ((error?: Error | null) => void) | null = null;
+    let callbackUsed = false;
+    const loop = runProcessLoop({
+      input: input.input,
+      output,
+      diagnostics: new CaptureWriter(),
+      kernel: new AgentKernel({ providers: new Map() }),
+      shutdownGraceMs: 50,
+    });
+    let emittedThrew = false;
+    try {
+      const callback = await callbackReady.promise;
+      heldCallback = callback;
+      await input.secondRead;
+      const activeListeners = output.listenerCount('error');
+      try {
+        output.emit('error', new Error('private stdout event failure'));
+      } catch {
+        emittedThrew = true;
+      }
+      if (emittedThrew) {
+        callbackUsed = true;
+        callback();
+      }
+      input.pushSecond(encodedRequest({
+        jsonrpc: '2.0', id: 7, method: 'kernel.health', params: {},
+      }));
+
+      expect(await input.stopped).toBe('returned');
+      expect((await loop).forced).toBe(true);
+      expect(emittedThrew).toBe(false);
+      expect(activeListeners).toBe(baselineListeners + 1);
+      expect(output.listenerCount('error')).toBe(baselineListeners + 1);
+      callbackUsed = true;
+      callback();
+      expect(output.listenerCount('error')).toBe(baselineListeners);
+    } finally {
+      if (heldCallback !== null && !callbackUsed) heldCallback();
+      input.finish();
+      await loop;
+    }
+  });
+
+  it('contains an error event followed by a late callback error before removing its listener', async () => {
+    const callbackReady = deferred<(error?: Error | null) => void>();
+    const input = controlledOpenInput(encodedRequest({
+      jsonrpc: '2.0', id: 71, method: 'kernel.health', params: {},
+    }));
+    const output = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        this.chunks.push(Buffer.from(chunk));
+        callbackReady.resolve(callback);
+      }
+    }();
+    const baselineListeners = output.listenerCount('error');
+    let heldCallback: ((error?: Error | null) => void) | null = null;
+    let callbackUsed = false;
+    const loop = runProcessLoop({
+      input: input.input,
+      output,
+      diagnostics: new CaptureWriter(),
+      kernel: new AgentKernel({ providers: new Map() }),
+      shutdownGraceMs: 50,
+    });
+    try {
+      const callback = await callbackReady.promise;
+      heldCallback = callback;
+      await input.secondRead;
+      output.emit('error', new Error('first private stdout event'));
+      input.pushSecond(encodedRequest({
+        jsonrpc: '2.0', id: 72, method: 'kernel.health', params: {},
+      }));
+      expect(await input.stopped).toBe('returned');
+      expect((await loop).forced).toBe(true);
+      const internalListenersAfterReturn = output.listenerCount('error');
+      const secondErrorObserved = deferred<void>();
+      const externalErrorHandler = () => secondErrorObserved.resolve();
+      output.on('error', externalErrorHandler);
+
+      callbackUsed = true;
+      callback(new Error('second private callback failure'));
+      await secondErrorObserved.promise;
+
+      expect(internalListenersAfterReturn).toBe(baselineListeners + 1);
+      expect(output.listenerCount('error')).toBe(baselineListeners + 1);
+      output.off('error', externalErrorHandler);
+      expect(output.listenerCount('error')).toBe(baselineListeners);
+    } finally {
+      if (heldCallback !== null && !callbackUsed) heldCallback();
+      input.finish();
+      await loop;
+    }
+  });
+
+  it('rejects a late provider success without writing after forced return', async () => {
+    const turn = deferred<{ finalResponse: string }>();
+    const runStarted = deferred<void>();
+    const providerReturned = deferred<void>();
+    const lateWrite = deferred<void>();
+    const lateRejection = deferred<void>();
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async () => {
+        runStarted.resolve();
+        const result = await turn.promise;
+        providerReturned.resolve();
+        return result;
+      },
+      cancel: async () => true,
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const output = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        super._write(chunk, encoding, callback);
+        lateWrite.resolve();
+      }
+    }();
+    const diagnostics = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        super._write(chunk, encoding, callback);
+        if (Buffer.from(chunk).toString('utf8').includes('response write failed')) {
+          lateRejection.resolve();
+        }
+      }
+    }();
+    vi.useFakeTimers();
+    try {
+      const loop = runProcessLoop({
+        input: Readable.from([encodedRequest({
+          jsonrpc: '2.0', id: 8, method: 'turns.run',
+          params: { projectId: PROJECT_ID, sessionId: 'session-1', runId: 'late-success', prompt: 'Plan.' },
+        })]),
+        output,
+        diagnostics,
+        kernel,
+        shutdownGraceMs: 5,
+      });
+      await runStarted.promise;
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await loop).forced).toBe(true);
+      expect(output.text()).toBe('');
+
+      turn.resolve({ finalResponse: 'must not be written' });
+      await providerReturned.promise;
+      const lateOutcome = await Promise.race([
+        lateWrite.promise.then(() => 'write' as const),
+        lateRejection.promise.then(() => 'rejected' as const),
+      ]);
+
+      expect(lateOutcome).toBe('rejected');
+      expect(output.text()).toBe('');
+    } finally {
+      turn.resolve({ finalResponse: 'cleanup' });
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains stdout error containment until a late held callback settles', async () => {
+    const callbackReady = deferred<(error?: Error | null) => void>();
+    const output = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        this.chunks.push(Buffer.from(chunk));
+        callbackReady.resolve(callback);
+      }
+    }();
+    const baselineListeners = output.listenerCount('error');
+    vi.useFakeTimers();
+    try {
+      const loop = runProcessLoop({
+        input: Readable.from([encodedRequest({
+          jsonrpc: '2.0', id: 9, method: 'kernel.health', params: {},
+        })]),
+        output,
+        diagnostics: new CaptureWriter(),
+        kernel: new AgentKernel({ providers: new Map() }),
+        shutdownGraceMs: 5,
+      });
+      const callback = await callbackReady.promise;
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await loop).forced).toBe(true);
+      const internalListenersAfterReturn = output.listenerCount('error');
+      const errorObserved = deferred<void>();
+      const externalErrorHandler = () => errorObserved.resolve();
+      output.on('error', externalErrorHandler);
+      callback(new Error('late private stdout failure'));
+      await errorObserved.promise;
+
+      expect(internalListenersAfterReturn).toBe(baselineListeners + 1);
+      expect(output.listenerCount('error')).toBe(baselineListeners + 1);
+      output.off('error', externalErrorHandler);
+      expect(output.listenerCount('error')).toBe(baselineListeners);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('recovers valid ids when possible and otherwise uses null for invalid JSON or envelopes', async () => {
     const kernel = new AgentKernel({ providers: new Map() });
     const leaked = 'private prompt must not reach diagnostics';
@@ -988,11 +1776,46 @@ describe('bounded concurrent NDJSON process loop', () => {
     expect(lines.every((line) => responseSchema.safeParse(line).success)).toBe(true);
   });
 
+  it('withholds a hanging explicit cancel response until EOF grace forces shutdown', async () => {
+    const cancelStarted = deferred<void>();
+    let cancelCalls = 0;
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async () => new Promise<{ finalResponse: string }>(() => undefined),
+      cancel: async () => {
+        cancelCalls += 1;
+        cancelStarted.resolve();
+        return new Promise<boolean>(() => undefined);
+      },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const loop = runLoop(kernel, [Buffer.concat([
+      encodedRequest({
+        jsonrpc: '2.0', id: 13, method: 'turns.run',
+        params: { projectId: PROJECT_ID, sessionId: 'session-1', runId: 'hung-cancel', prompt: 'Plan.' },
+      }),
+      encodedRequest({
+        jsonrpc: '2.0', id: 14, method: 'turns.cancel', params: { runId: 'hung-cancel' },
+      }),
+    ])], { shutdownGraceMs: 5 });
+    await cancelStarted.promise;
+
+    const { lines, outcome } = await loop;
+
+    expect(outcome.forced).toBe(true);
+    expect(cancelCalls).toBe(1);
+    expect(lines.some((line) => (
+      typeof line === 'object' && line !== null && 'id' in line && line.id === 14
+    ))).toBe(false);
+  });
+
   it('does not starve cancel behind all 64 active run slots', async () => {
     const turns = new Map<string, ReturnType<typeof deferred<{ finalResponse: string }>>>();
     const cancellations: string[] = [];
     const provider = makeProvider({
-      startSession: async () => ({ sessionId: 'session-1' }),
       runTurn: (input) => {
         const turn = deferred<{ finalResponse: string }>();
         turns.set(input.runId, turn);
@@ -1005,14 +1828,18 @@ describe('bounded concurrent NDJSON process loop', () => {
       },
     });
     const { kernel } = await initializedKernel([provider]);
-    await kernel.dispatch(request(2, 'sessions.start', {
-      projectId: PROJECT_ID, provider: 'codex',
-    }));
+    const sessionIds: string[] = [];
+    for (let index = 0; index < 64; index += 1) {
+      const result = resultOf(await kernel.dispatch(request(2 + index, 'sessions.start', {
+        projectId: PROJECT_ID, provider: 'codex',
+      }))) as { sessionId: string };
+      sessionIds.push(result.sessionId);
+    }
     const requests = Array.from({ length: 64 }, (_, index) => encodedRequest({
       jsonrpc: '2.0', id: 100 + index, method: 'turns.run',
       params: {
         projectId: PROJECT_ID,
-        sessionId: 'session-1',
+        sessionId: sessionIds[index],
         runId: `run-${index}`,
         prompt: 'Plan.',
       },
@@ -1086,6 +1913,81 @@ describe('bounded concurrent NDJSON process loop', () => {
     expect(lines.some((line) => (
       typeof line === 'object' && line !== null && 'id' in line && line.id === 20 && 'result' in line
     ))).toBe(true);
+  });
+
+  it('serves kernel health beyond 64 blocked provider control requests', async () => {
+    const healthProbe = deferred<{ authenticated: boolean; detail: string }>();
+    const provider = makeProvider({ health: async () => healthProbe.promise });
+    const { kernel } = await initializedKernel([provider], {
+      providers: new Map(),
+      providerHealthTimeoutMs: 20,
+    });
+    const providerControls = Array.from({ length: 64 }, (_, index) => encodedRequest({
+      jsonrpc: '2.0', id: 200 + index, method: 'connections.status', params: {},
+    }));
+    const loop = runLoop(kernel, [Buffer.concat([
+      ...providerControls,
+      encodedRequest({ jsonrpc: '2.0', id: 999, method: 'kernel.health', params: {} }),
+    ])], { maxControlRequests: 64, shutdownGraceMs: 5 });
+
+    const { lines, outcome } = await loop;
+    healthProbe.resolve({ authenticated: true, detail: 'private detail' });
+
+    expect(outcome.forced).toBe(true);
+    expect(lines).toContainEqual({
+      jsonrpc: '2.0', id: 999, result: { status: 'ok', protocolVersion: 1 },
+    });
+  });
+
+  it('bounds a kernel-health flood independently when stdout is blocked', async () => {
+    class CountingHealthKernel extends AgentKernel {
+      healthCalls = 0;
+
+      override dispatch(
+        rpcRequest: RpcRequest,
+        emitNotification?: Parameters<AgentKernel['dispatch']>[1],
+      ): Promise<RpcResponse> {
+        if (rpcRequest.method === 'kernel.health') this.healthCalls += 1;
+        return super.dispatch(rpcRequest, emitNotification);
+      }
+    }
+    const kernel = new CountingHealthKernel({ providers: new Map() });
+    const callbackReady = deferred<(error?: Error | null) => void>();
+    const output = new class extends CaptureWriter {
+      override _write(
+        chunk: Buffer | string,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        this.chunks.push(Buffer.from(chunk));
+        callbackReady.resolve(callback);
+      }
+    }();
+    const requests = Array.from({ length: 20 }, (_, index) => encodedRequest({
+      jsonrpc: '2.0', id: 1_000 + index, method: 'kernel.health', params: {},
+    }));
+    vi.useFakeTimers();
+    try {
+      const loop = runProcessLoop({
+        input: Readable.from([Buffer.concat(requests)]),
+        output,
+        diagnostics: new CaptureWriter(),
+        kernel,
+        maxQueuedWriterBytes: 128,
+        writerReservedBytes: 1,
+        shutdownGraceMs: 5,
+      });
+      const callback = await callbackReady.promise;
+      await vi.advanceTimersByTimeAsync(5);
+      const outcome = await loop;
+      callback();
+
+      expect(outcome.forced).toBe(true);
+      expect(kernel.healthCalls).toBeLessThanOrEqual(2);
+      expect(outcome.peakQueuedWriterBytes).toBeLessThanOrEqual(128);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serializes provider events before their matching response', async () => {
@@ -1179,9 +2081,10 @@ describe('bounded concurrent NDJSON process loop', () => {
         }
       }
     }();
+    const { kernel } = await initializedKernel();
     const input = Buffer.concat([
-      encodedRequest({ jsonrpc: '2.0', id: 45, method: 'kernel.health', params: {} }),
-      encodedRequest({ jsonrpc: '2.0', id: 46, method: 'kernel.health', params: {} }),
+      encodedRequest({ jsonrpc: '2.0', id: 45, method: 'connections.status', params: {} }),
+      encodedRequest({ jsonrpc: '2.0', id: 46, method: 'connections.status', params: {} }),
     ]);
     const bufferFrom = vi.spyOn(Buffer, 'from');
     const serializedResponses = () => bufferFrom.mock.calls.filter(([value]) => (
@@ -1196,8 +2099,8 @@ describe('bounded concurrent NDJSON process loop', () => {
         input: Readable.from([input]),
         output,
         diagnostics: new CaptureWriter(),
-        kernel: new AgentKernel({ providers: new Map() }),
-        maxQueuedWriterBytes: 128,
+        kernel,
+        maxQueuedWriterBytes: 100,
         writerReservedBytes: 1,
         shutdownGraceMs: 500,
       });
@@ -1244,9 +2147,10 @@ describe('bounded concurrent NDJSON process loop', () => {
         }
       }
     }();
+    const { kernel } = await initializedKernel();
     const input = Buffer.concat([
       ...[80, 81, 82].map((id) => encodedRequest({
-        jsonrpc: '2.0', id, method: 'kernel.health', params: {},
+        jsonrpc: '2.0', id, method: 'connections.status', params: {},
       })),
       encodedRequest({
         jsonrpc: '2.0', id: 83, method: 'turns.cancel', params: { runId: 'unknown-run' },
@@ -1269,8 +2173,8 @@ describe('bounded concurrent NDJSON process loop', () => {
         input: Readable.from([input]),
         output,
         diagnostics: new CaptureWriter(),
-        kernel: new AgentKernel({ providers: new Map() }),
-        maxQueuedWriterBytes: 220,
+        kernel,
+        maxQueuedWriterBytes: 180,
         writerReservedBytes: 100,
         shutdownGraceMs: 500,
       });
@@ -1367,7 +2271,7 @@ describe('bounded concurrent NDJSON process loop', () => {
         return true;
       },
     });
-    const { kernel } = await initializedKernel([provider]);
+    const { dataRoot, kernel } = await initializedKernel([provider]);
     await kernel.dispatch(request(2, 'sessions.start', {
       projectId: PROJECT_ID, provider: 'codex',
     }));
@@ -1396,7 +2300,11 @@ describe('bounded concurrent NDJSON process loop', () => {
     }();
     const input = Buffer.concat([
       ...[70, 71, 72].map((id) => encodedRequest({
-        jsonrpc: '2.0', id, method: 'kernel.health', params: {},
+        jsonrpc: '2.0', id, method: 'kernel.initialize', params: {
+          protocolVersion: 1,
+          appVersion: '0.5.6',
+          dataDirectory: dataRoot,
+        },
       })),
       encodedRequest({
         jsonrpc: '2.0', id: 73, method: 'turns.run',

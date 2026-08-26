@@ -1,5 +1,9 @@
 import type { ProviderBridge, ProviderId } from './providers/types';
 import {
+  DEFAULT_PROVIDER_HEALTH_TIMEOUT_MS,
+  ProviderHealthMonitor,
+} from './provider-health';
+import {
   AgentEventLimitError,
   KernelError,
   MAX_ACTIVE_RUNS,
@@ -52,6 +56,7 @@ export interface AgentKernelOptions {
   providers: ReadonlyMap<ProviderId, ProviderBridge>;
   environment?: Readonly<Record<string, string | undefined>>;
   limits?: Partial<KernelLimits>;
+  providerHealthTimeoutMs?: number;
   projectWorkspaceResolver?: typeof resolveProjectWorkspace;
 }
 
@@ -60,8 +65,6 @@ interface SessionState {
   projectId: string;
   workingDirectory: string;
 }
-
-type SessionIdentity = Pick<SessionState, 'providerId' | 'projectId'>;
 
 interface ActiveRun {
   provider: ProviderBridge;
@@ -112,9 +115,10 @@ export class AgentKernel {
   private readonly providers: ReadonlyMap<ProviderId, ProviderBridge>;
   private readonly environment: Readonly<Record<string, string | undefined>>;
   private readonly limits: KernelLimits;
+  private readonly providerHealth: ProviderHealthMonitor;
   private readonly projectWorkspaceResolver: typeof resolveProjectWorkspace;
   private readonly sessions = new Map<string, SessionState>();
-  private readonly pendingSessionIds = new Map<string, SessionIdentity>();
+  private readonly sessionReservations = new Map<string, object>();
   private readonly activeRuns = new Map<string, ActiveRun>();
   private pendingSessions = 0;
   private dataRoot: string | null = null;
@@ -123,6 +127,11 @@ export class AgentKernel {
     this.providers = options.providers;
     this.environment = options.environment ?? process.env;
     this.limits = completeLimits(options.limits);
+    const providerHealthTimeoutMs = positiveLimit(
+      options.providerHealthTimeoutMs ?? DEFAULT_PROVIDER_HEALTH_TIMEOUT_MS,
+      DEFAULT_PROVIDER_HEALTH_TIMEOUT_MS,
+    );
+    this.providerHealth = new ProviderHealthMonitor(providerHealthTimeoutMs);
     this.projectWorkspaceResolver = options.projectWorkspaceResolver ?? resolveProjectWorkspace;
   }
 
@@ -179,7 +188,7 @@ export class AgentKernel {
           break;
         case 'turns.cancel':
           this.requireInitialized();
-          result = this.cancelRun((params.data as { runId: string }).runId);
+          result = await this.cancelRun((params.data as { runId: string }).runId);
           break;
       }
       return responseSchema.parse(successResponse(request.id, result));
@@ -236,19 +245,9 @@ export class AgentKernel {
       .filter(([id, provider]) => provider.id === id && providerIdSchema.safeParse(id).success)
       .sort(([left], [right]) => left.localeCompare(right))
       .slice(0, 4);
-    const summaries = await Promise.all(providers.map(async ([id, provider]) => {
-      try {
-        const health = await provider.health();
-        if (typeof health?.authenticated !== 'boolean') throw new Error('invalid health');
-        return {
-          id,
-          authenticated: health.authenticated,
-          detail: health.authenticated ? 'available' : 'authentication_required',
-        };
-      } catch {
-        return { id, authenticated: false, detail: 'unavailable' };
-      }
-    }));
+    const summaries = await Promise.all(providers.map(([id, provider]) => (
+      this.providerHealth.status(id, provider)
+    )));
     return { providers: summaries };
   }
 
@@ -287,7 +286,7 @@ export class AgentKernel {
       }
       const sessionId = sessionIdSchema.safeParse(started?.sessionId);
       if (!sessionId.success) throw new KernelError('provider_failed');
-      if (this.sessions.has(sessionId.data) || this.pendingSessionIds.has(sessionId.data)) {
+      if (this.sessions.has(sessionId.data) || this.sessionReservations.has(sessionId.data)) {
         throw new KernelError('session_conflict');
       }
       this.sessions.set(sessionId.data, {
@@ -315,13 +314,10 @@ export class AgentKernel {
     ) {
       throw new KernelError('session_conflict');
     }
-    if (this.pendingSessionIds.has(params.sessionId)) throw new KernelError('session_conflict');
+    if (this.sessionReservations.has(params.sessionId)) throw new KernelError('session_conflict');
     if (existing === undefined) this.reserveSession();
-    const reservation: SessionIdentity = {
-      providerId: params.provider,
-      projectId: params.projectId,
-    };
-    this.pendingSessionIds.set(params.sessionId, reservation);
+    const reservation = {};
+    this.sessionReservations.set(params.sessionId, reservation);
     try {
       const workingDirectory = await this.workspace(params.projectId);
       try {
@@ -340,8 +336,8 @@ export class AgentKernel {
       });
       return { sessionId: params.sessionId, provider: params.provider, resumed: true };
     } finally {
-      if (this.pendingSessionIds.get(params.sessionId) === reservation) {
-        this.pendingSessionIds.delete(params.sessionId);
+      if (this.sessionReservations.get(params.sessionId) === reservation) {
+        this.sessionReservations.delete(params.sessionId);
       }
       if (existing === undefined) this.pendingSessions -= 1;
     }
@@ -357,10 +353,11 @@ export class AgentKernel {
     },
     emitNotification: NotificationSink,
   ): Promise<RpcResult> {
+    if (this.activeRuns.has(params.runId)) throw new KernelError('run_conflict');
+    if (this.sessionReservations.has(params.sessionId)) throw new KernelError('session_conflict');
     const session = this.sessions.get(params.sessionId);
     if (session === undefined) throw new KernelError('session_not_found');
     if (session.projectId !== params.projectId) throw new KernelError('session_conflict');
-    if (this.activeRuns.has(params.runId)) throw new KernelError('run_conflict');
     if (this.activeRuns.size >= this.limits.maxActiveRuns) {
       throw new KernelError('capacity_exceeded');
     }
@@ -375,6 +372,8 @@ export class AgentKernel {
       acceptingEvents: true,
       cancelPromise: null,
     };
+    const reservation = {};
+    this.sessionReservations.set(params.sessionId, reservation);
     this.activeRuns.set(params.runId, active);
     const emit = (untrustedEvent: unknown) => {
       if (!active.acceptingEvents) return;
@@ -436,6 +435,9 @@ export class AgentKernel {
     } finally {
       active.acceptingEvents = false;
       if (this.activeRuns.get(params.runId) === active) this.activeRuns.delete(params.runId);
+      if (this.sessionReservations.get(params.sessionId) === reservation) {
+        this.sessionReservations.delete(params.sessionId);
+      }
     }
   }
 
@@ -447,11 +449,11 @@ export class AgentKernel {
     throw new AgentEventLimitError();
   }
 
-  private cancelRun(runId: string): RpcResult {
+  private async cancelRun(runId: string): Promise<RpcResult> {
     const active = this.activeRuns.get(runId);
     if (active === undefined) return { runId, cancelled: false };
-    this.cancelOnce(runId, active);
-    return { runId, cancelled: true };
+    const cancelled = await this.cancelOnce(runId, active);
+    return { runId, cancelled };
   }
 
   private cancelOnce(runId: string, active: ActiveRun): Promise<boolean> {
