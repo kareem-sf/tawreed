@@ -314,6 +314,7 @@ export async function runProcessLoop(options: ProcessLoopOptions): Promise<Proce
   }
   const forced = forcedByWriterBackpressure || !tasksDrained || !writerFlushed;
   if (forced) {
+    options.kernel.quiesceActiveRuns();
     await writer.abort();
     return { forced: true, peakQueuedWriterBytes: writer.peakQueuedBytes };
   }

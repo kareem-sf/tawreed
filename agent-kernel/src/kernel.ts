@@ -204,6 +204,10 @@ export class AgentKernel {
     }
   }
 
+  quiesceActiveRuns(): void {
+    for (const active of this.activeRuns.values()) active.acceptingEvents = false;
+  }
+
   private requireInitialized(): void {
     if (this.dataRoot === null) throw new KernelError('not_initialized');
   }

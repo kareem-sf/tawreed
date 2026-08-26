@@ -538,6 +538,71 @@ describe('project context boundary', () => {
       },
     })).rejects.toThrow('project_context_invalid');
   });
+
+  it('rejects final-read workspace replacement instead of returning an escaped cached path', async () => {
+    const dataRoot = await makeDataRoot();
+    const projectPath = join(dataRoot, 'projects', PROJECT_ID);
+    const workspacePath = join(projectPath, 'agent-workspace');
+    const outside = await mkdtemp(join(tmpdir(), 'tawreed-agent-final-workspace-'));
+    temporaryDirectories.push(outside);
+
+    await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID, {
+      afterProjectRecordRead: async (phase) => {
+        if (phase !== 'final') return;
+        await rm(workspacePath, { recursive: true });
+        await symlink(outside, workspacePath, process.platform === 'win32' ? 'junction' : 'dir');
+      },
+    })).rejects.toThrow('project_context_invalid');
+    expect(await realpath(workspacePath)).toBe(await realpath(outside));
+  });
+
+  it('rejects final-read replacement with a different real workspace directory identity', async () => {
+    const dataRoot = await makeDataRoot();
+    const workspacePath = join(dataRoot, 'projects', PROJECT_ID, 'agent-workspace');
+
+    await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID, {
+      afterProjectRecordRead: async (phase) => {
+        if (phase !== 'final') return;
+        await rm(workspacePath, { recursive: true });
+        await mkdir(workspacePath);
+      },
+    })).rejects.toThrow('project_context_invalid');
+  });
+
+  it('rejects same-inode same-size project mutation during the initial record read', async () => {
+    const dataRoot = await makeDataRoot();
+    const projectPath = join(dataRoot, 'projects', PROJECT_ID);
+    const projectRecord = join(projectPath, 'project.json');
+    const workspacePath = join(projectPath, 'agent-workspace');
+    const valid = JSON.stringify(validProjectRecord(PROJECT_ID));
+    const invalid = JSON.stringify(validProjectRecord(PROJECT_ID, { status: 'paused' }));
+    expect(Buffer.byteLength(invalid)).toBe(Buffer.byteLength(valid));
+
+    await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID, {
+      afterProjectRecordRead: async (phase) => {
+        if (phase === 'initial') await writeFile(projectRecord, invalid);
+      },
+      afterWorkspaceReady: async () => {
+        await writeFile(projectRecord, valid);
+      },
+    })).rejects.toThrow('project_context_invalid');
+    expect(await lstat(workspacePath).catch(() => null)).toBeNull();
+  });
+
+  it('rejects same-inode same-size project mutation during the final record read', async () => {
+    const dataRoot = await makeDataRoot();
+    const projectPath = join(dataRoot, 'projects', PROJECT_ID);
+    const projectRecord = join(projectPath, 'project.json');
+    const valid = JSON.stringify(validProjectRecord(PROJECT_ID));
+    const invalid = JSON.stringify(validProjectRecord(PROJECT_ID, { status: 'paused' }));
+    expect(Buffer.byteLength(invalid)).toBe(Buffer.byteLength(valid));
+
+    await expect(resolveProjectWorkspace(dataRoot, PROJECT_ID, {
+      afterProjectRecordRead: async (phase) => {
+        if (phase === 'final') await writeFile(projectRecord, invalid);
+      },
+    })).rejects.toThrow('project_context_invalid');
+  });
 });
 
 describe('agent kernel dispatch', () => {
@@ -1618,6 +1683,58 @@ describe('bounded concurrent NDJSON process loop', () => {
       expect(output.text()).toBe('');
     } finally {
       turn.resolve({ finalResponse: 'cleanup' });
+      vi.useRealTimers();
+    }
+  });
+
+  it('quiesces active emitters before forced writer abort and return', async () => {
+    const turn = deferred<{ finalResponse: string }>();
+    const runStarted = deferred<void>();
+    const providerReturned = deferred<void>();
+    let emitAfterForced!: (event: ProviderEvent) => void;
+    let cancelCalls = 0;
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async (_input, emit) => {
+        emitAfterForced = emit;
+        runStarted.resolve();
+        const result = await turn.promise;
+        providerReturned.resolve();
+        return result;
+      },
+      cancel: async () => {
+        cancelCalls += 1;
+        return true;
+      },
+    });
+    const { kernel } = await initializedKernel([provider]);
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const output = new CaptureWriter();
+    vi.useFakeTimers();
+    try {
+      const loop = runProcessLoop({
+        input: Readable.from([encodedRequest({
+          jsonrpc: '2.0', id: 73, method: 'turns.run',
+          params: { projectId: PROJECT_ID, sessionId: 'session-1', runId: 'forced-emitter', prompt: 'Plan.' },
+        })]),
+        output,
+        diagnostics: new CaptureWriter(),
+        kernel,
+        shutdownGraceMs: 5,
+      });
+      await runStarted.promise;
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await loop).forced).toBe(true);
+      const outputBeforeLateEvent = output.text();
+
+      expect(() => emitAfterForced({ type: 'late', payload: { ignored: true } })).not.toThrow();
+      expect(output.text()).toBe(outputBeforeLateEvent);
+      expect(cancelCalls).toBe(1);
+    } finally {
+      turn.resolve({ finalResponse: 'cleanup' });
+      await providerReturned.promise;
       vi.useRealTimers();
     }
   });

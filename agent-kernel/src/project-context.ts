@@ -1,5 +1,5 @@
-import { constants } from 'node:fs';
-import { lstat, mkdir, open, realpath } from 'node:fs/promises';
+import { constants, type BigIntStats } from 'node:fs';
+import { lstat, mkdir, open, realpath, type FileHandle } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { projectIdSchema } from './protocol';
@@ -34,13 +34,28 @@ function isContained(parent: string, child: string): boolean {
   return path === '' || (!path.startsWith(`..${sep}`) && path !== '..' && !isAbsolute(path));
 }
 
+interface DirectorySnapshot {
+  canonicalPath: string;
+  dev: bigint;
+  ino: bigint;
+}
+
 async function requireRealDirectory(path: string): Promise<string> {
-  const metadata = await lstat(path).catch(fail);
+  return (await requireRealDirectorySnapshot(path)).canonicalPath;
+}
+
+async function requireRealDirectorySnapshot(path: string): Promise<DirectorySnapshot> {
+  const metadata = await lstat(path, { bigint: true }).catch(fail);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) fail();
   const canonical = await realpath(path).catch(fail);
-  const canonicalMetadata = await lstat(canonical).catch(fail);
-  if (!canonicalMetadata.isDirectory() || canonicalMetadata.isSymbolicLink()) fail();
-  return canonical;
+  const canonicalMetadata = await lstat(canonical, { bigint: true }).catch(fail);
+  if (
+    !canonicalMetadata.isDirectory()
+    || canonicalMetadata.isSymbolicLink()
+    || canonicalMetadata.dev !== metadata.dev
+    || canonicalMetadata.ino !== metadata.ino
+  ) fail();
+  return { canonicalPath: canonical, dev: canonicalMetadata.dev, ino: canonicalMetadata.ino };
 }
 
 async function readBoundedRegularFile(
@@ -61,35 +76,56 @@ async function readBoundedRegularFile(
       || opened.dev !== metadata.dev
       || opened.ino !== metadata.ino
     ) fail();
-    const bytes = Buffer.allocUnsafe(MAX_PROJECT_RECORD_BYTES + 1);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const result = await handle.read(bytes, offset, bytes.length - offset, offset).catch(fail);
-      if (result.bytesRead === 0) break;
-      offset += result.bytesRead;
-    }
-    const openedAfterRead = await handle.stat({ bigint: true }).catch(fail);
+    const initialBytes = await readBoundedHandle(handle);
+    const openedAfterInitialRead = await handle.stat({ bigint: true }).catch(fail);
+    if (
+      !sameFileVersion(opened, openedAfterInitialRead)
+      || openedAfterInitialRead.size !== BigInt(initialBytes.length)
+    ) fail();
     try {
       await afterRead?.();
     } catch {
       fail();
     }
+    const finalBytes = await readBoundedHandle(handle);
+    const openedAfterFinalRead = await handle.stat({ bigint: true }).catch(fail);
     const pathAfterRead = await lstat(path, { bigint: true }).catch(fail);
     if (
-      offset > MAX_PROJECT_RECORD_BYTES
-      || openedAfterRead.size !== BigInt(offset)
-      || openedAfterRead.dev !== opened.dev
-      || openedAfterRead.ino !== opened.ino
+      !initialBytes.equals(finalBytes)
+      || !sameFileVersion(openedAfterInitialRead, openedAfterFinalRead)
+      || openedAfterFinalRead.size !== BigInt(finalBytes.length)
       || !pathAfterRead.isFile()
       || pathAfterRead.isSymbolicLink()
-      || pathAfterRead.size !== openedAfterRead.size
-      || pathAfterRead.dev !== opened.dev
-      || pathAfterRead.ino !== opened.ino
+      || !sameFileVersion(openedAfterFinalRead, pathAfterRead)
     ) fail();
-    return Buffer.from(bytes.subarray(0, offset));
+    return finalBytes;
   } finally {
     await handle.close().catch(() => undefined);
   }
+}
+
+async function readBoundedHandle(handle: FileHandle): Promise<Buffer> {
+  const bytes = Buffer.allocUnsafe(MAX_PROJECT_RECORD_BYTES + 1);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const result = await handle.read(bytes, offset, bytes.length - offset, offset).catch(fail);
+    if (result.bytesRead === 0) break;
+    offset += result.bytesRead;
+  }
+  if (offset > MAX_PROJECT_RECORD_BYTES) fail();
+  return Buffer.from(bytes.subarray(0, offset));
+}
+
+function sameFileVersion(
+  left: BigIntStats,
+  right: BigIntStats,
+): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs
+    && left.birthtimeNs === right.birthtimeNs;
 }
 
 function hasTooManyCharacters(value: string, maximum: number): boolean {
@@ -298,7 +334,8 @@ export async function resolveProjectWorkspace(
     fail();
   }
 
-  const canonicalWorkspace = await requireRealDirectory(workspacePath);
+  const workspaceSnapshot = await requireRealDirectorySnapshot(workspacePath);
+  const canonicalWorkspace = workspaceSnapshot.canonicalPath;
   const projectAfterCreate = await requireRealDirectory(projectPath);
   if (
     !sameCanonicalPath(projectAfterCreate, canonicalProject)
@@ -323,5 +360,13 @@ export async function resolveProjectWorkspace(
   );
   const projectAfterFinalRecord = await requireRealDirectory(projectPath);
   if (!sameCanonicalPath(projectAfterFinalRecord, canonicalProject)) fail();
-  return canonicalWorkspace;
+  const finalWorkspace = await requireRealDirectorySnapshot(workspacePath);
+  if (
+    finalWorkspace.dev !== workspaceSnapshot.dev
+    || finalWorkspace.ino !== workspaceSnapshot.ino
+    || !sameCanonicalPath(finalWorkspace.canonicalPath, workspaceSnapshot.canonicalPath)
+    || !isContained(canonicalProject, finalWorkspace.canonicalPath)
+    || relative(canonicalProject, finalWorkspace.canonicalPath) !== WORKSPACE_DIRECTORY
+  ) fail();
+  return finalWorkspace.canonicalPath;
 }
