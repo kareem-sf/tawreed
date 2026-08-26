@@ -1224,6 +1224,128 @@ describe('agent kernel dispatch', () => {
     await running;
   });
 
+  it('preinstalls one cancellation promise across overflow, reentrant explicit, and EOF callers', async () => {
+    const turn = deferred<{ finalResponse: string }>();
+    const runStarted = deferred<void>();
+    const cancellation = deferred<boolean>();
+    const kernelHolder: { current: AgentKernel | null } = { current: null };
+    let capturedEmit!: (event: ProviderEvent) => void;
+    let reentrantExplicit!: Promise<RpcResponse>;
+    let cancelCalls = 0;
+    const provider = makeProvider({
+      startSession: async () => ({ sessionId: 'session-1' }),
+      runTurn: async (_input, emit) => {
+        capturedEmit = emit;
+        runStarted.resolve();
+        return turn.promise;
+      },
+      cancel: ((runId: string) => {
+        cancelCalls += 1;
+        if (cancelCalls === 1) {
+          capturedEmit({ type: 'progress', payload: { step: 1 } });
+          try {
+            capturedEmit({ type: 'progress', payload: { step: 2 } });
+          } catch {
+            // Overflow re-enters cancelOnce synchronously.
+          }
+          const activeKernel = kernelHolder.current;
+          if (activeKernel === null) throw new Error('kernel not ready');
+          reentrantExplicit = activeKernel.dispatch(request(50, 'turns.cancel', { runId }));
+          activeKernel.requestCancellationForActiveRuns();
+        }
+        return cancellation.promise;
+      }) as ProviderBridge['cancel'],
+    });
+    const { kernel } = await initializedKernel([provider], {
+      providers: new Map(),
+      limits: { maxEventsPerRun: 1 },
+    });
+    kernelHolder.current = kernel;
+    await kernel.dispatch(request(2, 'sessions.start', {
+      projectId: PROJECT_ID, provider: 'codex',
+    }));
+    const running = kernel.dispatch(request(3, 'turns.run', {
+      projectId: PROJECT_ID, sessionId: 'session-1', runId: 'reentrant-cancel', prompt: 'Plan.',
+    }));
+    await runStarted.promise;
+
+    const explicit = kernel.dispatch(request(4, 'turns.cancel', { runId: 'reentrant-cancel' }));
+    try {
+      expect(cancelCalls).toBe(1);
+      cancellation.resolve(true);
+      expect(resultOf(await explicit)).toEqual({ runId: 'reentrant-cancel', cancelled: true });
+      expect(resultOf(await reentrantExplicit)).toEqual({
+        runId: 'reentrant-cancel', cancelled: true,
+      });
+      expect(cancelCalls).toBe(1);
+      turn.resolve({ finalResponse: 'ignored after overflow' });
+      expect(errorCodeOf(await running)).toBe('agent_event_limit');
+    } finally {
+      cancellation.resolve(true);
+      turn.resolve({ finalResponse: 'cleanup' });
+      await Promise.allSettled([explicit, reentrantExplicit, running]);
+    }
+  });
+
+  it('settles one memoized cancellation exactly once for every provider outcome', async () => {
+    const hostileThenable = {
+      then(resolveValue: (value: boolean) => void, rejectValue: (error: Error) => void) {
+        resolveValue(true);
+        rejectValue(new Error('late rejection'));
+        throw new Error('late throw');
+      },
+    };
+    const cases: Array<[string, () => unknown, boolean]> = [
+      ['sync throw', () => { throw new Error('private sync failure'); }, false],
+      ['hostile thenable', () => hostileThenable, true],
+      ['async rejection', () => Promise.reject(new Error('private async failure')), false],
+      ['provider false', () => Promise.resolve(false), false],
+      ['provider true', () => Promise.resolve(true), true],
+    ];
+
+    for (const [label, providerResult, expected] of cases) {
+      const turn = deferred<{ finalResponse: string }>();
+      const runStarted = deferred<void>();
+      let cancelCalls = 0;
+      const provider = makeProvider({
+        startSession: async () => ({ sessionId: 'session-1' }),
+        runTurn: async () => {
+          runStarted.resolve();
+          return turn.promise;
+        },
+        cancel: (() => {
+          cancelCalls += 1;
+          return providerResult();
+        }) as ProviderBridge['cancel'],
+      });
+      const { kernel: outcomeKernel } = await initializedKernel([provider]);
+      await outcomeKernel.dispatch(request(2, 'sessions.start', {
+        projectId: PROJECT_ID, provider: 'codex',
+      }));
+      const running = outcomeKernel.dispatch(request(3, 'turns.run', {
+        projectId: PROJECT_ID, sessionId: 'session-1', runId: `cancel-${label}`, prompt: 'Plan.',
+      }));
+      await runStarted.promise;
+
+      const first = outcomeKernel.dispatch(request(4, 'turns.cancel', {
+        runId: `cancel-${label}`,
+      }));
+      const second = outcomeKernel.dispatch(request(5, 'turns.cancel', {
+        runId: `cancel-${label}`,
+      }));
+
+      expect(resultOf(await first), label).toEqual({
+        runId: `cancel-${label}`, cancelled: expected,
+      });
+      expect(resultOf(await second), label).toEqual({
+        runId: `cancel-${label}`, cancelled: expected,
+      });
+      expect(cancelCalls, label).toBe(1);
+      turn.resolve({ finalResponse: 'finished' });
+      await running;
+    }
+  });
+
   it('latches event-count overflow, cancels once, and wins even when the provider swallows emits', async () => {
     const cancellations: string[] = [];
     const provider = makeProvider({

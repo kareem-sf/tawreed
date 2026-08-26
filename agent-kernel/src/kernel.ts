@@ -462,13 +462,18 @@ export class AgentKernel {
 
   private cancelOnce(runId: string, active: ActiveRun): Promise<boolean> {
     if (active.cancelPromise === null) {
+      let settleCancellation!: (cancelled: boolean) => void;
+      const ownedCancellation = new Promise<boolean>((resolveCancellation) => {
+        settleCancellation = resolveCancellation;
+      });
+      active.cancelPromise = ownedCancellation;
       try {
-        active.cancelPromise = Promise.resolve(active.provider.cancel(runId)).then(
-          (cancelled) => cancelled === true,
-          () => false,
+        void Promise.resolve(active.provider.cancel(runId)).then(
+          (cancelled) => settleCancellation(cancelled === true),
+          () => settleCancellation(false),
         );
       } catch {
-        active.cancelPromise = Promise.resolve(false);
+        settleCancellation(false);
       }
       void active.cancelPromise.catch(() => undefined);
     }
