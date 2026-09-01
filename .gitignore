@@ -53,6 +53,8 @@ public/video/
 .DS_Store
 Thumbs.db
 Desktop.ini
+test-results/
+playwright-report/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
