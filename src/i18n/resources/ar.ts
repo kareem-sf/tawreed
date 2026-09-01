@@ -15,7 +15,6 @@ const ar = {
   "openWorkbookDetail": "فتح ملف حزم العمل المنشأ مباشرة في Excel",
   "settings": "الإعدادات",
   "apiKey": "مفتاح API",
-  "apiKeyHint": "يُحفظ في مخزن بيانات الاعتماد الآمن لنظام التشغيل (ويُستخدم {{path}} فقط كخيار توافق خاص) — ولا يُرسل إلا إلى api.anthropic.com.",
   "save": "حفظ",
   "remove": "إزالة",
   "keySaved": "تم حفظ المفتاح",

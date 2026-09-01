@@ -15,7 +15,6 @@ const en = {
   "openWorkbookDetail": "Open this generated work-package workbook in Excel",
   "settings": "Settings",
   "apiKey": "API key",
-  "apiKeyHint": "Stored in your operating system credential store (with {{path}} only as a private compatibility fallback) — sent only to api.anthropic.com.",
   "save": "Save",
   "remove": "Remove",
   "keySaved": "Key saved",

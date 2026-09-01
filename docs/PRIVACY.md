@@ -22,8 +22,11 @@ identifiers, descriptions, units, quantities, grounded project candidates, and
 relevant comments be sent to that provider:
 
 - Anthropic receives requests through `api.anthropic.com`. Its key is stored in
-  the operating-system credential manager. A private `~/.tawreed/.env` fallback
-  is used only when a native credential service is unavailable.
+  the operating-system credential manager, as every provider key is. If that
+  store is unavailable the key is not saved at all: Tawreed reports the failure
+  rather than writing a key to disk. A key left in `~/.tawreed/.env` by a build
+  before this rule is read once, moved into the credential manager, and cleared
+  from the file.
 - Codex receives prompts through the official local Codex CLI and the user's
   ChatGPT authentication. Tawreed does not read Codex OAuth tokens. Each job is
   ephemeral, schema-constrained, read-only, cancellable, and runs in a fresh

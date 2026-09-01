@@ -1,7 +1,7 @@
 // Local state: ~/.tawreed — created on first run, reused forever after.
 // Layout:
-//   OS credential store        Anthropic API key (preferred)
-//   ~/.tawreed/.env            owner-only fallback/legacy key storage
+//   OS credential store        every provider API key — the only place they are written
+//   ~/.tawreed/.env            legacy key location, read once then migrated and cleared
 //   ~/.tawreed/settings.json   non-secret app settings
 //   ~/.tawreed/history.sqlite  run history
 //   ~/.tawreed/output/         generated work-package workbooks
@@ -77,19 +77,9 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
         }
     }
 
-    let env_file = dir.join(".env");
-    if !env_file.exists() {
-        fs::write(
-            &env_file,
-            "# Tawreed local fallback configuration — this file stays on your machine.\n\
-             # Keys saved in Settings use the operating system credential store when available.\n\
-             # A manually supplied or compatibility fallback key can be placed here:\n\
-             ANTHROPIC_API_KEY=\n",
-        )
-        .map_err(|e| format!("create .env template: {e}"))?;
-        #[cfg(unix)]
-        set_private_permissions(&env_file);
-    }
+    // No .env template is created any more. It only ever invited users to type a key into
+    // a file, and keys now live solely in the OS credential store. An existing file is
+    // still read once, migrated, and cleared — see api_key.
     let settings = dir.join("settings.json");
     let settings_existed = settings.exists();
     let current_settings = fs::read_to_string(&settings)
@@ -352,7 +342,11 @@ fn legacy_file_api_key() -> Option<String> {
 }
 
 /// API key resolution order: process env -> OS credential store -> legacy private file.
-/// A legacy file key is migrated into secure storage opportunistically.
+///
+/// The file is read only to migrate away from it: a key found there is copied into the
+/// credential store and the file entry cleared, so an install predating keychain-only
+/// storage keeps working without the user re-entering anything. Nothing writes a key back
+/// to the file — see write_env_key.
 pub fn api_key() -> Option<String> {
     if let Ok(k) = std::env::var("ANTHROPIC_API_KEY") {
         if !k.trim().is_empty() {
@@ -370,7 +364,7 @@ pub fn api_key() -> Option<String> {
     }
     let legacy = legacy_file_api_key()?;
     if let Ok(entry) = credential_entry() {
-        if entry.set_password(&legacy).is_ok() && write_env_file_key(None).is_ok() {
+        if entry.set_password(&legacy).is_ok() && clear_env_file_key().is_ok() {
             log_line("migrated Anthropic API key to operating system credential store");
         }
     }
@@ -516,7 +510,7 @@ fn set_private_permissions(path: &std::path::Path) {
 /// `ANTHROPIC_API_KEY=value` form. An optional leading `export ` is tolerated (dotenvy
 /// honors it too) so a pasted shell-style line is rewritten in place instead of ending
 /// up duplicated by an appended canonical line.
-fn rewrite_env_key(content: &str, value: Option<&str>) -> String {
+fn clear_env_key(content: &str) -> String {
     let mut replaced = false;
     let mut lines: Vec<String> = content
         .lines()
@@ -525,23 +519,28 @@ fn rewrite_env_key(content: &str, value: Option<&str>) -> String {
             let entry = trimmed.strip_prefix("export ").unwrap_or(trimmed);
             if entry.starts_with("ANTHROPIC_API_KEY=") {
                 replaced = true;
-                format!("ANTHROPIC_API_KEY={}", value.unwrap_or(""))
+                "ANTHROPIC_API_KEY=".to_string()
             } else {
                 line.to_string()
             }
         })
         .collect();
     if !replaced {
-        lines.push(format!("ANTHROPIC_API_KEY={}", value.unwrap_or("")));
+        lines.push("ANTHROPIC_API_KEY=".to_string());
     }
     lines.join("\n") + "\n"
 }
 
 /// Read-modify-write ~/.tawreed/.env, preserving unrelated lines and comments.
-fn write_env_file_key(value: Option<&str>) -> Result<(), String> {
+fn clear_env_file_key() -> Result<(), String> {
     let path = env_path()?;
+    // Nothing to clear, and creating the file here would reintroduce the very artifact
+    // this change removes.
+    if !path.exists() {
+        return Ok(());
+    }
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let content = rewrite_env_key(&existing, value);
+    let content = clear_env_key(&existing);
     // The .env holds the API key — on Unix it must never be world-readable. mode(0o600)
     // covers a freshly created file; set_private_permissions fixes one created earlier
     // with looser permissions (mode() is a no-op unless the file is being created).
@@ -569,26 +568,24 @@ fn write_env_file_key(value: Option<&str>) -> Result<(), String> {
 /// have no Secret Service; in that case retain the owner-only file fallback.
 pub fn write_env_key(value: Option<&str>) -> Result<(), String> {
     match value {
-        Some(secret) => match credential_entry().and_then(|entry| {
-            entry.set_password(secret).map_err(|error| {
-                format!("save API key in operating system credential store: {error}")
-            })
-        }) {
-            Ok(()) => {
-                write_env_file_key(None)?;
-                log_line("Anthropic API key stored in operating system credential store");
-                Ok(())
-            }
-            Err(error) => {
-                log_line(&format!(
-                    "credential store unavailable; using private file fallback: {error}"
-                ));
-                write_env_file_key(Some(secret))
-            }
-        },
+        Some(secret) => {
+            // Keychain or nothing. Falling back to a plaintext file on disk would leave
+            // Anthropic as the one provider that can silently downgrade its own storage,
+            // and a key file is precisely what a distributed app should never create.
+            // Gemini, Grok and the compatible endpoint have always behaved this way.
+            credential_entry().and_then(|entry| {
+                entry.set_password(secret).map_err(|error| {
+                    format!("save API key in operating system credential store: {error}")
+                })
+            })?;
+            // Purge any key left by an older build that did use the file.
+            clear_env_file_key()?;
+            log_line("Anthropic API key stored in operating system credential store");
+            Ok(())
+        }
         None => {
             // Always clear the fallback file even if the platform store is currently locked.
-            write_env_file_key(None)?;
+            clear_env_file_key()?;
             match credential_entry() {
                 Ok(entry) => match entry.delete_credential() {
                     Ok(()) | Err(keyring::v1::Error::NoEntry) => Ok(()),
@@ -708,7 +705,7 @@ pub fn log_line(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate_runs_table, migrate_settings, rewrite_env_key, validate_setting};
+    use super::{clear_env_key, migrate_runs_table, migrate_settings, validate_setting};
 
     #[test]
     fn every_provider_can_be_saved_as_the_active_provider() {
@@ -737,20 +734,23 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_env_key_rewrites_plain_and_export_lines_in_canonical_form() {
-        let out = rewrite_env_key(
+    fn clear_env_key_blanks_plain_and_export_lines_and_keeps_the_rest() {
+        let out = clear_env_key(
             "# comment\nANTHROPIC_API_KEY=old\nexport ANTHROPIC_API_KEY=older\nOTHER=1\n",
-            Some("new"),
         );
         assert_eq!(
             out,
-            "# comment\nANTHROPIC_API_KEY=new\nANTHROPIC_API_KEY=new\nOTHER=1\n"
+            "# comment\nANTHROPIC_API_KEY=\nANTHROPIC_API_KEY=\nOTHER=1\n"
+        );
+        assert!(
+            !out.contains("old"),
+            "a cleared file must not retain the secret"
         );
     }
 
     #[test]
-    fn rewrite_env_key_ignores_comments_and_appends_when_missing() {
-        let out = rewrite_env_key("# ANTHROPIC_API_KEY=commented\n", None);
+    fn clear_env_key_ignores_comments_and_appends_when_missing() {
+        let out = clear_env_key("# ANTHROPIC_API_KEY=commented\n");
         assert_eq!(out, "# ANTHROPIC_API_KEY=commented\nANTHROPIC_API_KEY=\n");
     }
 
