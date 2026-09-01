@@ -2,7 +2,9 @@
 name = "tawreed"
 version = "0.5.6"
 edition = "2021"
-rust-version = "1.88"
+# Matches the toolchain CI pins and tests. Raising this is a breaking change for
+# anyone building from source, so only move it deliberately alongside CI.
+rust-version = "1.97"
 description = "Portable BOQ → work-package workbook converter"
 license = "MIT"
 authors = ["Kareem Safwat"]

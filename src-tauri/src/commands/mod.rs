@@ -3,7 +3,10 @@
 //
 // Split by domain into submodules; every #[tauri::command] function keeps its original
 // name and is re-exported here unchanged so `commands::function_name` paths in main.rs
-// continue to work without modification.
+// continue to work without modification. Glob re-exports are required (not explicit
+// named ones) because the `#[tauri::command]` macro attaches hidden sibling items
+// (e.g. `__cmd__foo`) next to each function that `tauri::generate_handler!` also needs
+// to resolve at `commands::foo`.
 mod ai;
 mod codex_provider;
 mod credentials;
@@ -11,26 +14,9 @@ mod history;
 mod revisions;
 mod system;
 
-pub use ai::{
-    cancel_ai_job, compatible_complete, compatible_test, gemini_complete, gemini_models,
-    gemini_test, grok_complete, grok_models, grok_test, llm_complete,
-};
-pub use codex_provider::{
-    codex_complete, codex_install, codex_login, codex_models, codex_status,
-};
-pub use credentials::{
-    delete_api_key, delete_compatible_api_key, delete_gemini_api_key, delete_grok_api_key,
-    set_api_key, set_compatible_api_key, set_gemini_api_key, set_grok_api_key,
-};
-pub use history::{
-    list_classification_memory, list_runs, record_run, save_classification_memory,
-    ClassificationMemoryEntry,
-};
-pub use revisions::{
-    discard_revision, reserve_revision, write_revision_bundle, RevisionArtifact,
-    RevisionOutput, RevisionReservation,
-};
-pub use system::{
-    app_log, bootstrap, get_settings, open_generated_folder, open_logs_folder,
-    open_output_folder, open_url, open_workbook, read_input_file, set_setting,
-};
+pub use ai::*;
+pub use codex_provider::*;
+pub use credentials::*;
+pub use history::*;
+pub use revisions::*;
+pub use system::*;

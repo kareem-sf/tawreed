@@ -18,9 +18,11 @@ pub struct BootstrapInfo {
     pub data_dir: String,
     pub has_api_key: bool,
     pub has_compatible_key: bool,
+    pub has_gemini_key: bool,
+    pub has_grok_key: bool,
     pub run_count: i64,
     pub version: String,
-    /// "codex" | "anthropic" | "none" — resolved AI provider for this session.
+    /// "codex" | "anthropic" | "compatible" | "gemini" | "grok" | "none" — resolved AI provider for this session.
     pub provider: String,
     pub provider_preference: String,
     pub codex_installed: bool,
@@ -44,7 +46,7 @@ fn db_path() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("history.sqlite"))
 }
 
-fn log_path() -> Result<PathBuf, String> {
+pub fn log_path() -> Result<PathBuf, String> {
     Ok(data_dir()?.join("logs").join("app.log"))
 }
 
@@ -103,6 +105,8 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
     let codex = crate::codex::detect(false);
     let has_key = api_key().is_some();
     let has_compatible_key = compatible_api_key().is_some();
+    let has_gemini_key = gemini_api_key().is_some();
+    let has_grok_key = grok_api_key().is_some();
     let settings_value = get_settings();
     let onboarding_step = settings_value
         .pointer("/onboarding/step")
@@ -119,7 +123,12 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
     let provider_preference = settings_value
         .get("activeProvider")
         .and_then(serde_json::Value::as_str)
-        .filter(|value| matches!(*value, "codex" | "anthropic" | "compatible"))
+        .filter(|value| {
+            matches!(
+                *value,
+                "codex" | "anthropic" | "compatible" | "gemini" | "grok"
+            )
+        })
         .unwrap_or("codex")
         .to_string();
     let provider = match provider_preference.as_str() {
@@ -127,6 +136,8 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
         "codex" if codex.installed && codex.authenticated => "codex",
         "anthropic" if has_key => "anthropic",
         "compatible" if has_compatible_key => "compatible",
+        "gemini" if has_gemini_key => "gemini",
+        "grok" if has_grok_key => "grok",
         _ => "none",
     };
 
@@ -147,6 +158,8 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
         data_dir: dir.to_string_lossy().to_string(),
         has_api_key: has_key,
         has_compatible_key,
+        has_gemini_key,
+        has_grok_key,
         run_count,
         version: env!("CARGO_PKG_VERSION").to_string(),
         provider: provider.to_string(),
@@ -310,6 +323,8 @@ fn migrate_runs_table(conn: &rusqlite::Connection) -> Result<(), String> {
 const KEYRING_SERVICE: &str = "com.tawreed.desktop";
 const KEYRING_ACCOUNT: &str = "anthropic-api-key";
 const COMPATIBLE_KEYRING_ACCOUNT: &str = "compatible-provider-api-key";
+const GEMINI_KEYRING_ACCOUNT: &str = "gemini-api-key";
+const GROK_KEYRING_ACCOUNT: &str = "grok-api-key";
 
 fn credential_entry_for(account: &str) -> Result<keyring::v1::Entry, String> {
     keyring::v1::Entry::new(KEYRING_SERVICE, account)
@@ -379,10 +394,12 @@ const ALLOWED_SETTINGS: &[&str] = &[
     "activeProvider",
     "onboarding",
     "compatible",
+    "gemini",
+    "grok",
 ];
 
-/// Merge one key into settings.json.
-pub fn set_setting(key: &str, value: serde_json::Value) -> Result<(), String> {
+/// Pure validation, split out from `set_setting` so it's testable without touching disk.
+fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(), String> {
     if !ALLOWED_SETTINGS.contains(&key) {
         return Err(format!("unknown setting: {key}"));
     }
@@ -397,9 +414,14 @@ pub fn set_setting(key: &str, value: serde_json::Value) -> Result<(), String> {
             return Err("processingMode must be ask, online, or offline".into());
         }
         "activeProvider"
-            if !matches!(value.as_str(), Some("codex" | "anthropic" | "compatible")) =>
+            if !matches!(
+                value.as_str(),
+                Some("codex" | "anthropic" | "compatible" | "gemini" | "grok")
+            ) =>
         {
-            return Err("activeProvider must be codex, anthropic, or compatible".into());
+            return Err(
+                "activeProvider must be codex, anthropic, compatible, gemini, or grok".into(),
+            );
         }
         "onboarding" => {
             let version = value.get("version").and_then(serde_json::Value::as_u64);
@@ -422,8 +444,20 @@ pub fn set_setting(key: &str, value: serde_json::Value) -> Result<(), String> {
         "model" if value.as_str().is_none_or(|text| text.len() > 160) => {
             return Err("invalid model setting".into());
         }
+        "gemini" | "grok" => {
+            let model = value.get("model").and_then(serde_json::Value::as_str);
+            if model.is_none_or(|text| text.len() > 160) {
+                return Err(format!("invalid {key} settings"));
+            }
+        }
         _ => {}
     }
+    Ok(())
+}
+
+/// Merge one key into settings.json.
+pub fn set_setting(key: &str, value: serde_json::Value) -> Result<(), String> {
+    validate_setting(key, &value)?;
     let path = data_dir()?.join("settings.json");
     let mut settings = get_settings();
     if !settings.is_object() {
@@ -596,6 +630,50 @@ pub fn write_compatible_api_key(value: Option<&str>) -> Result<(), String> {
     }
 }
 
+fn named_api_key(account: &str, env_var: &str) -> Option<String> {
+    if let Ok(key) = std::env::var(env_var) {
+        if !key.trim().is_empty() {
+            return Some(key.trim().to_string());
+        }
+    }
+    let entry = credential_entry_for(account).ok()?;
+    entry
+        .get_password()
+        .ok()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+}
+
+fn write_named_api_key(account: &str, label: &str, value: Option<&str>) -> Result<(), String> {
+    let entry = credential_entry_for(account)?;
+    match value {
+        Some(secret) if !secret.trim().is_empty() => entry
+            .set_password(secret.trim())
+            .map_err(|error| format!("save {label} key: {error}")),
+        Some(_) => Err(format!("Empty {label} key")),
+        None => match entry.delete_credential() {
+            Ok(()) | Err(keyring::v1::Error::NoEntry) => Ok(()),
+            Err(error) => Err(format!("remove {label} key: {error}")),
+        },
+    }
+}
+
+pub fn gemini_api_key() -> Option<String> {
+    named_api_key(GEMINI_KEYRING_ACCOUNT, "TAWREED_GEMINI_API_KEY")
+}
+
+pub fn write_gemini_api_key(value: Option<&str>) -> Result<(), String> {
+    write_named_api_key(GEMINI_KEYRING_ACCOUNT, "Gemini", value)
+}
+
+pub fn grok_api_key() -> Option<String> {
+    named_api_key(GROK_KEYRING_ACCOUNT, "TAWREED_GROK_API_KEY")
+}
+
+pub fn write_grok_api_key(value: Option<&str>) -> Result<(), String> {
+    write_named_api_key(GROK_KEYRING_ACCOUNT, "Grok", value)
+}
+
 pub fn log_line(message: &str) {
     // Strip newlines so a caller-supplied message can't forge extra log lines.
     let sanitized = message.replace(['\n', '\r'], " ");
@@ -606,7 +684,10 @@ pub fn log_line(message: &str) {
             .unwrap_or(0);
         if let Ok(meta) = std::fs::metadata(&path) {
             if meta.len() > 10 * 1024 * 1024 {
-                let _ = std::fs::write(&path, ""); // truncate
+                // Rotate instead of truncating so a crash right after the threshold
+                // doesn't wipe the evidence needed to diagnose it.
+                let rotated = path.with_extension("log.1");
+                let _ = std::fs::rename(&path, &rotated);
             }
         }
         let _ = fs::OpenOptions::new()
@@ -622,7 +703,33 @@ pub fn log_line(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate_runs_table, migrate_settings, rewrite_env_key};
+    use super::{migrate_runs_table, migrate_settings, rewrite_env_key, validate_setting};
+
+    #[test]
+    fn every_provider_can_be_saved_as_the_active_provider() {
+        for provider in ["codex", "anthropic", "compatible", "gemini", "grok"] {
+            assert!(
+                validate_setting("activeProvider", &serde_json::json!(provider)).is_ok(),
+                "activeProvider should accept {provider}",
+            );
+        }
+        assert!(validate_setting("activeProvider", &serde_json::json!("bogus")).is_err());
+    }
+
+    #[test]
+    fn every_named_provider_settings_key_is_allowed_and_validated() {
+        for provider in ["gemini", "grok"] {
+            assert!(
+                validate_setting(provider, &serde_json::json!({ "model": "some-model" })).is_ok(),
+                "{provider} settings should be accepted",
+            );
+            assert!(
+                validate_setting(provider, &serde_json::json!({ "model": "x".repeat(161) }))
+                    .is_err(),
+                "{provider} should reject an overlong model name",
+            );
+        }
+    }
 
     #[test]
     fn rewrite_env_key_rewrites_plain_and_export_lines_in_canonical_form() {
