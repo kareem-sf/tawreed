@@ -151,6 +151,30 @@ function enforceBoundaries() {
       errors.push(`Module-size budget exceeded: ${name} has ${lines} lines (limit ${budget})`);
     }
   }
+  checkRustBudgets();
+}
+
+// Rust modules are not part of the TypeScript import graph, so they are budgeted here.
+// The two named files still exceed the general limit; their allowances are a ratchet
+// pinned at today's size so they can only shrink. Split them and delete these entries —
+// commands/ai was split this way and now needs no exemption at all.
+function checkRustBudgets() {
+  const rustBudgets = new Map([
+    ['src-tauri/src/codex.rs', 910],
+    ['src-tauri/src/store.rs', 810],
+  ]);
+  const rustRoot = resolve(root, 'src-tauri/src');
+  const rustFiles = readdirSync(rustRoot, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && extname(entry.name) === '.rs')
+    .map((entry) => join(entry.parentPath ?? entry.path, entry.name));
+  for (const path of rustFiles) {
+    const name = projectPath(path);
+    const lines = readFileSync(path, 'utf8').split(/\r?\n/).length;
+    const budget = rustBudgets.get(name) ?? 500;
+    if (lines > budget) {
+      errors.push(`Module-size budget exceeded: ${name} has ${lines} lines (limit ${budget})`);
+    }
+  }
 }
 
 detectCycles();
