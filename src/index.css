@@ -19,6 +19,16 @@ body {
   background: transparent;
   border-radius: 14px;
   user-select: none;
+  font-family: 'Public Sans', 'Segoe UI', system-ui, sans-serif;
+}
+
+.font-serif-display {
+  font-family: 'Domine', 'Segoe UI', system-ui, serif;
+}
+
+.font-mono-figures {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Opt back into selection for copyable text (output paths, error messages). */
@@ -147,7 +157,7 @@ body {
 .titlebar-btn:focus-visible,
 .titlebar-nav:focus-visible {
   opacity: 1;
-  outline: 2px solid #9a6700;
+  outline: 2px solid var(--gold-deep);
   outline-offset: 2px;
 }
 
@@ -210,6 +220,18 @@ body {
 }
 
 :root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f1f1f2;
+  --ink: #18181b;
+  --ink-dim: #52525b;
+  --ink-faint: #a1a1aa;
+  --gold: #a17925;
+  --gold-deep: #9a6700;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-soft: rgba(0, 0, 0, 0.05);
+  --danger: #c2472e;
+
   --legend: oklch(1 0 0);
   --legend-foreground: oklch(0.141 0.005 285.823);
   --legend-muted: oklch(0.967 0.001 286.375);
@@ -218,6 +240,18 @@ body {
 }
 
 [data-mantine-color-scheme='dark'] {
+  --bg: #0a0a10;
+  --surface: #16161c;
+  --surface-2: #1e1e26;
+  --ink: #fafafa;
+  --ink-dim: #a1a1aa;
+  --ink-faint: #71717a;
+  --gold: #a17925;
+  --gold-deep: #9a6700;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-soft: rgba(255, 255, 255, 0.05);
+  --danger: #e2745a;
+
   --legend: oklch(0.21 0.006 285.885);
   --legend-foreground: oklch(0.985 0 0);
   --legend-muted: oklch(0.274 0.006 286.033);
@@ -231,4 +265,15 @@ body {
   --color-legend-muted: var(--legend-muted);
   --color-legend-muted-foreground: var(--legend-muted-foreground);
   --color-legend-track: var(--legend-track);
+
+  --color-gold: var(--gold);
+  --color-gold-deep: var(--gold-deep);
+  --color-ledger-bg: var(--bg);
+  --color-ledger-surface: var(--surface);
+  --color-ledger-surface-2: var(--surface-2);
+  --color-ledger-ink: var(--ink);
+  --color-ledger-ink-dim: var(--ink-dim);
+  --color-ledger-ink-faint: var(--ink-faint);
+  --color-ledger-line: var(--line);
+  --color-ledger-danger: var(--danger);
 }

@@ -12,6 +12,7 @@ interface Props {
   update: UpdateState;
   onChange: (dialog: AppDialog) => void;
   onSettingsClosed: () => void;
+  onProviderChanged: () => void;
   onRunOnboarding: () => void;
   onCheckUpdate: () => Promise<void>;
 }
@@ -22,6 +23,7 @@ export function AppDialogs({
   update,
   onChange,
   onSettingsClosed,
+  onProviderChanged,
   onRunOnboarding,
   onCheckUpdate,
 }: Props) {
@@ -43,6 +45,9 @@ export function AppDialogs({
         <SettingsModal
           hasKey={boot.has_api_key}
           hasCompatibleKey={boot.has_compatible_key}
+          hasGeminiKey={boot.has_gemini_key}
+          hasGrokKey={boot.has_grok_key}
+          onProviderChanged={onProviderChanged}
           onOpenAbout={() => onChange('about')}
           onRunOnboarding={() => {
             onChange(null);

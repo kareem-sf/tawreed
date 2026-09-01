@@ -3,9 +3,12 @@ import { useTranslation } from 'react-i18next';
 import {
   appLog,
   discardRevision,
+  getSettings,
   listClassificationMemory,
   makeCodexTransport,
   makeCompatibleTransport,
+  makeGeminiTransport,
+  makeGrokTransport,
   makeLlmTransport,
   openWorkbook,
   recordRun,
@@ -16,7 +19,7 @@ import {
   type BootstrapInfo,
   type RevisionOutput,
 } from '../../bridge';
-import { DEFAULT_MODEL, UNCLASSIFIED_CODE } from '../../../engine/classify/llm';
+import { DEFAULT_MODEL } from '../../../engine/classify/llm';
 import {
   applyClassificationMemory,
   memoryFromApprovedReview,
@@ -25,7 +28,8 @@ import {
 } from '../../../engine/agent-workflow';
 import { buildPackages, validate } from '../../../engine/validate';
 import type { AiProvider, WorkPackage } from '../../../shared/types';
-import { generateInWorker, inspectInWorker, WorkerCancelledError } from '../../boq-worker';
+import { generateInWorker, inspectInWorker } from '../../boq-worker';
+import { errorMessage, friendlyErrorMessage, isCancellation } from './errors';
 import { workflowReducer } from './reducer';
 import { initialWorkflowState, type PendingInspection, type PipelineData } from './types';
 
@@ -37,19 +41,25 @@ interface UseBoqWorkflowOptions {
   processingMode: ProcessingMode;
 }
 
-function isCancellation(reason: unknown): boolean {
-  return reason instanceof WorkerCancelledError
-    || (reason instanceof Error && reason.name === 'AbortError');
-}
-
-function errorMessage(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
-}
-
-function providerModel(provider: AiProvider, modelSlug: string | null): string {
+async function providerModel(provider: AiProvider, modelSlug: string | null): Promise<string> {
   if (provider === 'codex') return modelSlug ?? '';
   if (provider === 'anthropic') return DEFAULT_MODEL;
-  if (provider === 'compatible') return 'configured service';
+  if (provider === 'compatible') {
+    const settings = await getSettings();
+    const compatible = settings.compatible;
+    const model = compatible && typeof compatible === 'object'
+      ? (compatible as Record<string, unknown>).model
+      : null;
+    return typeof model === 'string' && model ? model : 'configured service';
+  }
+  if (provider === 'gemini' || provider === 'grok') {
+    const settings = await getSettings();
+    const named = settings[provider];
+    const model = named && typeof named === 'object'
+      ? (named as Record<string, unknown>).model
+      : null;
+    return typeof model === 'string' && model ? model : '';
+  }
   return '';
 }
 
@@ -88,7 +98,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
     dispatch({ type: 'startBusy' });
     const resolvedProvider = allowAi && boot?.provider !== 'none' ? boot?.provider : 'offline';
     const provider: AiProvider = resolvedProvider ?? 'offline';
-    const model = providerModel(provider, modelSlug);
+    const model = await providerModel(provider, modelSlug);
     const controller = new AbortController();
     if (provider !== 'offline') {
       cancelJobRef.current = () => controller.abort();
@@ -111,7 +121,11 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         ? makeCodexTransport(modelSlug, controller.signal)
         : provider === 'compatible'
           ? makeCompatibleTransport(controller.signal)
-          : makeLlmTransport(controller.signal);
+          : provider === 'gemini'
+            ? makeGeminiTransport(controller.signal)
+            : provider === 'grok'
+              ? makeGrokTransport(controller.signal)
+              : makeLlmTransport(controller.signal);
       let inspection = pending.inspection;
       let llmFailed = false;
 
@@ -161,17 +175,20 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
       }
 
       let classifications = classificationPlan.classifications;
-      const llmApplied = classifications.some(
-        (classification) => classification.source === 'llm'
-          && classification.packageCode !== UNCLASSIFIED_CODE,
-      );
+      // A failed batch marks its items 'fallback' and the run continues, so asking merely
+      // whether *any* item reached the AI would report a mostly-failed run as a success.
+      // Count what the AI never classified so the total can be shown to the user.
+      const aiSkipped = provider === 'offline'
+        ? 0
+        : classifications.filter((entry) => entry.source !== 'llm').length;
+      const llmApplied = aiSkipped < classifications.length;
       if (provider !== 'offline' && !llmApplied) llmFailed = true;
       trace.push(workflowEvent(
         'classify',
-        llmFailed ? 'fallback' : 'completed',
+        llmFailed || aiSkipped > 0 ? 'fallback' : 'completed',
         llmFailed
           ? 'Provider unavailable; deterministic classification completed'
-          : `${inspection.items.length} items classified`,
+          : `${classifications.length - aiSkipped} of ${classifications.length} items classified by AI`,
       ));
 
       let memoryApplied = 0;
@@ -219,6 +236,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
           issues,
           llmUsed: provider !== 'offline' && !llmFailed && llmApplied,
           llmFailed,
+          aiSkipped,
           provider,
           model,
           trace,
@@ -234,7 +252,8 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         return;
       }
       dispatch({ type: 'reset' });
-      dispatch({ type: 'setError', error: errorMessage(reason) });
+      void appLog(`workflow error: ${errorMessage(reason)}`);
+      dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
     } finally {
       clearCancellation();
     }
@@ -294,7 +313,8 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         return;
       }
       dispatch({ type: 'reset' });
-      dispatch({ type: 'setError', error: errorMessage(reason) });
+      void appLog(`workflow error: ${errorMessage(reason)}`);
+      dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
     }
   }, [analyze, boot, clearCancellation, processingMode, reset, t]);
 
@@ -427,14 +447,16 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
       }
       dispatch({ type: 'showDone', output: published, data: completedData });
       void openWorkbook(published.masterPath).catch((reason) => {
-        dispatch({ type: 'setError', error: errorMessage(reason) });
+        void appLog(`open workbook failed: ${errorMessage(reason)}`);
+        dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
       });
     } catch (reason) {
       if (reservation) await discardRevision(reservation).catch(() => undefined);
       if (isCancellation(reason)) {
         trace.push(workflowEvent('generate', 'cancelled', 'Generation cancelled by user'));
       } else {
-        dispatch({ type: 'setError', error: errorMessage(reason) });
+        void appLog(`generate error: ${errorMessage(reason)}`);
+        dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
       }
       dispatch({ type: 'showReview', data: { ...data, trace } });
     } finally {

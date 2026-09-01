@@ -11,10 +11,12 @@ export interface BootstrapInfo {
   data_dir: string;
   has_api_key: boolean;
   has_compatible_key: boolean;
+  has_gemini_key: boolean;
+  has_grok_key: boolean;
   run_count: number;
   version: string;
-  provider: 'codex' | 'anthropic' | 'compatible' | 'none';
-  provider_preference: 'codex' | 'anthropic' | 'compatible';
+  provider: 'codex' | 'anthropic' | 'compatible' | 'gemini' | 'grok' | 'none';
+  provider_preference: 'codex' | 'anthropic' | 'compatible' | 'gemini' | 'grok';
   codex_installed: boolean;
   codex_authenticated: boolean;
 }
@@ -43,7 +45,7 @@ export async function bootstrap(): Promise<BootstrapInfo> {
   if (!isDesktop()) {
     return {
       first_run: false, data_dir: '(browser dev — no data dir)', has_api_key: false,
-      has_compatible_key: false,
+      has_compatible_key: false, has_gemini_key: false, has_grok_key: false,
       onboarding_required: false, onboarding_step: 'complete',
       run_count: 0, version: 'dev', provider: 'none', provider_preference: 'codex',
       codex_installed: false, codex_authenticated: false,
@@ -79,8 +81,8 @@ function abortError(): Error {
   return error;
 }
 
-async function invokeAi(
-  command: 'llm_complete' | 'codex_complete' | 'compatible_complete',
+export async function invokeAi(
+  command: 'llm_complete' | 'codex_complete' | 'compatible_complete' | 'gemini_complete' | 'grok_complete',
   args: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -120,10 +122,41 @@ export function makeCompatibleTransport(signal?: AbortSignal) {
   };
 }
 
-export async function testCompatibleProvider(): Promise<boolean> {
-  if (!isDesktop()) return false;
-  return invoke<boolean>('compatible_test');
+const providerTest = (command: string) => async (): Promise<boolean> =>
+  (isDesktop() ? invoke<boolean>(command) : false);
+export const testCompatibleProvider = providerTest('compatible_test');
+export const testAnthropicProvider = providerTest('anthropic_test');
+
+/** Bridge for a named BYOK provider speaking the OpenAI-compatible dialect behind a
+ * fixed, official base URL (see commands.rs named_provider_endpoint). */
+function makeNamedProviderBridge(id: 'gemini' | 'grok') {
+  return {
+    makeTransport: (signal?: AbortSignal) => async (request: LlmRequest) => {
+      if (!isDesktop()) throw new Error(`${id} transport is only available in the desktop app`);
+      return invokeAi(`${id}_complete` as const, { request }, signal);
+    },
+    test: async () => (isDesktop() ? invoke<boolean>(`${id}_test`) : false),
+    models: async () => (isDesktop() ? invoke<string[]>(`${id}_models`) : []),
+    setKey: async (key: string) => {
+      if (isDesktop()) await invoke(`set_${id}_api_key`, { key });
+    },
+    deleteKey: async () => {
+      if (isDesktop()) await invoke(`delete_${id}_api_key`);
+    },
+  };
 }
+const geminiBridge = makeNamedProviderBridge('gemini');
+const grokBridge = makeNamedProviderBridge('grok');
+export const makeGeminiTransport = geminiBridge.makeTransport;
+export const testGeminiProvider = geminiBridge.test;
+export const geminiModels = geminiBridge.models;
+export const setGeminiApiKey = geminiBridge.setKey;
+export const deleteGeminiApiKey = geminiBridge.deleteKey;
+export const makeGrokTransport = grokBridge.makeTransport;
+export const testGrokProvider = grokBridge.test;
+export const grokModels = grokBridge.models;
+export const setGrokApiKey = grokBridge.setKey;
+export const deleteGrokApiKey = grokBridge.deleteKey;
 
 /** Transport that routes classification through the Codex CLI (ChatGPT subscription quota). */
 export function makeCodexTransport(model?: string | null, signal?: AbortSignal) {
@@ -278,6 +311,11 @@ export async function saveClassificationMemory(
 export async function openGeneratedFolder(path: string): Promise<void> {
   if (!isDesktop()) return;
   await invoke('open_generated_folder', { path });
+}
+
+export async function openLogsFolder(): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke('open_logs_folder');
 }
 
 export async function openWorkbook(path: string): Promise<void> {

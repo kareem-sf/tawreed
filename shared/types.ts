@@ -23,7 +23,7 @@ export interface BoqItem {
 }
 
 export type ClassifySource = 'heuristic' | 'llm' | 'fallback' | 'memory' | 'user';
-export type AiProvider = 'offline' | 'codex' | 'anthropic' | 'compatible';
+export type AiProvider = 'offline' | 'codex' | 'anthropic' | 'compatible' | 'gemini' | 'grok';
 
 export type AgentStage =
   | 'inspect'
