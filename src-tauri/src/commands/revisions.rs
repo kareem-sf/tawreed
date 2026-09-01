@@ -2,6 +2,7 @@
 use crate::store;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Sanitize a user-supplied path component (project name, artifact filename, etc.) into a
 /// value that is safe to use as a filesystem path segment on Windows/macOS/Linux alike.
@@ -47,8 +48,9 @@ pub(crate) fn safe_component(raw: &str, max_chars: usize) -> String {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bridge-types/")]
 pub struct RevisionReservation {
     project_name: String,
     revision: u32,
@@ -64,8 +66,9 @@ pub struct RevisionArtifact {
     kind: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bridge-types/")]
 pub struct RevisionOutput {
     project_name: String,
     revision: u32,

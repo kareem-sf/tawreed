@@ -39,10 +39,11 @@
     "media:onboarding": "node scripts/generate-onboarding-media.mjs",
     "verify:version": "node scripts/verify-version.cjs",
     "sync:version": "node scripts/sync-release-version.cjs",
-    "check": "npm run verify:install-scripts && npm run verify:architecture && npm run verify:commands && npm run verify:docs && npm run lint && npm run typecheck && npm test && npm run build && npm run verify:assets && npm run verify:notices && npm run verify:version",
+    "check": "npm run verify:install-scripts && npm run verify:architecture && npm run verify:commands && npm run verify:bindings && npm run verify:docs && npm run lint && npm run typecheck && npm test && npm run build && npm run verify:assets && npm run verify:notices && npm run verify:version",
     "tauri": "tauri",
     "verify:architecture": "node scripts/verify-architecture.cjs",
     "verify:commands": "node scripts/verify-commands.cjs",
+    "verify:bindings": "node scripts/verify-bindings.cjs",
     "verify:docs": "node scripts/verify-docs.cjs"
   },
   "dependencies": {

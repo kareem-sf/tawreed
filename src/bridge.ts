@@ -4,40 +4,31 @@ import type { RunRecord } from '../shared/types';
 import { requestToPrompt, type LlmRequest } from '../engine/classify/llm';
 import type { GeneratedArtifact } from '../engine/generate';
 
-export interface BootstrapInfo {
-  first_run: boolean;
-  onboarding_required: boolean;
+// Generated from the Rust structs by ts-rs (cargo test export_bindings). These are the
+// wire shapes; editing them by hand would only re-open the drift they exist to close.
+import type { BootstrapInfo as RustBootstrapInfo } from './bridge-types/BootstrapInfo';
+import type { CodexStatus } from './bridge-types/CodexStatus';
+import type { UpdateInfo } from './bridge-types/UpdateInfo';
+import type { ModelInfo } from './bridge-types/ModelInfo';
+import type { RevisionReservation } from './bridge-types/RevisionReservation';
+import type { RevisionOutput } from './bridge-types/RevisionOutput';
+import type { ClassificationMemoryEntry } from './bridge-types/ClassificationMemoryEntry';
+
+export type {
+  CodexStatus, UpdateInfo, ModelInfo,
+  RevisionReservation, RevisionOutput, ClassificationMemoryEntry,
+};
+
+/** Generated from the Rust struct, with the three string fields narrowed to the values
+ * the host actually emits — Rust types them as String, so the union is a TypeScript-side
+ * refinement rather than something serde guarantees. Keep it in step with store.rs. */
+export type BootstrapInfo = Omit<
+  RustBootstrapInfo, 'onboarding_step' | 'provider' | 'provider_preference'
+> & {
   onboarding_step: 'language' | 'video' | 'connection' | 'complete';
-  data_dir: string;
-  has_api_key: boolean;
-  has_compatible_key: boolean;
-  has_gemini_key: boolean;
-  has_grok_key: boolean;
-  run_count: number;
-  version: string;
   provider: 'codex' | 'anthropic' | 'compatible' | 'gemini' | 'grok' | 'none';
   provider_preference: 'codex' | 'anthropic' | 'compatible' | 'gemini' | 'grok';
-  codex_installed: boolean;
-  codex_authenticated: boolean;
-}
-
-export interface CodexStatus {
-  installed: boolean;
-  authenticated: boolean;
-  version: string | null;
-  path: string | null;
-  source: string | null;
-}
-
-export interface UpdateInfo {
-  current_version: string;
-  latest_version: string;
-  latest_tag: string;
-  update_available: boolean;
-  asset_name: string;
-  asset_sha256: string | null;
-  published_at: string | null;
-}
+};
 
 export const isDesktop = () => '__TAURI_INTERNALS__' in window;
 
@@ -170,13 +161,6 @@ export function makeCodexTransport(model?: string | null, signal?: AbortSignal) 
   };
 }
 
-export interface ModelInfo {
-  slug: string;
-  display_name: string;
-  description: string;
-  default_reasoning_level: string | null;
-}
-
 export async function codexModels(): Promise<ModelInfo[]> {
   if (!isDesktop()) return [];
   return invoke<ModelInfo[]>('codex_models');
@@ -224,23 +208,6 @@ function encodeBytes(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export interface RevisionReservation {
-  projectName: string;
-  revision: number;
-  revisionLabel: string;
-  session: string;
-}
-
-export interface RevisionOutput {
-  projectName: string;
-  revision: number;
-  revisionLabel: string;
-  masterPath: string;
-  packageFolder: string;
-  revisionFolder: string;
-  files: string[];
-}
-
 export async function reserveRevision(projectName: string): Promise<RevisionReservation> {
   if (!isDesktop()) throw new Error('Desktop only');
   return invoke<RevisionReservation>('reserve_revision', { projectName });
@@ -283,14 +250,6 @@ export async function recordRun(entry: Omit<RunRecord, 'id'>): Promise<number> {
 export async function listRuns(): Promise<RunRecord[]> {
   if (!isDesktop()) return [];
   return invoke<RunRecord[]>('list_runs');
-}
-
-export interface ClassificationMemoryEntry {
-  descriptionKey: string;
-  packageCode: string;
-  packageNameEn: string;
-  packageNameAr: string;
-  updatedAt: string;
 }
 
 export async function listClassificationMemory(

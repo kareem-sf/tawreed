@@ -28,6 +28,7 @@ base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 semver = "1"
 sha2 = "0.10"
+ts-rs = "12"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

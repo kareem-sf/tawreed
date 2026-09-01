@@ -3,6 +3,7 @@ use super::revisions::safe_component;
 use crate::store;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use ts_rs::TS;
 
 #[tauri::command]
 pub fn record_run(entry: Value) -> Result<i64, String> {
@@ -137,8 +138,9 @@ pub fn list_runs() -> Result<Vec<Value>, String> {
     Ok(out)
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bridge-types/")]
 pub struct ClassificationMemoryEntry {
     description_key: String,
     package_code: String,

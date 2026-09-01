@@ -9,8 +9,10 @@
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
+use ts_rs::TS;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bridge-types/")]
 pub struct BootstrapInfo {
     pub first_run: bool,
     pub onboarding_required: bool,
@@ -20,6 +22,9 @@ pub struct BootstrapInfo {
     pub has_compatible_key: bool,
     pub has_gemini_key: bool,
     pub has_grok_key: bool,
+    // ts-rs maps i64 to bigint for precision, but Tauri serializes it as a JSON number
+    // and a run count will never approach 2^53, so the webview sees a plain number.
+    #[ts(type = "number")]
     pub run_count: i64,
     pub version: String,
     /// "codex" | "anthropic" | "compatible" | "gemini" | "grok" | "none" — resolved AI provider for this session.

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use ts_rs::TS;
 
 const EXEC_TIMEOUT_SECS: u64 = 240;
 #[cfg(windows)]
@@ -48,7 +49,8 @@ pub fn invalidate_cache() {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bridge-types/")]
 pub struct CodexStatus {
     pub installed: bool,
     pub authenticated: bool,
@@ -57,7 +59,8 @@ pub struct CodexStatus {
     pub source: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bridge-types/")]
 pub struct ModelInfo {
     pub slug: String,
     pub display_name: String,
