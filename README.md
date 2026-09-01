@@ -42,6 +42,11 @@ screens are therefore expected. See [Installation](docs/INSTALL.md).
 
 See [Privacy](docs/PRIVACY.md) and [Security](SECURITY.md).
 
+## Help
+
+Start with the [user guide](docs/USER-GUIDE.md). For anything else, [SUPPORT.md](SUPPORT.md)
+says where to ask.
+
 ## Development
 
 Requirements are Node.js 24, the repository-pinned Rust toolchain, and the

@@ -1,5 +1,11 @@
 # Tawreed Agentic Redesign
 
+> **NOT YET IMPLEMENTED.** This document describes a planned future
+> rearchitecture. The application currently shipping (`src/`, `engine/`,
+> `src-tauri/`) does not implement the agent kernel, provider-bridge
+> architecture, or bootstrapper described below — see `docs/ARCHITECTURE.md`
+> for what actually exists today.
+
 **Status:** Approved design
 
 **Date:** 2026-08-25

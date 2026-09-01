@@ -29,6 +29,20 @@ relevant comments be sent to that provider:
   ephemeral, schema-constrained, read-only, cancellable, and runs in a fresh
   empty working directory without loading repository rules or user
   configuration.
+- Google Gemini receives requests through Gemini's official OpenAI-compatible
+  endpoint (`generativelanguage.googleapis.com`). Its key is stored in the
+  operating-system credential manager.
+- xAI Grok receives requests through Grok's official OpenAI-compatible
+  endpoint (`api.x.ai`). Its key is stored in the operating-system credential
+  manager.
+- A user-supplied "Other service" (any OpenAI-compatible HTTPS endpoint) may
+  also be configured. Its key is stored in the operating-system credential
+  manager. Data sent to a self-configured service is only as private as that
+  service's own policy — review it before enabling.
+
+Regardless of provider, only item identifiers, descriptions, units,
+quantities, grounded project candidates, and relevant comments are ever sent,
+and only after per-file approval.
 
 Do not enable an external AI provider when project policy prohibits that data
 from leaving the device. Offline deterministic classification remains
@@ -49,7 +63,9 @@ revision and output paths, item/package counts, source type, OCR use, provider
 and model, AI use, agent event traces, and the count of locally applied memory
 rules. Approved project/package mappings are also stored locally in this
 database. `app.log` contains operational messages and may include filenames,
-project names, generated paths, and provider error summaries.
+project names, generated paths, and provider error summaries. The log rotates
+to `app.log.1` once it exceeds 10 MB rather than being cleared, so a report
+made shortly after that point still has recent history to include.
 
 Delete `~/.tawreed` to remove Tawreed's local settings, history, logs, managed
 Codex binary, classification memory, and generated output. Back up required

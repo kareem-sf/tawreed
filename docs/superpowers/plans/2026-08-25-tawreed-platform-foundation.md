@@ -1,5 +1,9 @@
 # Tawreed Platform Foundation Implementation Plan
 
+> **NOT YET IMPLEMENTED.** This is a future implementation plan for the
+> agentic redesign in the linked spec below. The currently shipping app does
+> not have an agent kernel, Codex SDK bridge, or native bootstrapper.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver a working local-first platform foundation with one visible Tawreed executable, a verified managed runtime under `~/.tawreed`, text-first project state, a local Tawreed Agent Kernel, a Codex SDK bridge, and the approved Adaptive Agent Workspace.
