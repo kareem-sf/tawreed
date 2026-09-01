@@ -72,6 +72,9 @@ export function useAppConfiguration() {
   }, []);
 
   useEffect(() => {
+    // Bootstrap on mount; the state write happens in the async continuation, not
+    // synchronously during render, so it cannot cascade.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshConfiguration();
   }, [refreshConfiguration]);
 

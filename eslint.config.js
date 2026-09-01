@@ -32,7 +32,7 @@ export default tseslint.config(
       'no-control-regex': 'off',
       'no-misleading-character-class': 'off',
       'no-useless-escape': 'off',
-      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/set-state-in-effect': 'error',
       // The codebase has zero `any`; enforcing it keeps the discipline from eroding.
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', {

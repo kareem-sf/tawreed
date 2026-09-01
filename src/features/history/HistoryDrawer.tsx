@@ -21,6 +21,8 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
 
   useEffect(() => {
     if (opened) {
+      // Guarded by `opened`, so this runs once per open rather than every render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(true);
       listRuns()
         .then(setRuns)

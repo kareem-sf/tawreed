@@ -1,8 +1,10 @@
-// Full headless pipeline: bytes → inspection → classification → validation → packages.
+// Test-only harness: composes bytes → inspection → classification → validation →
+// packages so end-to-end tests do not each rebuild that chain. Production drives the
+// same steps from the workflow hook, which needs per-stage progress and consent gating.
 import type { PipelineResult } from '../shared/types';
-import { inspectDocument } from './inspect-document';
-import { classifyAll, type ClassifyOptions } from './classify';
-import { buildPackages, validate } from './validate';
+import { inspectDocument } from '../engine/inspect-document';
+import { classifyAll, type ClassifyOptions } from '../engine/classify';
+import { buildPackages, validate } from '../engine/validate';
 
 export async function runPipeline(
   bytes: ArrayBuffer | Uint8Array,

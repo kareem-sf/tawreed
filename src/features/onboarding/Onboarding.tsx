@@ -41,6 +41,9 @@ export default function Onboarding({
   const index = stepOrder.indexOf(step);
 
   useEffect(() => {
+    // Deliberate prop-to-state sync: reopening onboarding at a different step must
+    // move the wizard, and the dependency limits it to an actual prop change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStep(initialStep);
   }, [initialStep]);
 

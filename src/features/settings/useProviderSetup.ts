@@ -90,6 +90,8 @@ export function useProviderSetup({ onConfigured }: Options = {}) {
   }, []);
 
   useEffect(() => {
+    // Async bootstrap: every write below lands in a promise continuation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshCodex();
     void getSettings().then((settings) => {
       const current = settings.activeProvider;
@@ -118,6 +120,8 @@ export function useProviderSetup({ onConfigured }: Options = {}) {
 
   useEffect(() => {
     if (!codex?.authenticated) {
+      // Clearing a derived list when sign-in drops; guarded, so it settles at once.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setModels([]);
       return;
     }
