@@ -103,7 +103,9 @@ export default function ReviewPanel({
     <div className="flex h-full flex-col gap-3 px-4 pb-3">
       <header className="flex items-start justify-between gap-4 px-1">
         <div className="min-w-0">
-          <Text size="sm" fw={650} truncate>{data.inspection.projectName}</Text>
+          <Text className="font-serif-display" size="sm" fw={650} truncate c="var(--ink)">
+            {data.inspection.projectName}
+          </Text>
           <Text size="xs" c="dimmed" truncate>
             {data.fileName} · {t('summaryLine', {
               items: totalItems,
@@ -112,20 +114,19 @@ export default function ReviewPanel({
           </Text>
         </div>
         <div className="shrink-0 text-end">
-          <Text size="xs" c="dimmed">{t('totalValue')}</Text>
-          <div className="flex items-baseline justify-end gap-1.5">
-            <Text size="xs" c="dimmed">{t('currencyEgp')}</Text>
-            <NumberTicker
-              value={grandTotal}
-              locale={locale}
-              className="text-[18px] font-bold text-zinc-950 dark:text-white"
-            />
-          </div>
+          <Text size="xs" tt="uppercase" style={{ letterSpacing: '0.09em' }} c="dimmed">
+            {t('totalValue')} · {t('currencyEgp')}
+          </Text>
+          <NumberTicker
+            value={grandTotal}
+            locale={locale}
+            className="font-serif-display text-[24px] font-semibold text-gold-deep dark:text-gold"
+          />
         </div>
       </header>
 
       <section
-        className="min-h-0 flex-1 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.025]"
+        className="min-h-0 flex-1 rounded-2xl border border-ledger-line bg-ledger-surface shadow-sm"
         aria-label={t('workPackage')}
       >
         <ScrollArea h="100%" offsetScrollbars scrollbarSize={4}>
@@ -144,9 +145,19 @@ export default function ReviewPanel({
       </section>
 
       {(hasErrors || reviewItemIds.size > 0) && (
-        <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className="flex items-center gap-2 rounded-xl border border-ledger-line bg-gold/8 px-3 py-2.5 text-xs text-gold-deep dark:text-[#f0d8a0]">
           <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
           <span>{t('itemsNeedReview', { count: reviewItemIds.size })}</span>
+        </div>
+      )}
+
+      {data.aiSkipped > 0 && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-xl border border-ledger-line bg-gold/8 px-3 py-2.5 text-xs text-gold-deep dark:text-[#f0d8a0]"
+        >
+          <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
+          <span>{t('aiSkippedItems', { count: data.aiSkipped, total: totalItems })}</span>
         </div>
       )}
 
@@ -171,12 +182,19 @@ export default function ReviewPanel({
               : t('reviewItems')}
           </Button>
           <Button
-            color="yellow"
+            color="gold"
             size="sm"
             disabled={busy || hasErrors}
             onClick={onGenerate}
             leftSection={<Check size={15} aria-hidden="true" />}
-            styles={{ root: { color: '#18181b', fontWeight: 650 } }}
+            styles={{
+              root: {
+                color: '#1c1408',
+                fontWeight: 700,
+                background: 'linear-gradient(180deg, #f3c968, var(--gold))',
+                boxShadow: '0 8px 20px -6px rgba(232,181,74,0.5)',
+              },
+            }}
           >
             {busy
               ? t('generatingShort')

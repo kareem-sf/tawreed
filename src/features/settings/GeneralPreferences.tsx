@@ -65,7 +65,7 @@ export function GeneralPreferences() {
         <Text size="xs" fw={650}>{t('processingChoice')}</Text>
         <Text size="xs" c="dimmed" mt={2} mb={7}>{t('processingChoiceDetail')}</Text>
         {loading ? (
-          <Loader size={16} color="yellow" />
+          <Loader size={16} color="gold" />
         ) : (
           <Select
             size="xs"

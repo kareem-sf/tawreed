@@ -11,16 +11,21 @@ import {
 } from '@mantine/core';
 import { CheckCircle2, Circle, Cloud, RefreshCw, Settings2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { NamedProviderCard } from './NamedProviderCard';
 import type { Provider } from './provider-types';
 import { useProviderSetup } from './useProviderSetup';
 
 interface Props {
   hasKey: boolean;
   hasCompatibleKey: boolean;
+  hasGeminiKey?: boolean;
+  hasGrokKey?: boolean;
   onConfigured?: (provider: Provider | 'offline') => void;
 }
 
-export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props) {
+export function ProviderSetup({
+  hasKey, hasCompatibleKey, hasGeminiKey = false, hasGrokKey = false, onConfigured,
+}: Props) {
   const { t } = useTranslation();
   const setup = useProviderSetup({ onConfigured });
   const connectionCards = [
@@ -37,6 +42,20 @@ export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props)
       title: t('anthropicConnection'),
       detail: t('anthropicConnectionDetail'),
       ready: hasKey,
+    },
+    {
+      value: 'gemini' as const,
+      icon: Cloud,
+      title: t('geminiConnection'),
+      detail: t('geminiConnectionDetail'),
+      ready: hasGeminiKey,
+    },
+    {
+      value: 'grok' as const,
+      icon: Cloud,
+      title: t('grokConnection'),
+      detail: t('grokConnectionDetail'),
+      ready: hasGrokKey,
     },
     {
       value: 'compatible' as const,
@@ -59,14 +78,14 @@ export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props)
               type="button"
               className={`rounded-xl border p-3 text-start transition ${
                 selected
-                  ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-500/10'
-                  : 'border-zinc-200 hover:border-zinc-300 dark:border-white/10'
+                  ? 'border-gold-deep bg-gold/8 dark:border-gold'
+                  : 'border-ledger-line hover:border-gold-deep/60'
               }`}
               aria-pressed={selected}
               onClick={() => void setup.selectProvider(item.value)}
             >
               <div className="flex items-center justify-between">
-                <Icon size={16} className={selected ? 'text-amber-600' : 'text-zinc-400'} aria-hidden="true" />
+                <Icon size={16} className={selected ? 'text-gold-deep dark:text-gold' : 'text-ledger-ink-faint'} aria-hidden="true" />
                 {item.ready
                   ? <CheckCircle2 size={14} className="text-emerald-600" aria-hidden="true" />
                   : <Circle size={12} className="text-zinc-300" aria-hidden="true" />}
@@ -110,7 +129,7 @@ export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props)
               {!setup.codex?.installed && (
                 <Button
                   size="xs"
-                  color="yellow"
+                  color="gold"
                   loading={setup.working === 'codex-install'}
                   onClick={() => void setup.installCodex()}
                 >
@@ -120,7 +139,7 @@ export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props)
               {setup.codex?.installed && !setup.codex.authenticated && (
                 <Button
                   size="xs"
-                  color="yellow"
+                  color="gold"
                   loading={setup.working === 'codex-login'}
                   onClick={() => void setup.loginCodex()}
                 >
@@ -160,7 +179,7 @@ export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props)
           <Group mt="sm">
             <Button
               size="xs"
-              color="yellow"
+              color="gold"
               loading={setup.working === 'anthropic'}
               disabled={!setup.anthropicKey.trim()}
               onClick={() => void setup.saveAnthropic()}
@@ -174,6 +193,38 @@ export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props)
             )}
           </Group>
         </div>
+      )}
+
+      {setup.provider === 'gemini' && (
+        <NamedProviderCard
+          keyLabelDetail={t('geminiKeyDetail')}
+          keyPlaceholder="AIza…"
+          keyValue={setup.geminiKey}
+          onKeyChange={setup.setGeminiKey}
+          modelList={setup.geminiModelList}
+          model={setup.geminiModel}
+          onModelChange={setup.chooseGeminiModel}
+          working={setup.working === 'gemini'}
+          hasKey={hasGeminiKey}
+          onSave={() => void setup.saveGemini()}
+          onRemove={() => void setup.removeGemini()}
+        />
+      )}
+
+      {setup.provider === 'grok' && (
+        <NamedProviderCard
+          keyLabelDetail={t('grokKeyDetail')}
+          keyPlaceholder="xai-…"
+          keyValue={setup.grokKey}
+          onKeyChange={setup.setGrokKey}
+          modelList={setup.grokModelList}
+          model={setup.grokModel}
+          onModelChange={setup.chooseGrokModel}
+          working={setup.working === 'grok'}
+          hasKey={hasGrokKey}
+          onSave={() => void setup.saveGrok()}
+          onRemove={() => void setup.removeGrok()}
+        />
       )}
 
       {setup.provider === 'compatible' && (
@@ -212,7 +263,7 @@ export function ProviderSetup({ hasKey, hasCompatibleKey, onConfigured }: Props)
                 <Group mt="xs">
                   <Button
                     size="xs"
-                    color="yellow"
+                    color="gold"
                     loading={setup.working === 'compatible'}
                     disabled={
                       !setup.compatible.baseUrl.trim()

@@ -1,14 +1,23 @@
 import { useEffect, useState } from 'react';
 import { ActionIcon, ScrollArea, Table, Text, Tooltip } from '@mantine/core';
-import { FileSpreadsheet, FolderOpen, Sparkles, Workflow } from 'lucide-react';
+import { Check, ClipboardCopy, FileSpreadsheet, FolderOpen, Sparkles, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { listRuns, openGeneratedFolder, openWorkbook } from '../../bridge';
 import type { RunRecord } from '../../../shared/types';
+import { formatRunForSupport } from './formatRunForSupport';
 
 export default function HistoryDrawer({ opened }: { opened: boolean }) {
   const { t, i18n } = useTranslation();
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  const copyForSupport = (run: RunRecord) => {
+    void navigator.clipboard.writeText(formatRunForSupport(run)).then(() => {
+      setCopiedId(run.id ?? null);
+      window.setTimeout(() => setCopiedId((current) => (current === (run.id ?? null) ? null : current)), 1500);
+    }).catch(() => undefined);
+  };
 
   useEffect(() => {
     if (opened) {
@@ -97,7 +106,7 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
                   <Tooltip label={t('openWorkbookDetail')} openDelay={180}>
                     <ActionIcon
                       variant="subtle"
-                      color="yellow"
+                      color="gold"
                       size="sm"
                       onClick={() => openWorkbook(run.outputFile).catch(() => undefined)}
                       aria-label={t('openWorkbook')}
@@ -118,6 +127,17 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
                       </ActionIcon>
                     </Tooltip>
                   )}
+                  <Tooltip label={copiedId === (run.id ?? null) ? t('copiedForSupport') : t('copyForSupportDetail')} openDelay={180}>
+                    <ActionIcon
+                      variant="subtle"
+                      color={copiedId === (run.id ?? null) ? 'green' : 'gray'}
+                      size="sm"
+                      onClick={() => copyForSupport(run)}
+                      aria-label={t('copyForSupport')}
+                    >
+                      {copiedId === (run.id ?? null) ? <Check size={14} /> : <ClipboardCopy size={14} />}
+                    </ActionIcon>
+                  </Tooltip>
                 </Table.Td>
               </Table.Tr>
             );
