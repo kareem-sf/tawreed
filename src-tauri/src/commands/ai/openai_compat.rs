@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::jobs::{begin_ai_job, finish_ai_job, wait_for_cancellation};
 use super::retry::send_with_retry;
-use super::serialize_capped;
+use super::{output_schema, serialize_capped};
 
 /// Google's OpenAI-compatible `/models` route lists ids in the native `models/<id>` form,
 /// but its `/chat/completions` route accepts only the bare id. Strip the prefix both when
@@ -187,6 +187,19 @@ async fn provider_complete_inner(
     // Gemini gets the field — an arbitrary compatible endpoint may reject an unknown key.
     if provider == "gemini" {
         payload["reasoning_effort"] = json!("low");
+    }
+    // Constrained decoding, for the two providers whose structured-output support is known
+    // at these fixed official endpoints. A user-supplied compatible endpoint is deliberately
+    // excluded for the same reason as reasoning_effort above: an unknown server may reject
+    // the field outright, and a 400 here would fail classification entirely rather than
+    // degrade it. Those endpoints keep the prompt-only contract plus the repair round-trip.
+    if provider == "gemini" || provider == "grok" {
+        if let Some(schema) = output_schema(&request)? {
+            payload["response_format"] = json!({
+                "type": "json_schema",
+                "json_schema": { "name": "tawreed_result", "strict": true, "schema": schema },
+            });
+        }
     }
     let body = serialize_capped(&payload)?;
     let client = reqwest::Client::builder()

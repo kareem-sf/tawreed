@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::jobs::{begin_ai_job, finish_ai_job};
 use super::retry::send_with_retry;
-use super::serialize_capped;
+use super::{output_schema, serialize_capped};
 
 #[tauri::command]
 pub async fn llm_complete(request: Value, job_id: String) -> Result<String, String> {
@@ -65,6 +65,15 @@ async fn llm_complete_inner(request: Value, cancelled: Arc<AtomicBool>) -> Resul
         if (0.0..=1.0).contains(&temperature) {
             sanitized["temperature"] = json!(temperature);
         }
+    }
+    // Constrained decoding against the caller's JSON Schema. Without this the engine's
+    // schema was built, sent, and silently dropped here, leaving "Return ONLY valid JSON"
+    // in the prompt as the only thing standing between a stray sentence of prose and a
+    // whole batch of items falling back to Unclassified.
+    if let Some(schema) = output_schema(&request)? {
+        sanitized["output_config"] = json!({
+            "format": { "type": "json_schema", "schema": schema },
+        });
     }
     let body = serialize_capped(&sanitized)?;
 
