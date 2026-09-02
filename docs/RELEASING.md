@@ -10,8 +10,21 @@ Use Conventional Commit titles on merged pull requests:
 
 - `fix:` creates a patch release.
 - `feat:` creates a minor release.
-- A `BREAKING CHANGE:` footer or `type!:` creates a major release.
+- A `BREAKING CHANGE:` footer or `type!:` bumps the minor version while the
+  project is below 1.0, because `bump-minor-pre-major` is set. Without it a
+  single breaking change would jump straight from 0.x to 1.0.0.
 - Other commit types can appear in generated notes but do not force a release.
+
+### Version pin — remove after 0.0.1 ships
+
+`release-please-config.json` currently carries `"release-as": "0.0.1"` to restart
+the version line. It is **not** one-shot: while it is present every release comes
+out as 0.0.1 and no version can ever advance. Delete that one key as soon as
+v0.0.1 is tagged.
+
+Note that 0.0.1 sorts below the retired v0.3.0-v0.5.6 tags, so `update.rs`, which
+compares the GitHub `releases/latest` version against the running one, offers no
+update to anyone still on a retired build.
 
 After a qualifying change reaches `main`, `.github/workflows/release-please.yml`
 creates or updates the Release Please pull request. The workflow explicitly
