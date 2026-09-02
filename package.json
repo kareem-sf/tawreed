@@ -31,6 +31,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "eval": "node scripts/run-eval.mjs",
     "lint": "eslint \"{engine,shared,src,tests}/**/*.{ts,tsx}\" vite.config.ts",
     "typecheck": "tsc --noEmit --incremental false",
     "verify:assets": "node scripts/verify-vendor-assets.cjs",

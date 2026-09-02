@@ -15,6 +15,8 @@ import { TAXONOMY, UNCLASSIFIED } from './taxonomy';
 export interface ClassifyOptions {
   useLlm: boolean;
   transport?: LlmTransport;
+  /** Overrides DEFAULT_MODEL. Set by the evaluation harness to compare models. */
+  model?: string;
   onProgress?: (p: LlmProgress) => void;
 }
 
@@ -24,8 +26,12 @@ export async function classifyAll(items: BoqItem[], opts: ClassifyOptions): Prom
     return [...classified, ...remaining.map((i) => heuristicFallback(i))];
   }
   if (!opts.transport) throw new Error('LLM classification requested but no transport provided.');
-  return llmClassify(items, opts.transport, (done, total, processedItems) =>
-    opts.onProgress?.({ phase: 'llm', done, total, remainingItems: Math.max(0, items.length - processedItems) })
+  return llmClassify(
+    items,
+    opts.transport,
+    (done, total, processedItems) =>
+      opts.onProgress?.({ phase: 'llm', done, total, remainingItems: Math.max(0, items.length - processedItems) }),
+    opts.model,
   );
 }
 
