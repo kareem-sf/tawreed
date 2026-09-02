@@ -198,8 +198,6 @@ const en = {
   "reportProblem": "Report a problem",
   "aiEnhancedDetail": "AI reviewed ambiguous BOQ descriptions and improved package classification",
   "aiFailedDetail": "AI was unavailable; Tawreed completed classification using deterministic rules",
-  "packageDetail": "{{code}} · {{items}} items · EGP {{cost}}",
-  "currencyEgp": "EGP",
   "openPortfolio": "Visit Kareem Safwat’s professional website",
   "aboutKicker": "Construction procurement intelligence",
   "aboutDesktopLabel": "Desktop intelligence",

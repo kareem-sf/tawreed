@@ -5,7 +5,9 @@ import { itemTotal } from './item-total';
 import { normalizeText } from './normalize';
 
 const TOTAL_TOLERANCE_PCT = 0.015; // 1.5%
-const TOTAL_TOLERANCE_ABS = 1; // EGP — small floor so near-zero totals don't flap on rounding
+// Small absolute floor so near-zero totals don't flap on rounding. Unit-less: Tawreed
+// does not know, and does not claim to know, which currency a BOQ is priced in.
+const TOTAL_TOLERANCE_ABS = 1;
 const OUTLIER_Z = 2.5;
 
 export function buildPackages(items: BoqItem[], classifications: Classification[]): WorkPackage[] {

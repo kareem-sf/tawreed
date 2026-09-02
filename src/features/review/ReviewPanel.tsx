@@ -119,7 +119,7 @@ export default function ReviewPanel({
         </div>
         <div className="shrink-0 text-end">
           <Text size="xs" tt="uppercase" style={{ letterSpacing: '0.09em' }} c="dimmed">
-            {t('totalValue')} · {t('currencyEgp')}
+            {t('totalValue')}
           </Text>
           <NumberTicker
             value={grandTotal}
@@ -139,7 +139,6 @@ export default function ReviewPanel({
             totalItems={totalItems}
             locale={locale}
             flaggedCodes={flaggedCodes}
-            currencyLabel={t('currencyEgp')}
             needsReviewLabel={t('needsReview')}
             itemCountLabel={(count) => t('packageItemCount', { count })}
             packageName={(workPackage) => ar ? workPackage.nameAr : workPackage.nameEn}

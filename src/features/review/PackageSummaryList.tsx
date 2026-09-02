@@ -6,7 +6,6 @@ interface Props {
   totalItems: number;
   locale: string;
   flaggedCodes: Set<string>;
-  currencyLabel: string;
   needsReviewLabel: string;
   itemCountLabel: (count: number) => string;
   packageName: (workPackage: WorkPackage) => string;
@@ -18,7 +17,6 @@ export function PackageSummaryList({
   totalItems,
   locale,
   flaggedCodes,
-  currencyLabel,
   needsReviewLabel,
   itemCountLabel,
   packageName,
@@ -66,7 +64,7 @@ export function PackageSummaryList({
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="font-mono-figures text-end text-[13.5px] font-semibold text-ledger-ink">
-                        {currencyLabel} {compactNumber.format(workPackage.totalCost)}
+                        {compactNumber.format(workPackage.totalCost)}
                       </span>
                       <ChevronRight
                         aria-hidden="true"

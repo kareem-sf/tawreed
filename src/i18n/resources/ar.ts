@@ -198,8 +198,6 @@ const ar = {
   "reportProblem": "الإبلاغ عن مشكلة",
   "aiEnhancedDetail": "راجع الذكاء الاصطناعي أوصاف البنود الملتبسة وحسّن تصنيف الحزم",
   "aiFailedDetail": "تعذر الذكاء الاصطناعي، فأكمل توريد التصنيف باستخدام القواعد الحتمية",
-  "packageDetail": "{{code}} · {{items}} بند · {{cost}} جنيه",
-  "currencyEgp": "ج.م",
   "openPortfolio": "زيارة الموقع المهني لكريم صفوت",
   "aboutKicker": "ذكاء مشتريات قطاع التشييد",
   "aboutDesktopLabel": "ذكاء مكتبي",
