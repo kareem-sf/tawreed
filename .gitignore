@@ -40,6 +40,10 @@ public/video/
 *.mkv
 *.webm
 *.mp3
+# ...except the onboarding narration, which ships inside the app next to its
+# committed captions. It is generated from a network TTS service, so it cannot be
+# rebuilt deterministically in CI.
+!public/onboarding/tawreed-tour-*.mp3
 *.wav
 *.m4a
 
