@@ -18,7 +18,7 @@ concurrency:
 jobs:
   analyze:
     name: Analyze ${{ matrix.language }}
-    runs-on: ${{ matrix.language == 'rust' && 'windows-2022' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -39,17 +39,9 @@ jobs:
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.language == 'rust' && 'manual' || 'none' }}
-
-      # Rust has no autobuild; CodeQL needs to observe a real cargo compilation.
-      - name: Build Rust for analysis
-        if: matrix.language == 'rust'
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup toolchain install 1.97.0 --profile minimal
-          rustup default 1.97.0
-          cargo build --manifest-path src-tauri/Cargo.toml --locked
+          # Every language here extracts from source. The Rust extractor rejects
+          # `manual` outright, and none of the others need a build observed.
+          build-mode: none
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
