@@ -23,6 +23,11 @@ export function apiKeyFor(provider: EvalProvider): string | undefined {
   return process.env[KEY_ENV[provider]]?.trim() || undefined;
 }
 
+/** The environment variable a given provider's key is read from. */
+export function apiKeyVariable(provider: EvalProvider): string {
+  return KEY_ENV[provider];
+}
+
 async function post(url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
   const response = await fetch(url, {
     method: 'POST',

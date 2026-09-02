@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { classifyPlan } from '../../engine/classify';
 import { loadCorpus, type EvalCase } from './corpus';
 import { aggregate, formatReport, scoreCase } from './score';
-import { apiKeyFor, makeEvalTransport, type EvalProvider } from './live-transport';
+import { apiKeyFor, apiKeyVariable, makeEvalTransport, type EvalProvider } from './live-transport';
 
 const LIVE = process.env.TAWREED_EVAL_LIVE === '1';
 const PROVIDER = (process.env.TAWREED_EVAL_PROVIDER ?? 'anthropic') as EvalProvider;
@@ -19,7 +19,10 @@ const DIRS = ['./corpus-synthetic', './corpus'].map((d) => fileURLToPath(new URL
 describe.runIf(LIVE)(`classification accuracy (live: ${PROVIDER})`, () => {
   it('scores the corpus against the real provider', { timeout: 30 * 60_000 }, async () => {
     const key = apiKeyFor(PROVIDER);
-    expect(key, `no API key in the environment for provider "${PROVIDER}"`).toBeTruthy();
+    expect(
+      key,
+      `set ${apiKeyVariable(PROVIDER)} to score against ${PROVIDER}`,
+    ).toBeTruthy();
     const transport = makeEvalTransport(PROVIDER, key!);
 
     const corpus: EvalCase[] = [];
