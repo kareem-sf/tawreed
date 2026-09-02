@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
-import { runPipeline } from '../engine/pipeline';
+import { runPipeline } from './pipeline-harness';
 import {
   buildWorkbook,
   buildWorkbooks,

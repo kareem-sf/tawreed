@@ -8,6 +8,8 @@ src-tauri/gen/schemas/
 coverage/
 .vite/
 .cache/
+.worktrees/
+.superpowers/
 *.tsbuildinfo
 
 # Local configuration and Tawreed runtime data
@@ -38,6 +40,10 @@ public/video/
 *.mkv
 *.webm
 *.mp3
+# ...except the onboarding narration, which ships inside the app next to its
+# committed captions. It is generated from a network TTS service, so it cannot be
+# rebuilt deterministically in CI.
+!public/onboarding/tawreed-tour-*.mp3
 *.wav
 *.m4a
 
@@ -51,7 +57,12 @@ public/video/
 .DS_Store
 Thumbs.db
 Desktop.ini
+test-results/
+playwright-report/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Private evaluation corpus — real client BOQs never enter the repo
+tests/eval/corpus/

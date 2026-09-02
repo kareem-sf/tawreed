@@ -23,7 +23,7 @@ export interface BoqItem {
 }
 
 export type ClassifySource = 'heuristic' | 'llm' | 'fallback' | 'memory' | 'user';
-export type AiProvider = 'offline' | 'codex' | 'anthropic' | 'compatible';
+export type AiProvider = 'offline' | 'codex' | 'anthropic' | 'compatible' | 'gemini' | 'grok';
 
 export type AgentStage =
   | 'inspect'
@@ -50,6 +50,12 @@ export interface Classification {
   packageNameAr?: string;
   confidence: number; // 0..1
   source: ClassifySource;
+  /**
+   * The offline heuristic grouped this item with items the model put elsewhere. An
+   * independent second opinion, unlike `confidence`, which the model reports about itself.
+   * Only ever set on the LLM path; absent means agreement or no heuristic opinion.
+   */
+  heuristicDisagreement?: boolean;
 }
 
 export interface WorkPackageDef {
@@ -146,4 +152,26 @@ export interface RunRecord {
   model?: string;
   trace?: AgentEvent[];
   memoryApplied?: number;
+  /**
+   * Per-item provenance for this run. Persisted so a human's corrections during review
+   * survive publication — they are the only labelled examples of what the classifier got
+   * wrong, and the evaluation corpus is built from them.
+   */
+  classifications?: RunClassificationRecord[];
 }
+
+export interface RunClassificationRecord {
+  itemId: number;
+  description: string;
+  packageCode: string;
+  source: ClassifySource;
+  confidence: number;
+}
+
+/**
+ * Confidence at or above which a classification is trusted without being flagged for
+ * human verification. One constant so the review UI and the validator cannot drift into
+ * flagging different sets of items — they previously disagreed (0.55 vs 0.5), leaving a
+ * band of items warned about in one place and silently accepted in the other.
+ */
+export const REVIEW_CONFIDENCE_THRESHOLD = 0.55;

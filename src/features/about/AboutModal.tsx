@@ -9,7 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { openUrl } from '../../bridge';
+import { openLogsFolder, openUrl } from '../../bridge';
 import type { UpdateState } from '../../app/types';
 import Logo from '../../components/Logo';
 
@@ -49,13 +49,13 @@ export default function AboutModal({
           : t('checkForUpdates');
 
   return (
-    <div className="-m-4 bg-white p-7 text-start dark:bg-zinc-950">
+    <div className="-m-4 bg-ledger-bg p-7 text-start">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <Logo size={30} />
           <div>
-            <h2 className="text-base font-semibold text-zinc-950 dark:text-white">Tawreed</h2>
-            <p className="text-xs text-zinc-500">v{version}</p>
+            <h2 className="font-serif-display text-base font-semibold text-ledger-ink">Tawreed</h2>
+            <p className="text-xs text-ledger-ink-faint">v{version}</p>
           </div>
         </div>
         <ActionIcon variant="subtle" color="gray" onClick={onClose} aria-label={t('close')}>
@@ -63,13 +63,13 @@ export default function AboutModal({
         </ActionIcon>
       </div>
 
-      <p className="mt-6 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+      <p className="mt-6 text-sm font-medium text-ledger-ink">
         {t('aboutHeadline')}
       </p>
-      <p className="mt-2 max-w-lg text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+      <p className="mt-2 max-w-lg text-xs leading-5 text-ledger-ink-dim">
         {t('aboutBody')}
       </p>
-      <p className="mt-3 rounded-lg bg-zinc-50 p-3 text-xs leading-5 text-zinc-600 dark:bg-white/[0.04] dark:text-zinc-300">
+      <p className="mt-3 rounded-lg border border-ledger-line bg-ledger-surface-2 p-3 text-xs leading-5 text-ledger-ink-dim">
         {t('aboutPrinciple')}
       </p>
 
@@ -79,25 +79,25 @@ export default function AboutModal({
           [t('aboutLanguages'), t('aboutLanguagesDetail')],
           [t('aboutDelivery'), t('aboutDeliveryDetail')],
         ].map(([value, label]) => (
-          <div key={value} className="rounded-lg border border-zinc-200 p-3 dark:border-white/10">
-            <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">{value}</div>
-            <div className="mt-1 text-[10px] text-zinc-500">{label}</div>
+          <div key={value} className="rounded-lg border border-ledger-line p-3">
+            <div className="text-xs font-semibold text-ledger-ink">{value}</div>
+            <div className="mt-1 text-[10px] text-ledger-ink-faint">{label}</div>
           </div>
         ))}
       </div>
 
-      <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border-zinc-200 p-3 dark:border-white/10">
-        <div className="flex min-w-0 items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          {update.status === 'checking' && <Loader size={13} color="yellow" />}
+      <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border-ledger-line p-3">
+        <div className="flex min-w-0 items-center gap-2 text-xs text-ledger-ink-dim">
+          {update.status === 'checking' && <Loader size={13} color="gold" />}
           {update.status === 'current' && <CheckCircle2 size={14} className="text-emerald-600" />}
-          {update.status === 'available' && <Download size={14} className="text-amber-600" />}
-          {update.status === 'error' && <AlertCircle size={14} className="text-red-600" />}
+          {update.status === 'available' && <Download size={14} className="text-gold-deep dark:text-gold" />}
+          {update.status === 'error' && <AlertCircle size={14} className="text-ledger-danger" />}
           <span>{updateMessage}</span>
         </div>
         {update.status === 'available' ? (
           <Button
             size="compact-xs"
-            color="yellow"
+            color="gold"
             onClick={() => {
               setDownloadFailed(false);
               void onOpenUpdate(update.info.latest_version).catch(() => setDownloadFailed(true));
@@ -118,30 +118,42 @@ export default function AboutModal({
           </Button>
         )}
       </div>
-      {downloadFailed && <p className="mt-1 text-xs text-red-600">{t('updateDownloadFailed')}</p>}
+      {downloadFailed && <p className="mt-1 text-xs text-ledger-danger">{t('updateDownloadFailed')}</p>}
 
-      <div className="mt-6 border-t border-zinc-200 pt-4 dark:border-white/10">
-        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+      <div className="mt-6 border-t border-ledger-line pt-4">
+        <p className="text-sm font-semibold text-ledger-ink">
           Developed by Kareem Safwat
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
           <button
-            className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-amber-700 hover:underline dark:text-amber-400"
+            className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-gold-deep hover:underline dark:text-gold"
             onClick={() => void openUrl('https://kareemsafwat.com').catch(() => undefined)}
           >
             kareemsafwat.com <ArrowUpRight size={12} />
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-zinc-500 hover:text-zinc-900 hover:underline dark:hover:text-zinc-100"
+            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed').catch(() => undefined)}
           >
             {t('viewRepo')}
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-zinc-500 hover:text-zinc-900 hover:underline dark:hover:text-zinc-100"
+            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed/blob/main/LICENSE').catch(() => undefined)}
           >
             {t('mitLicense')}
+          </button>
+          <button
+            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
+            onClick={() => void openLogsFolder().catch(() => undefined)}
+          >
+            {t('openLogsFolder')}
+          </button>
+          <button
+            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
+            onClick={() => void openUrl('https://github.com/kareem-sf/tawreed/issues/new').catch(() => undefined)}
+          >
+            {t('reportProblem')}
           </button>
         </div>
       </div>

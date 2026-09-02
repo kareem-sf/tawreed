@@ -2,6 +2,8 @@
 
 mod codex;
 mod commands;
+mod error_contract;
+mod schema;
 mod store;
 mod update;
 
@@ -15,9 +17,20 @@ fn main() {
             commands::delete_api_key,
             commands::set_compatible_api_key,
             commands::delete_compatible_api_key,
+            commands::set_gemini_api_key,
+            commands::delete_gemini_api_key,
+            commands::set_grok_api_key,
+            commands::delete_grok_api_key,
             commands::llm_complete,
+            commands::anthropic_test,
             commands::compatible_complete,
             commands::compatible_test,
+            commands::gemini_complete,
+            commands::gemini_test,
+            commands::gemini_models,
+            commands::grok_complete,
+            commands::grok_test,
+            commands::grok_models,
             commands::cancel_ai_job,
             commands::read_input_file,
             commands::reserve_revision,
@@ -26,9 +39,10 @@ fn main() {
             commands::save_classification_memory,
             commands::list_classification_memory,
             commands::record_run,
+            commands::list_run_classifications,
             commands::list_runs,
-            commands::open_output_folder,
             commands::open_generated_folder,
+            commands::open_logs_folder,
             commands::open_workbook,
             commands::open_url,
             commands::app_log,

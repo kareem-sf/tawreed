@@ -25,7 +25,7 @@ The committed models match the cited upstream files byte-for-byte.
 
 ## PDF.js
 
-- Component: `pdfjs-dist` 6.1.200
+- Component: `pdfjs-dist` 6.2.108
 - Source: https://github.com/mozilla/pdf.js
 - License: Apache License 2.0
 - Included files: character maps, standard fonts, ICC/WASM support assets, and
@@ -34,6 +34,13 @@ The committed models match the cited upstream files byte-for-byte.
 Component-specific notices for Adobe CMaps, Liberation fonts, Foxit/PDFium
 fonts, OpenJPEG, QCMS, and JBIG2 are retained beside the files in
 `public/pdfjs/`.
+
+## ExcelJS
+
+- Component: `exceljs` 4.4.0
+- Source: https://github.com/exceljs/exceljs
+- License: MIT
+- Used to generate the master and per-package workbook files.
 
 ## UI Components
 

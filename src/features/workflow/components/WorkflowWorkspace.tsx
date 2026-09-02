@@ -1,4 +1,4 @@
-import { Button, Group, Text, Tooltip } from '@mantine/core';
+import { Button, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { AnimatePresence } from 'motion/react';
 import { FileSpreadsheet, FolderOpen, LockKeyhole } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -58,28 +58,45 @@ export function WorkflowWorkspace({
         )}
 
         {state.view === 'consent' && state.pendingInspection && (
-          <BlurFade key="consent" className="flex h-full items-center justify-center px-8">
-            <section className="w-full max-w-xl rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm dark:border-white/10 dark:bg-zinc-950/80">
-              <LockKeyhole className="h-8 w-8 text-amber-500" strokeWidth={1.6} aria-hidden="true" />
-              <Text fw={650} size="lg" mt="md">{t('aiConsentTitle')}</Text>
-              <Text size="sm" c="dimmed" mt={6}>{t('aiConsentBody')}</Text>
-              <div className="mt-4 rounded-xl bg-zinc-50 p-3 text-xs leading-5 text-zinc-600 dark:bg-white/[0.04] dark:text-zinc-300">
-                {t('sharedFieldsSimple', {
-                  count: state.pendingInspection.inspection.items.length,
-                  provider: consentProvider,
-                })}
-              </div>
-              <Text size="xs" c="dimmed" mt="sm">{t('aiConsentPrivacy')}</Text>
-              <Group mt="lg" justify="flex-end">
-                <Button variant="subtle" color="gray" onClick={() => onConsent(false)}>
-                  {t('stayOffline')}
-                </Button>
-                <Button color="yellow" onClick={() => onConsent(true)}>
-                  {t('improvePackages')}
-                </Button>
-              </Group>
-            </section>
-          </BlurFade>
+          <Modal
+            key="consent"
+            opened
+            onClose={() => onConsent(false)}
+            centered
+            radius="lg"
+            padding="xl"
+            size="md"
+            withCloseButton={false}
+          >
+            <LockKeyhole className="h-8 w-8 text-gold-deep dark:text-gold" strokeWidth={1.6} aria-hidden="true" />
+            <Text className="font-serif-display" fw={650} size="lg" mt="md">{t('aiConsentTitle')}</Text>
+            <Text size="sm" c="dimmed" mt={6}>{t('aiConsentBody')}</Text>
+            <div className="mt-4 rounded-xl border border-ledger-line bg-ledger-surface-2 p-3 text-xs leading-5 text-ledger-ink-dim">
+              {t('sharedFieldsSimple', {
+                count: state.pendingInspection.inspection.items.length,
+                provider: consentProvider,
+              })}
+            </div>
+            <Text size="xs" c="dimmed" mt="sm">{t('aiConsentPrivacy')}</Text>
+            <Group mt="lg" justify="flex-end">
+              <Button variant="subtle" color="gray" onClick={() => onConsent(false)}>
+                {t('stayOffline')}
+              </Button>
+              <Button
+                color="gold"
+                onClick={() => onConsent(true)}
+                styles={{
+                  root: {
+                    color: '#1c1408',
+                    fontWeight: 700,
+                    background: 'linear-gradient(180deg, #f3c968, var(--gold))',
+                  },
+                }}
+              >
+                {t('improvePackages')}
+              </Button>
+            </Group>
+          </Modal>
         )}
 
         {state.view === 'busy' && (
@@ -120,11 +137,11 @@ export function WorkflowWorkspace({
         {state.view === 'done' && state.output && (
           <BlurFade key="done" className="flex h-full flex-col items-center justify-center gap-3 px-8">
             <FileSpreadsheet
-              className="h-12 w-12 text-amber-500 drop-shadow-[0_8px_20px_rgba(232,181,74,0.24)]"
+              className="h-12 w-12 text-gold drop-shadow-[0_8px_20px_rgba(232,181,74,0.24)]"
               strokeWidth={1.35}
               aria-hidden="true"
             />
-            <Text fw={650}>{t('doneTitle')}</Text>
+            <Text className="font-serif-display" fw={650}>{t('doneTitle')}</Text>
             <Text size="sm" fw={600}>{state.output.projectName} · {state.output.revisionLabel}</Text>
             <Text
               size="xs"
@@ -147,7 +164,7 @@ export function WorkflowWorkspace({
                   size="xs"
                   leftSection={<FileSpreadsheet size={13} aria-hidden="true" />}
                   onClick={() => void openWorkbook(state.output!.masterPath).catch(() => undefined)}
-                  styles={{ root: { background: '#1a1408', color: '#f5d58a', fontWeight: 600 } }}
+                  styles={{ root: { background: 'var(--surface-2)', color: 'var(--gold)', fontWeight: 600 } }}
                 >
                   {t('openWorkbook')}
                 </Button>

@@ -1,11 +1,13 @@
 // Validation rule engine — errors block generation, warnings don't.
-import type { BoqItem, Classification, ValidationIssue, WorkPackage } from '../shared/types';
+import { REVIEW_CONFIDENCE_THRESHOLD, type BoqItem, type Classification, type ValidationIssue, type WorkPackage } from '../shared/types';
 import { TAXONOMY, UNCLASSIFIED } from './classify/taxonomy';
 import { itemTotal } from './item-total';
 import { normalizeText } from './normalize';
 
 const TOTAL_TOLERANCE_PCT = 0.015; // 1.5%
-const TOTAL_TOLERANCE_ABS = 1; // EGP — small floor so near-zero totals don't flap on rounding
+// Small absolute floor so near-zero totals don't flap on rounding. Unit-less: Tawreed
+// does not know, and does not claim to know, which currency a BOQ is priced in.
+const TOTAL_TOLERANCE_ABS = 1;
 const OUTLIER_Z = 2.5;
 
 export function buildPackages(items: BoqItem[], classifications: Classification[]): WorkPackage[] {
@@ -53,12 +55,12 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
   }
 
   // 2. Low-confidence classifications (WP-99 fallbacks are already covered by UNCLASSIFIED)
-  const lowConf = classifications.filter((c) => c.source !== 'heuristic' && c.confidence < 0.5 && c.packageCode !== UNCLASSIFIED.code).map((c) => c.itemId);
+  const lowConf = classifications.filter((c) => c.source !== 'heuristic' && c.confidence < REVIEW_CONFIDENCE_THRESHOLD && c.packageCode !== UNCLASSIFIED.code).map((c) => c.itemId);
   if (lowConf.length > 0) {
     issues.push({
       severity: 'warning', code: 'LOW_CONFIDENCE',
-      messageEn: `${lowConf.length} item(s) classified with low confidence (<50%).`,
-      messageAr: `${lowConf.length} بند مصنف بثقة منخفضة (أقل من 50%).`,
+      messageEn: `${lowConf.length} item(s) classified with low confidence (<${Math.round(REVIEW_CONFIDENCE_THRESHOLD * 100)}%).`,
+      messageAr: `${lowConf.length} بند مصنف بثقة منخفضة (أقل من ${Math.round(REVIEW_CONFIDENCE_THRESHOLD * 100)}%).`,
       itemIds: lowConf,
     });
   }

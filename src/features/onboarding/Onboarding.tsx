@@ -6,6 +6,7 @@ import { setSetting } from '../../bridge';
 import { currentDesktopWindow } from '../../platform/desktop/window';
 import Logo from '../../components/Logo';
 import { ProviderSetup } from '../settings/ProviderSetup';
+import LiveDemo from './LiveDemo';
 
 type OnboardingStep = 'language' | 'video' | 'connection';
 
@@ -14,6 +15,8 @@ interface Props {
   required: boolean;
   hasKey: boolean;
   hasCompatibleKey: boolean;
+  hasGeminiKey: boolean;
+  hasGrokKey: boolean;
   onComplete: () => void;
   onClose: () => void;
 }
@@ -25,6 +28,8 @@ export default function Onboarding({
   required,
   hasKey,
   hasCompatibleKey,
+  hasGeminiKey,
+  hasGrokKey,
   onComplete,
   onClose,
 }: Props) {
@@ -36,6 +41,9 @@ export default function Onboarding({
   const index = stepOrder.indexOf(step);
 
   useEffect(() => {
+    // Deliberate prop-to-state sync: reopening onboarding at a different step must
+    // move the wizard, and the dependency limits it to an actual prop change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStep(initialStep);
   }, [initialStep]);
 
@@ -62,7 +70,7 @@ export default function Onboarding({
   };
 
   return (
-    <div className="flex h-full flex-col bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
+    <div className="flex h-full flex-col bg-ledger-bg text-ledger-ink">
       <header className="flex h-10 shrink-0 items-center justify-between px-4" data-tauri-drag-region>
         <div className="flex items-center gap-2" data-tauri-drag-region>
           <Logo size={18} />
@@ -107,10 +115,10 @@ export default function Onboarding({
                 key={item}
                 className={`h-1.5 rounded-full transition-all ${
                   itemIndex === index
-                    ? 'w-9 bg-amber-500'
+                    ? 'w-9 bg-gold'
                     : itemIndex < index
-                      ? 'w-5 bg-zinc-400'
-                      : 'w-5 bg-zinc-200 dark:bg-zinc-800'
+                      ? 'w-5 bg-ledger-ink-dim'
+                      : 'w-5 bg-ledger-surface-2'
                 }`}
               />
             ))}
@@ -118,26 +126,30 @@ export default function Onboarding({
 
           {step === 'language' && (
             <section className="mx-auto max-w-lg text-center">
-              <Globe2 className="mx-auto size-8 text-amber-500" />
-              <h1 className="mt-5 text-2xl font-semibold tracking-[-0.03em]">
+              <Globe2 className="mx-auto size-9 text-gold" strokeWidth={1.5} />
+              <h1 className="font-serif-display mt-6 text-2xl font-semibold tracking-[-0.01em]">
                 Choose your language
               </h1>
-              <p className="mt-2 text-sm text-zinc-500">اختر لغة التطبيق</p>
+              <p className="mt-2 text-sm text-ledger-ink-faint">اختر لغة التطبيق</p>
               <div className="mt-8 grid grid-cols-2 gap-3">
                 <button
-                  className="rounded-2xl border border-zinc-200 p-6 text-start transition hover:border-amber-500 hover:bg-amber-50/60 dark:border-white/10 dark:hover:bg-amber-500/10"
+                  className="group rounded-2xl border border-ledger-line p-6 text-start shadow-sm transition hover:-translate-y-0.5 hover:border-gold-deep hover:bg-gold/8 hover:shadow-md"
                   onClick={() => void chooseLanguage('en')}
                 >
-                  <div className="text-lg font-semibold">English</div>
-                  <div className="mt-1 text-xs text-zinc-500">Continue in English</div>
+                  <div className="text-lg font-semibold transition group-hover:text-gold-deep dark:group-hover:text-gold">
+                    English
+                  </div>
+                  <div className="mt-1 text-xs text-ledger-ink-faint">Continue in English</div>
                 </button>
                 <button
                   dir="rtl"
-                  className="rounded-2xl border border-zinc-200 p-6 text-start transition hover:border-amber-500 hover:bg-amber-50/60 dark:border-white/10 dark:hover:bg-amber-500/10"
+                  className="group rounded-2xl border border-ledger-line p-6 text-start shadow-sm transition hover:-translate-y-0.5 hover:border-gold-deep hover:bg-gold/8 hover:shadow-md"
                   onClick={() => void chooseLanguage('ar')}
                 >
-                  <div className="text-lg font-semibold">العربية</div>
-                  <div className="mt-1 text-xs text-zinc-500">المتابعة باللغة العربية</div>
+                  <div className="text-lg font-semibold transition group-hover:text-gold-deep dark:group-hover:text-gold">
+                    العربية
+                  </div>
+                  <div className="mt-1 text-xs text-ledger-ink-faint">المتابعة باللغة العربية</div>
                 </button>
               </div>
             </section>
@@ -149,27 +161,7 @@ export default function Onboarding({
                 <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('tourTitle')}</h1>
                 <Text size="sm" c="dimmed" mt={5}>{t('tourDetail')}</Text>
               </div>
-              <div className="mt-5 overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-950 shadow-sm dark:border-white/10">
-                <video
-                  key={ar ? 'ar' : 'en'}
-                  className="aspect-video w-full"
-                  controls
-                  autoPlay
-                  preload="auto"
-                  poster={`/onboarding/tawreed-tour-${ar ? 'ar' : 'en'}-poster.jpg`}
-                >
-                  <source
-                    src={`/onboarding/tawreed-tour-${ar ? 'ar' : 'en'}.mp4`}
-                    type="video/mp4"
-                  />
-                  <track
-                    default
-                    kind="captions"
-                    srcLang={ar ? 'ar' : 'en'}
-                    src={`/onboarding/tawreed-tour-${ar ? 'ar' : 'en'}.vtt`}
-                  />
-                </video>
-              </div>
+              <LiveDemo lang={ar ? 'ar' : 'en'} />
               <Group justify="space-between" mt="lg">
                 <Button
                   variant="subtle"
@@ -180,7 +172,7 @@ export default function Onboarding({
                   {t('back')}
                 </Button>
                 <Button
-                  color="yellow"
+                  color="gold"
                   rightSection={<ChevronRight size={14} className="rtl:rotate-180" />}
                   onClick={() => void persistStep('connection')}
                 >
@@ -200,6 +192,8 @@ export default function Onboarding({
                 <ProviderSetup
                   hasKey={hasKey}
                   hasCompatibleKey={hasCompatibleKey}
+                  hasGeminiKey={hasGeminiKey}
+                  hasGrokKey={hasGrokKey}
                 />
               </div>
               <Group justify="space-between" mt="xl">
@@ -222,7 +216,7 @@ export default function Onboarding({
                     {t('useOffline')}
                   </Button>
                   <Button
-                    color="yellow"
+                    color="gold"
                     loading={finishing}
                     onClick={() => void finish(false)}
                   >

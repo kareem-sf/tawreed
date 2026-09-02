@@ -2,7 +2,9 @@
 name = "tawreed"
 version = "0.5.6"
 edition = "2021"
-rust-version = "1.88"
+# Matches the toolchain CI pins and tests. Raising this is a breaking change for
+# anyone building from source, so only move it deliberately alongside CI.
+rust-version = "1.97"
 description = "Portable BOQ → work-package workbook converter"
 license = "MIT"
 authors = ["Kareem Safwat"]
@@ -26,6 +28,7 @@ base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 semver = "1"
 sha2 = "0.10"
+ts-rs = "12"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

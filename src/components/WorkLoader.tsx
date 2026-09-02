@@ -28,7 +28,7 @@ export default function WorkLoader({
   return (
     <div className="flex flex-col items-center text-center" role="status" aria-live="polite">
       <motion.div
-        className="relative text-zinc-950 dark:text-white"
+        className="relative text-ledger-ink"
         style={{ width: config.box, height: config.box }}
         animate={reduceMotion ? undefined : { scale: [1, 1.025, 1] }}
         transition={{ duration: 2.4, ease: 'easeInOut', repeat: Infinity }}
@@ -53,10 +53,10 @@ export default function WorkLoader({
             }}
           />
         ))}
-        <span className="absolute inset-[42%] rounded-full bg-amber-500" />
+        <span className="absolute inset-[42%] rounded-full bg-gold" />
       </motion.div>
 
-      <h2 className="mt-5 text-lg font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white">
+      <h2 className="font-serif-display mt-5 text-lg font-semibold tracking-[-0.01em] text-ledger-ink">
         {title}
       </h2>
       {subtitle && (
@@ -66,9 +66,9 @@ export default function WorkLoader({
       )}
       {boundedProgress !== null && (
         <div className="mt-4 w-52">
-          <div className="h-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+          <div className="h-1 overflow-hidden rounded-full bg-ledger-surface-2">
             <motion.div
-              className="h-full rounded-full bg-amber-500"
+              className="h-full rounded-full bg-gold"
               initial={false}
               animate={{ width: `${boundedProgress}%` }}
               transition={{ duration: reduceMotion ? 0 : 0.25, ease: 'easeOut' }}

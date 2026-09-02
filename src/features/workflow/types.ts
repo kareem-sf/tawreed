@@ -32,6 +32,8 @@ export interface PipelineData {
   issues: ValidationIssue[];
   llmUsed: boolean;
   llmFailed: boolean;
+  /** Items the AI never classified — a failed batch still lets the run finish. */
+  aiSkipped: number;
   provider: AiProvider;
   model: string;
   trace: AgentEvent[];

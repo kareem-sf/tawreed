@@ -36,6 +36,8 @@ export default function App() {
           required={configuration.onboardingRequired}
           hasKey={configuration.boot.has_api_key}
           hasCompatibleKey={configuration.boot.has_compatible_key}
+          hasGeminiKey={configuration.boot.has_gemini_key}
+          hasGrokKey={configuration.boot.has_grok_key}
           onComplete={() => void configuration.completeOnboarding()}
           onClose={configuration.closeOnboarding}
         />
@@ -70,6 +72,7 @@ export default function App() {
         update={configuration.update}
         onChange={setDialog}
         onSettingsClosed={() => void configuration.refreshConfiguration()}
+        onProviderChanged={() => void configuration.refreshConfiguration()}
         onRunOnboarding={() => configuration.openOnboarding(false, 'language')}
         onCheckUpdate={configuration.refreshUpdate}
       />

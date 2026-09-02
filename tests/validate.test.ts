@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runPipeline } from '../engine/pipeline';
+import { runPipeline } from './pipeline-harness';
 import { enFixture } from './fixtures';
 import { hasBlockingErrors } from '../engine/validate';
 import type { BoqItem, Classification } from '../shared/types';

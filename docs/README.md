@@ -5,15 +5,18 @@ one primary document and link to it instead of copying instructions elsewhere.
 
 ## Users
 
+- [User guide](USER-GUIDE.md)
 - [Installation and updates](INSTALL.md)
 - [Privacy and local data](PRIVACY.md)
 - [Troubleshooting and operations](OPERATIONS.md)
+- [Getting support](../SUPPORT.md)
 
 ## Contributors and maintainers
 
 - [Architecture and trust boundaries](ARCHITECTURE.md)
 - [Development workflow](DEVELOPMENT.md)
 - [Release process](RELEASING.md)
+- [Branch protection and repository settings](BRANCH-PROTECTION.md)
 - [Repository security policy](../SECURITY.md)
 - [Contribution policy](../CONTRIBUTING.md)
 - [Third-party notices](../THIRD_PARTY_NOTICES.md)

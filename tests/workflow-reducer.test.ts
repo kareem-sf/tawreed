@@ -50,6 +50,7 @@ function data(): PipelineData {
     issues: [],
     llmUsed: false,
     llmFailed: false,
+    aiSkipped: 0,
     provider: 'offline',
     model: '',
     trace: [],

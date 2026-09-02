@@ -49,6 +49,12 @@ jobs:
       - name: Verify frontend, tests, build, assets, and version
         run: npm run check
 
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end smoke test
+        run: npm run test:e2e
+
       - name: Audit npm dependencies
         run: npm audit --audit-level=high --omit=dev
 
@@ -108,6 +114,12 @@ jobs:
 
       - name: Run frontend tests
         run: npm test
+
+      # One platform enforces the coverage ratchet; running it on both would only
+      # duplicate the work, since coverage does not vary by operating system.
+      - name: Enforce coverage thresholds
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run test:coverage
 
   platform-builds:
     name: Build ${{ matrix.name }}

@@ -1,4 +1,4 @@
-export type Provider = 'codex' | 'anthropic' | 'compatible';
+export type Provider = 'codex' | 'anthropic' | 'compatible' | 'gemini' | 'grok';
 
 export interface CompatibleSettings {
   baseUrl: string;

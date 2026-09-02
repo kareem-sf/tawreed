@@ -7,6 +7,9 @@ import { ProviderSetup } from './ProviderSetup';
 interface Props {
   hasKey: boolean;
   hasCompatibleKey: boolean;
+  hasGeminiKey: boolean;
+  hasGrokKey: boolean;
+  onProviderChanged: () => void;
   onOpenAbout: () => void;
   onRunOnboarding: () => void;
 }
@@ -14,6 +17,9 @@ interface Props {
 export default function SettingsModal({
   hasKey,
   hasCompatibleKey,
+  hasGeminiKey,
+  hasGrokKey,
+  onProviderChanged,
   onOpenAbout,
   onRunOnboarding,
 }: Props) {
@@ -28,10 +34,16 @@ export default function SettingsModal({
       <section>
         <Text size="xs" fw={650}>{t('connection')}</Text>
         <Text size="xs" c="dimmed" mt={2} mb={8}>{t('connectionDetail')}</Text>
-        <ProviderSetup hasKey={hasKey} hasCompatibleKey={hasCompatibleKey} />
+        <ProviderSetup
+          hasKey={hasKey}
+          hasCompatibleKey={hasCompatibleKey}
+          hasGeminiKey={hasGeminiKey}
+          hasGrokKey={hasGrokKey}
+          onConfigured={onProviderChanged}
+        />
       </section>
 
-      <div className="grid grid-cols-2 gap-2 border-t border-zinc-200 pt-4 dark:border-white/10">
+      <div className="grid grid-cols-2 gap-2 border-t border-ledger-line pt-4">
         <Button
           variant="light"
           color="gray"

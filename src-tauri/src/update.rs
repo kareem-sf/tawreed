@@ -1,6 +1,7 @@
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use ts_rs::TS;
 
 const RELEASE_API: &str = "https://api.github.com/repos/kareem-sf/tawreed/releases/latest";
 const RELEASE_PAGE_ROOT: &str = "https://github.com/kareem-sf/tawreed/releases/tag";
@@ -26,7 +27,8 @@ struct GithubRelease {
     assets: Vec<ReleaseAsset>,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/bridge-types/")]
 pub struct UpdateInfo {
     pub current_version: String,
     pub latest_version: String,

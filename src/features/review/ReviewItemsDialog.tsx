@@ -1,5 +1,7 @@
-import { Button, Group, Modal, ScrollArea, Select, Table, Text } from '@mantine/core';
+import { Button, Group, Modal, Text } from '@mantine/core';
+import { List } from 'react-window';
 import type { BoqItem, Classification } from '../../../shared/types';
+import { ReviewItemRow, type ReviewItemRowProps } from './ReviewItemRow';
 
 interface PackageOption {
   value: string;
@@ -33,6 +35,9 @@ interface Props {
   itemPackageLabel: (itemId: number) => string;
 }
 
+const ROW_HEIGHT = 44;
+const LIST_HEIGHT = 420;
+
 export function ReviewItemsDialog({
   opened,
   title,
@@ -59,6 +64,18 @@ export function ReviewItemsDialog({
   sourceReference,
   itemPackageLabel,
 }: Props) {
+  const rowProps: ReviewItemRowProps = {
+    items,
+    classifications,
+    reviewItemIds,
+    packageOptions,
+    needsReviewLabel,
+    checkedLabel,
+    onClassificationChange,
+    sourceReference,
+    itemPackageLabel,
+  };
+
   return (
     <Modal
       opened={opened}
@@ -70,48 +87,19 @@ export function ReviewItemsDialog({
       styles={{ content: { borderRadius: 18 } }}
     >
       <Text size="xs" c="dimmed" mb="sm">{detail}</Text>
-      <ScrollArea h={420} offsetScrollbars>
-        <Table striped highlightOnHover withRowBorders stickyHeader>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>{sourceLabel}</Table.Th>
-              <Table.Th>{descriptionLabel}</Table.Th>
-              <Table.Th>{packageLabel}</Table.Th>
-              <Table.Th>{statusLabel}</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {items.map((item) => {
-              const classification = classifications.get(item.id);
-              const needsReview = reviewItemIds.has(item.id);
-              return (
-                <Table.Tr key={item.id}>
-                  <Table.Td><Text size="xs">{sourceReference(item)}</Text></Table.Td>
-                  <Table.Td>
-                    <Text size="xs" maw={310} className="allow-select">{item.description}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Select
-                      aria-label={itemPackageLabel(item.id)}
-                      data={packageOptions}
-                      value={classification?.packageCode ?? 'WP-99'}
-                      onChange={(value) => value && onClassificationChange(item.id, value)}
-                      size="xs"
-                      searchable
-                      w={245}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs" c={needsReview ? 'yellow.8' : 'dimmed'}>
-                      {needsReview ? needsReviewLabel : checkedLabel}
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
-              );
-            })}
-          </Table.Tbody>
-        </Table>
-      </ScrollArea>
+      <div className="grid grid-cols-[110px_minmax(0,1fr)_261px_90px] gap-2 border-b border-ledger-line px-3 pb-2">
+        <Text size="xs" fw={600} c="dimmed">{sourceLabel}</Text>
+        <Text size="xs" fw={600} c="dimmed">{descriptionLabel}</Text>
+        <Text size="xs" fw={600} c="dimmed">{packageLabel}</Text>
+        <Text size="xs" fw={600} c="dimmed">{statusLabel}</Text>
+      </div>
+      <List
+        rowComponent={ReviewItemRow}
+        rowCount={items.length}
+        rowHeight={ROW_HEIGHT}
+        rowProps={rowProps}
+        style={{ height: LIST_HEIGHT }}
+      />
       <Group justify="space-between" mt="sm">
         <Button
           size="xs"

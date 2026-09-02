@@ -8,6 +8,7 @@ import type {
   PackageDefinition,
 } from '../../shared/types';
 import type { LlmProgress } from './types-internal';
+import { flagHeuristicDisagreement } from './agreement';
 import { heuristicClassify, heuristicFallback } from './heuristic';
 import { llmClassify, type LlmTransport } from './llm';
 import { TAXONOMY, UNCLASSIFIED } from './taxonomy';
@@ -15,6 +16,8 @@ import { TAXONOMY, UNCLASSIFIED } from './taxonomy';
 export interface ClassifyOptions {
   useLlm: boolean;
   transport?: LlmTransport;
+  /** Overrides DEFAULT_MODEL. Set by the evaluation harness to compare models. */
+  model?: string;
   onProgress?: (p: LlmProgress) => void;
 }
 
@@ -24,9 +27,16 @@ export async function classifyAll(items: BoqItem[], opts: ClassifyOptions): Prom
     return [...classified, ...remaining.map((i) => heuristicFallback(i))];
   }
   if (!opts.transport) throw new Error('LLM classification requested but no transport provided.');
-  return llmClassify(items, opts.transport, (done, total, processedItems) =>
-    opts.onProgress?.({ phase: 'llm', done, total, remainingItems: Math.max(0, items.length - processedItems) })
+  const classifications = await llmClassify(
+    items,
+    opts.transport,
+    (done, total, processedItems) =>
+      opts.onProgress?.({ phase: 'llm', done, total, remainingItems: Math.max(0, items.length - processedItems) }),
+    opts.model,
   );
+  // Second opinion from the offline classifier — cheap, deterministic, and independent of
+  // anything the model says about its own certainty.
+  return flagHeuristicDisagreement(items, classifications);
 }
 
 function catalogFromClassifications(classifications: Classification[]): PackageDefinition[] {
