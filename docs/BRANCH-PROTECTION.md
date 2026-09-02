@@ -14,7 +14,7 @@ Apply these under **Settings → Rules → Rulesets**, targeting the default bra
 | Target | Default branch | — |
 | Restrict deletions | On | `main` must not be deletable. |
 | Block force pushes | On | Release tags and provenance reference commits on `main`. |
-| Require a pull request | On, 1 approval | No direct pushes. |
+| Require a pull request | On, 0 approvals | No direct pushes. Approvals are set to zero because a single maintainer cannot approve their own pull request; raise this to 1 the moment a second maintainer exists. |
 | Dismiss stale approvals on push | On | An approval must apply to the code that merges. |
 | Require conversation resolution | On | — |
 | Require status checks to pass | On | See below. |
@@ -62,5 +62,7 @@ accept explicitly before the repository goes public:
   `.github/workflows/scorecard.yml`.
 - **Pull requests**: allow squash merging only; auto-delete head branches on
   merge.
-- **Tags**: protect `v*` so a release tag cannot be moved after publication —
-  build provenance attestation is bound to the tagged commit.
+- **Tags**: the `Protect release tags` ruleset targets `refs/tags/v*` and blocks
+  deletion and non-fast-forward updates, so a release tag cannot be moved after
+  publication — build provenance attestation is bound to the tagged commit. Tag
+  *creation* stays open because `release-please` creates the tag itself.
