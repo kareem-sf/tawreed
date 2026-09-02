@@ -51,7 +51,11 @@ export default function ReviewPanel({
       for (const itemId of issue.itemIds) ids.add(itemId);
     }
     for (const classification of data.classifications) {
-      if (classification.packageCode === 'WP-99' || classification.confidence < REVIEW_CONFIDENCE_THRESHOLD) {
+      if (
+        classification.packageCode === 'WP-99'
+        || classification.confidence < REVIEW_CONFIDENCE_THRESHOLD
+        || classification.heuristicDisagreement
+      ) {
         ids.add(classification.itemId);
       }
     }

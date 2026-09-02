@@ -50,6 +50,12 @@ export interface Classification {
   packageNameAr?: string;
   confidence: number; // 0..1
   source: ClassifySource;
+  /**
+   * The offline heuristic grouped this item with items the model put elsewhere. An
+   * independent second opinion, unlike `confidence`, which the model reports about itself.
+   * Only ever set on the LLM path; absent means agreement or no heuristic opinion.
+   */
+  heuristicDisagreement?: boolean;
 }
 
 export interface WorkPackageDef {
