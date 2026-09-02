@@ -392,3 +392,78 @@ mod path_safety_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::safe_component;
+
+    #[test]
+    fn path_traversal_and_separators_cannot_survive_into_a_path_segment() {
+        // Separators become spaces, so "../../etc/passwd" collapses to the single
+        // harmless folder name ".. .. etc passwd". What must never survive is a path
+        // separator, or a component that still *is* a directory traversal.
+        for raw in [
+            "../../etc/passwd",
+            r"..\..\windows",
+            "a/b/c",
+            r"a\b",
+            "..",
+            ".",
+        ] {
+            let safe = safe_component(raw, 80);
+            assert!(!safe.contains('/'), "{raw} -> {safe}");
+            assert!(!safe.contains('\\'), "{raw} -> {safe}");
+            assert_ne!(safe, ".", "{raw}");
+            assert_ne!(safe, "..", "{raw}");
+        }
+    }
+
+    #[test]
+    fn characters_windows_refuses_in_a_filename_are_removed() {
+        let safe = safe_component("Tower <A>: \"phase\" | 1? *", 80);
+        for ch in ['<', '>', ':', '"', '|', '?', '*'] {
+            assert!(!safe.contains(ch), "{ch} survived in {safe}");
+        }
+    }
+
+    #[test]
+    fn control_characters_are_not_carried_through() {
+        let safe = safe_component("Project\u{0}\u{1}\u{7}Name\nSecond", 80);
+        assert!(!safe.chars().any(|ch| ch < ' '), "{safe}");
+    }
+
+    #[test]
+    fn windows_reserved_device_names_are_escaped_extension_and_all() {
+        // CON.xlsx is as unusable as CON, so the check is against the stem.
+        for raw in [
+            "CON", "con", "PRN", "aux", "NUL", "COM1", "lpt9", "CON.xlsx",
+        ] {
+            let safe = safe_component(raw, 80);
+            assert!(safe.starts_with("Project "), "{raw} -> {safe}");
+        }
+        // A name that merely starts the same way is not reserved.
+        assert_eq!(safe_component("COM10", 80), "COM10");
+        assert_eq!(safe_component("CONCRETE", 80), "CONCRETE");
+    }
+
+    #[test]
+    fn trailing_dots_and_spaces_are_trimmed_and_empty_names_get_a_fallback() {
+        // Windows silently strips these, which would desynchronise a reserved folder name.
+        assert_eq!(safe_component("Tower A. . ", 80), "Tower A");
+        assert_eq!(safe_component("   ", 80), "Untitled Project");
+        assert_eq!(safe_component("...", 80), "Untitled Project");
+        assert_eq!(safe_component("", 80), "Untitled Project");
+    }
+
+    #[test]
+    fn runs_of_whitespace_collapse_and_the_length_cap_is_honoured() {
+        assert_eq!(safe_component("Tower    A\t\tB", 80), "Tower A B");
+        assert_eq!(safe_component(&"x".repeat(500), 32).chars().count(), 32);
+    }
+
+    #[test]
+    fn arabic_project_names_survive_unchanged() {
+        // Sanitising must not mangle a non-Latin script; only unsafe characters go.
+        assert_eq!(safe_component("مشروع البرج", 80), "مشروع البرج");
+    }
+}

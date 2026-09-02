@@ -8,6 +8,25 @@ pub fn bootstrap() -> Result<store::BootstrapInfo, String> {
     store::bootstrap_data_dir()
 }
 
+/// Content-sniff an input file against the extension it claims. An extension is a user
+/// assertion; the bytes are the evidence. Pure so it can be tested without a filesystem.
+pub(crate) fn has_valid_signature(extension: &str, bytes: &[u8]) -> bool {
+    match extension {
+        "pdf" => bytes.starts_with(b"%PDF-"),
+        "xlsx" | "ods" => {
+            bytes.len() >= 4
+                && bytes[0] == 0x50
+                && bytes[1] == 0x4b
+                && matches!(bytes[2], 0x03 | 0x05 | 0x07)
+        }
+        "xls" => bytes.starts_with(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+        // Text files have no reliable magic number. Reject empty and obviously
+        // binary payloads while retaining UTF-8 and legacy Windows/Arabic encodings.
+        "csv" => !bytes.is_empty() && bytes.iter().filter(|byte| **byte == 0).count() < 4,
+        _ => false,
+    }
+}
+
 #[tauri::command]
 pub fn read_input_file(path: String) -> Result<Value, String> {
     let path = std::path::Path::new(&path);
@@ -27,21 +46,7 @@ pub fn read_input_file(path: String) -> Result<Value, String> {
         return Err("The input file is larger than the 100 MB limit".into());
     }
     let bytes = std::fs::read(path).map_err(|e| format!("read input file: {e}"))?;
-    let valid = match extension.as_str() {
-        "pdf" => bytes.starts_with(b"%PDF-"),
-        "xlsx" | "ods" => {
-            bytes.len() >= 4
-                && bytes[0] == 0x50
-                && bytes[1] == 0x4b
-                && matches!(bytes[2], 0x03 | 0x05 | 0x07)
-        }
-        "xls" => bytes.starts_with(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
-        // Text files have no reliable magic number. Reject empty and obviously
-        // binary payloads while retaining UTF-8 and legacy Windows/Arabic encodings.
-        "csv" => !bytes.is_empty() && bytes.iter().filter(|byte| **byte == 0).count() < 4,
-        _ => false,
-    };
-    if !valid {
+    if !has_valid_signature(&extension, &bytes) {
         return Err(format!(
             "The selected .{extension} file has an invalid file signature"
         ));
@@ -220,6 +225,61 @@ mod external_url_tests {
             "file:///C:/Windows/System32/calc.exe",
         ] {
             assert!(approved_external_url(url).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_valid_signature;
+
+    const ZIP: &[u8] = &[0x50, 0x4b, 0x03, 0x04, 0x14, 0x00];
+    const CFB: &[u8] = &[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+
+    #[test]
+    fn each_format_accepts_its_own_signature() {
+        assert!(has_valid_signature("pdf", b"%PDF-1.7\n%..."));
+        assert!(has_valid_signature("xlsx", ZIP));
+        assert!(has_valid_signature("ods", ZIP));
+        assert!(has_valid_signature("xls", CFB));
+        assert!(has_valid_signature("csv", b"code,description,unit\n"));
+    }
+
+    #[test]
+    fn a_renamed_file_is_refused_rather_than_handed_to_a_parser() {
+        // The point of the check: a .exe renamed to .xlsx must not reach ExcelJS.
+        assert!(!has_valid_signature("xlsx", b"MZ\x90\x00executable"));
+        assert!(!has_valid_signature("pdf", ZIP));
+        assert!(!has_valid_signature("xls", ZIP));
+        assert!(!has_valid_signature("xlsx", CFB));
+    }
+
+    #[test]
+    fn an_empty_or_truncated_file_is_refused() {
+        for extension in ["pdf", "xlsx", "ods", "xls", "csv"] {
+            assert!(!has_valid_signature(extension, b""), "{extension}");
+        }
+        assert!(!has_valid_signature("xlsx", &ZIP[..3]));
+        assert!(!has_valid_signature("pdf", b"%PD"));
+    }
+
+    #[test]
+    fn csv_keeps_legacy_arabic_encodings_but_rejects_binary() {
+        // Windows-1256 Arabic has no BOM and no magic number; it must still be accepted.
+        assert!(has_valid_signature(
+            "csv",
+            &[0xc7, 0xe1, 0xe6, 0xcd, 0xcf, 0xc9, b',', b'1']
+        ));
+        // Four or more NUL bytes is the binary tell.
+        assert!(!has_valid_signature("csv", &[b'a', 0, 0, 0, 0, b'b']));
+        // Fewer than four stays acceptable, so a stray NUL does not reject a real CSV.
+        assert!(has_valid_signature("csv", &[b'a', 0, b',', 0, b'b']));
+    }
+
+    #[test]
+    fn an_unsupported_extension_is_never_valid() {
+        for extension in ["exe", "docx", "zip", "", "XLSX"] {
+            assert!(!has_valid_signature(extension, ZIP), "{extension}");
         }
     }
 }
