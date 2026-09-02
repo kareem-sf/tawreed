@@ -12,6 +12,11 @@ pub use openai_compat::*;
 use serde_json::Value;
 
 const MAX_LLM_REQUEST_BYTES: usize = 256 * 1024;
+
+/// Matched by the `output budget` branch of src/features/workflow/errors.ts. Reword only
+/// alongside that branch — see src-tauri/src/error_contract.rs.
+pub(crate) const REQUEST_TOO_LARGE_MESSAGE: &str =
+    "The request exceeds the 256 KB limit — split the batch and retry";
 /// Matches the Codex `--output-schema` ceiling, so every provider caps a schema alike.
 const MAX_OUTPUT_SCHEMA_BYTES: usize = 128 * 1024;
 
@@ -40,7 +45,7 @@ pub(super) fn output_schema(request: &Value) -> Result<Option<&Value>, String> {
 pub(super) fn serialize_capped(payload: &Value) -> Result<Vec<u8>, String> {
     let body = serde_json::to_vec(payload).map_err(|e| format!("serialize request: {e}"))?;
     if body.len() > MAX_LLM_REQUEST_BYTES {
-        return Err("The request exceeds the 256 KB limit — split the batch and retry".into());
+        return Err(REQUEST_TOO_LARGE_MESSAGE.into());
     }
     Ok(body)
 }

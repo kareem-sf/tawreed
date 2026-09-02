@@ -419,6 +419,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
       }
       trace.push(workflowEvent('publish', 'completed', `${published.revisionLabel} published`));
       const completedData: PipelineData = { ...data, trace };
+      const itemsById = new Map(data.inspection.items.map((item) => [item.id, item]));
 
       try {
         await recordRun({
@@ -441,6 +442,15 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
           model: data.model,
           trace,
           memoryApplied: data.memoryApplied,
+          // Approved classifications, item by item: what the AI proposed and what the
+          // human changed. Aggregated `llmUsed` cannot answer either question later.
+          classifications: data.classifications.map((classification) => ({
+            itemId: classification.itemId,
+            description: itemsById.get(classification.itemId)?.description ?? '',
+            packageCode: classification.packageCode,
+            source: classification.source,
+            confidence: classification.confidence,
+          })),
         });
       } catch (reason) {
         void appLog(`recordRun failed (non-fatal): ${errorMessage(reason)}`);

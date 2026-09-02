@@ -159,12 +159,13 @@ function enforceBoundaries() {
 // Rust modules are not part of the TypeScript import graph, so they are budgeted here.
 // The two named files still exceed the general limit; their allowances are a ratchet
 // pinned at today's size so they can only shrink. Split them and delete these entries —
-// commands/ai was split this way and now needs no exemption at all.
+// commands/ai was split this way and now needs no exemption at all, and store.rs came
+// down from 815 when the history schema moved to schema.rs.
 function checkRustBudgets() {
   const rustBudgets = new Map([
     // +4 and +6 over the pre-ts-rs sizes for the binding derives and export attributes.
     ['src-tauri/src/codex.rs', 913],
-    ['src-tauri/src/store.rs', 815],
+    ['src-tauri/src/store.rs', 710],
   ]);
   const rustRoot = resolve(root, 'src-tauri/src');
   const rustFiles = readdirSync(rustRoot, { recursive: true, withFileTypes: true })

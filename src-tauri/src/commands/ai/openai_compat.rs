@@ -9,6 +9,12 @@ use super::jobs::{begin_ai_job, finish_ai_job, wait_for_cancellation};
 use super::retry::send_with_retry;
 use super::{output_schema, serialize_capped};
 
+/// Matched by the `output budget` branch of src/features/workflow/errors.ts. Reword only
+/// alongside that branch — see src-tauri/src/error_contract.rs.
+pub(crate) const OUTPUT_BUDGET_MESSAGE: &str =
+    "used its entire output budget before answering. Choose a model with a smaller \
+     reasoning step, or raise the token limit.";
+
 /// Google's OpenAI-compatible `/models` route lists ids in the native `models/<id>` form,
 /// but its `/chat/completions` route accepts only the bare id. Strip the prefix both when
 /// the catalog is read (so the picker stores bare ids) and when a model is read back from
@@ -266,10 +272,7 @@ async fn provider_complete_inner(
             .and_then(Value::as_str)
             .is_some_and(|reason| reason.eq_ignore_ascii_case("length"));
         return Err(if truncated {
-            format!(
-                "{provider_label} used its entire output budget before answering. \
-                 Choose a model with a smaller reasoning step, or raise the token limit."
-            )
+            format!("{provider_label} {OUTPUT_BUDGET_MESSAGE}")
         } else {
             format!("{provider_label} returned an empty response")
         });

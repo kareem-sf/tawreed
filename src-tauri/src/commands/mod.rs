@@ -7,7 +7,7 @@
 // named ones) because the `#[tauri::command]` macro attaches hidden sibling items
 // (e.g. `__cmd__foo`) next to each function that `tauri::generate_handler!` also needs
 // to resolve at `commands::foo`.
-mod ai;
+pub(crate) mod ai;
 mod codex_provider;
 mod credentials;
 mod history;

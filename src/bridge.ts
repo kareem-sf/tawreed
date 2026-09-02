@@ -1,6 +1,7 @@
 // Bridge to the Rust host. In a plain browser (vite dev), commands degrade gracefully.
 import { invoke } from '@tauri-apps/api/core';
-import type { RunRecord } from '../shared/types';
+import type { ClassifySource, RunClassificationRecord, RunRecord } from '../shared/types';
+import { runClassificationSchema, runRecordSchema } from './bridge-schemas';
 import { requestToPrompt, type LlmRequest } from '../engine/classify/llm';
 import type { GeneratedArtifact } from '../engine/generate';
 
@@ -249,7 +250,33 @@ export async function recordRun(entry: Omit<RunRecord, 'id'>): Promise<number> {
 
 export async function listRuns(): Promise<RunRecord[]> {
   if (!isDesktop()) return [];
-  return invoke<RunRecord[]>('list_runs');
+  const rows = await invoke<unknown[]>('list_runs');
+  // Drop only the rows that genuinely do not fit, rather than asserting the whole array.
+  return rows.flatMap((row) => {
+    const parsed = runRecordSchema.safeParse(row);
+    return parsed.success ? [parsed.data as RunRecord] : [];
+  });
+}
+
+/** Per-item classification provenance. `source: 'user'` is the human corrections. */
+export async function listRunClassifications(
+  filter: { runId?: number; source?: ClassifySource } = {},
+): Promise<RunClassificationRecord[]> {
+  if (!isDesktop()) return [];
+  const rows = await invoke<unknown[]>('list_run_classifications', {
+    runId: filter.runId ?? null,
+    source: filter.source ?? null,
+  });
+  return rows.flatMap((row) => {
+    const parsed = runClassificationSchema.safeParse(row);
+    return parsed.success ? [{
+      itemId: parsed.data.itemId,
+      description: parsed.data.description,
+      packageCode: parsed.data.packageCode,
+      source: parsed.data.source,
+      confidence: parsed.data.confidence,
+    }] : [];
+  });
 }
 
 export async function listClassificationMemory(

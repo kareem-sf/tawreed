@@ -2,9 +2,10 @@
 // Cross-checks the Tauri command surface: every command registered in main.rs must be
 // reachable from bridge.ts, and every command bridge.ts invokes must be registered.
 //
-// The IPC boundary is hand-mirrored (no ts-rs/specta codegen yet) and several invoke
-// names are built from template literals, so neither compiler sees a rename. Without
-// this gate a dropped or renamed command only fails at runtime, in front of a user.
+// ts-rs generates the wire *types* (src/bridge-types, checked by verify-bindings.cjs), but
+// command *names* are still strings on both sides, and several invoke names are built from
+// template literals, so neither compiler sees a rename. Without this gate a dropped or
+// renamed command only fails at runtime, in front of a user.
 'use strict';
 
 const fs = require('node:fs');

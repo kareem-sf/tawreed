@@ -152,6 +152,20 @@ export interface RunRecord {
   model?: string;
   trace?: AgentEvent[];
   memoryApplied?: number;
+  /**
+   * Per-item provenance for this run. Persisted so a human's corrections during review
+   * survive publication — they are the only labelled examples of what the classifier got
+   * wrong, and the evaluation corpus is built from them.
+   */
+  classifications?: RunClassificationRecord[];
+}
+
+export interface RunClassificationRecord {
+  itemId: number;
+  description: string;
+  packageCode: string;
+  source: ClassifySource;
+  confidence: number;
 }
 
 /**

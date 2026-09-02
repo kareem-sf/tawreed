@@ -2,6 +2,8 @@
 
 mod codex;
 mod commands;
+mod error_contract;
+mod schema;
 mod store;
 mod update;
 
@@ -37,6 +39,7 @@ fn main() {
             commands::save_classification_memory,
             commands::list_classification_memory,
             commands::record_run,
+            commands::list_run_classifications,
             commands::list_runs,
             commands::open_generated_folder,
             commands::open_logs_folder,
