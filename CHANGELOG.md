@@ -3,6 +3,15 @@
 All notable changes to Tawreed are documented here. Versions follow Semantic
 Versioning.
 
+## 0.0.1 (2026-09-02)
+
+## What's Changed
+* feat(ai)!: measure classification accuracy and enforce provider output schemas by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/75
+* chore(release): restart the version line at 0.0.1 by @kareem-sf in https://github.com/kareem-sf/tawreed/pull/79
+
+
+**Full Changelog**: https://github.com/kareem-sf/tawreed/compare/v0.5.6...v0.0.1
+
 ## 0.5.6 (2026-08-16)
 
 ## What's Changed

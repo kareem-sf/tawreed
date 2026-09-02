@@ -1,6 +1,6 @@
 [package]
 name = "tawreed"
-version = "0.5.6"
+version = "0.0.1"
 edition = "2021"
 # Matches the toolchain CI pins and tests. Raising this is a breaking change for
 # anyone building from source, so only move it deliberately alongside CI.
