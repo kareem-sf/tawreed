@@ -147,3 +147,11 @@ export interface RunRecord {
   trace?: AgentEvent[];
   memoryApplied?: number;
 }
+
+/**
+ * Confidence at or above which a classification is trusted without being flagged for
+ * human verification. One constant so the review UI and the validator cannot drift into
+ * flagging different sets of items — they previously disagreed (0.55 vs 0.5), leaving a
+ * band of items warned about in one place and silently accepted in the other.
+ */
+export const REVIEW_CONFIDENCE_THRESHOLD = 0.55;

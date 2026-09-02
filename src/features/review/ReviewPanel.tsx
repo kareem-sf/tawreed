@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Button, Group, ScrollArea, Text } from '@mantine/core';
 import { AlertTriangle, ArrowLeft, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { WorkPackage } from '../../../shared/types';
+import { REVIEW_CONFIDENCE_THRESHOLD, type WorkPackage } from '../../../shared/types';
 import { PackageSummaryList } from './PackageSummaryList';
 import { ReviewItemsDialog } from './ReviewItemsDialog';
 import type { PipelineData } from '../workflow/types';
@@ -51,7 +51,7 @@ export default function ReviewPanel({
       for (const itemId of issue.itemIds) ids.add(itemId);
     }
     for (const classification of data.classifications) {
-      if (classification.packageCode === 'WP-99' || classification.confidence < 0.55) {
+      if (classification.packageCode === 'WP-99' || classification.confidence < REVIEW_CONFIDENCE_THRESHOLD) {
         ids.add(classification.itemId);
       }
     }
