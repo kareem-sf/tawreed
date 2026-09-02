@@ -65,6 +65,21 @@ npm run tauri -- dev
 documentation links, lint, types, tests, production assets, and version
 consistency. Full native package and Rust security gates run in protected CI.
 
+### Measuring classification accuracy
+
+`npm test` scores the offline classifier against the labelled corpus in
+`tests/eval/corpus-synthetic` and fails if grouping quality drops below the
+floors in `tests/eval/eval.test.ts`. Because the model names each project's
+packages itself, scoring compares groupings rather than codes — pairwise
+precision/recall and cluster purity — so a correct grouping is never penalised
+for its naming.
+
+`npm run eval -- --provider anthropic` scores the same corpus against a real
+provider, reading the key from `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
+`GROK_API_KEY`. It also picks up a private corpus in `tests/eval/corpus`, which
+is gitignored so real BOQs never enter the repository; see the README there for
+the file formats.
+
 ## Repository map
 
 ```text
@@ -76,6 +91,7 @@ engine/                  UI-independent BOQ and document engine
 shared/                  cross-layer TypeScript contracts
 src-tauri/               Rust host and privileged boundaries
 tests/                   deterministic regression tests
+tests/eval/              classification accuracy harness and labelled corpus
 scripts/                 architecture, security, release, and asset gates
 docs/                    canonical product and engineering documentation
 ```
