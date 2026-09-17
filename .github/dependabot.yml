@@ -20,13 +20,21 @@ updates:
     ignore:
       - dependency-name: "@e965/xlsx"
         update-types: [version-update:semver-major]
+      - dependency-name: "@eslint/js"
+        update-types: [version-update:semver-major]
       - dependency-name: "@mantine/core"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@playwright/test"
         update-types: [version-update:semver-major]
       - dependency-name: "@tailwindcss/vite"
         update-types: [version-update:semver-major]
       - dependency-name: "@tauri-apps/api"
         update-types: [version-update:semver-major]
       - dependency-name: "@tauri-apps/cli"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@testing-library/dom"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@testing-library/react"
         update-types: [version-update:semver-major]
       - dependency-name: "@types/react"
         update-types: [version-update:semver-major]
@@ -38,9 +46,19 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: "clsx"
         update-types: [version-update:semver-major]
+      - dependency-name: "edge-tts-universal"
+        update-types: [version-update:semver-major]
+      - dependency-name: "eslint"
+        update-types: [version-update:semver-major]
+      - dependency-name: "eslint-plugin-react-hooks"
+        update-types: [version-update:semver-major]
       - dependency-name: "exceljs"
         update-types: [version-update:semver-major]
+      - dependency-name: "globals"
+        update-types: [version-update:semver-major]
       - dependency-name: "i18next"
+        update-types: [version-update:semver-major]
+      - dependency-name: "jsdom"
         update-types: [version-update:semver-major]
       - dependency-name: "lucide-react"
         update-types: [version-update:semver-major]
@@ -54,9 +72,15 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: "react-i18next"
         update-types: [version-update:semver-major]
+      - dependency-name: "react-window"
+        update-types: [version-update:semver-major]
+      - dependency-name: "tailwind-merge"
+        update-types: [version-update:semver-major]
       - dependency-name: "tailwindcss"
         update-types: [version-update:semver-major]
       - dependency-name: "typescript"
+        update-types: [version-update:semver-major]
+      - dependency-name: "typescript-eslint"
         update-types: [version-update:semver-major]
       - dependency-name: "vite"
         update-types: [version-update:semver-major]
