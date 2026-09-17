@@ -48,10 +48,13 @@ describe('accessible UI contracts', () => {
     // rather than rendering the DOM directly.
     const workspace = readSource('../src/features/workflow/components/WorkflowWorkspace.tsx');
     expect(workspace).toMatch(/import\s*\{[^}]*\bModal\b[^}]*\}\s*from\s*'@mantine\/core'/);
-    const consentBlockMatch = workspace.match(/state\.view === 'consent'[\s\S]*?onClose=\{[^}]*\}/);
+    const consentBlockMatch = workspace.match(/state\.view === 'consent'[\s\S]*?withCloseButton=\{[^}]*\}/);
     expect(consentBlockMatch).not.toBeNull();
     expect(consentBlockMatch![0]).toContain('<Modal');
     expect(consentBlockMatch![0]).not.toContain('<section');
-    expect(consentBlockMatch![0]).toContain('onClose={() => onConsent(false)}');
+    // Explicit choice only: no implicit close may start a run behind the user's back.
+    expect(consentBlockMatch![0]).toContain('closeOnEscape={false}');
+    expect(consentBlockMatch![0]).toContain('closeOnClickOutside={false}');
+    expect(consentBlockMatch![0]).not.toContain('onConsent(false)');
   });
 });

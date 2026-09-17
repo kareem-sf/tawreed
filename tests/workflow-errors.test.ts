@@ -50,6 +50,25 @@ describe('friendlyErrorMessage', () => {
     expect(friendlyErrorMessage(new Error(raw), t)).toBe(raw);
   });
 
+  it('passes through request-cap and revision errors verbatim (user-fixable)', () => {
+    for (const raw of [
+      'Request exceeds the 256 KB limit for provider transport',
+      'Rev 02 already exists',
+      'Revision reservation no longer exists',
+      'Invalid revision session',
+      'Artifact exceeds the 200 MB limit',
+      'Too many artifacts in the revision bundle',
+      'Revision bundle exceeds the 1 GB total limit',
+      'Invalid generated workbook filename',
+      'Symbolic links are not accepted — drop the original file',
+      'Log message exceeds the 8 KB limit',
+      'Run trace carries too many events',
+      'Run text field is too long',
+    ]) {
+      expect(friendlyErrorMessage(new Error(raw), t), raw).toBe(raw);
+    }
+  });
+
   it('falls back to the generic message for anything unrecognised', () => {
     expect(friendlyErrorMessage(new Error('parse provider response: trailing comma'), t))
       .toBe('errorGeneric');

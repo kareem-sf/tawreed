@@ -56,8 +56,10 @@ function data(): PipelineData {
     trace: [],
     memoryApplied: 0,
     fileName: 'sample.xlsx',
-    bytes: new Uint8Array(),
+    fileHash: 'test-hash',
     startedAt: 1,
+    autoPilot: null,
+    heldReasons: null,
   };
 }
 
@@ -80,7 +82,8 @@ describe('workflowReducer', () => {
 
   it('keeps reserved publication data available for a safe retry', () => {
     const reviewData = data();
-    const review = workflowReducer(initialWorkflowState, { type: 'showReview', data: reviewData });
+    const busy = workflowReducer(initialWorkflowState, { type: 'startBusy', message: 'Parsing' });
+    const review = workflowReducer(busy, { type: 'showReview', data: reviewData });
     const pending = {
       reservation: {
         projectName: 'Sample project',
@@ -108,7 +111,7 @@ describe('workflowReducer', () => {
       files: ['/tmp/master.xlsx'],
     };
     const done = workflowReducer(
-      { ...initialWorkflowState, pendingPublication: {
+      { ...initialWorkflowState, view: 'review', data: reviewData, pendingPublication: {
         reservation: {
           projectName: 'Sample project',
           revision: 1,
@@ -134,5 +137,26 @@ describe('workflowReducer', () => {
       { type: 'reset' },
     );
     expect(reset).toEqual(initialWorkflowState);
+  });
+
+  it('ignores illegal transitions (stale async cannot resurrect state)', () => {
+    const reviewData = data();
+    // showReview from idle/done is a no-op
+    expect(workflowReducer(initialWorkflowState, { type: 'showReview', data: reviewData }).view).toBe('idle');
+    const busy = workflowReducer(initialWorkflowState, { type: 'startBusy', message: 'x' });
+    const done = workflowReducer(
+      { ...busy, view: 'review', data: reviewData },
+      { type: 'showDone', output: { projectName: 'p', revision: 1, revisionLabel: 'Rev 01', masterPath: '/m', packageFolder: '/f', revisionFolder: '/f', files: [] }, data: reviewData },
+    );
+    expect(workflowReducer(done, { type: 'showReview', data: reviewData }).view).toBe('done');
+    // requestConsent only from busy
+    expect(workflowReducer(initialWorkflowState, {
+      type: 'requestConsent',
+      pending: { inspection: inspection(), fileName: 'f', fileHash: 'test-hash', startedAt: 1, trace: [] },
+    }).view).toBe('idle');
+    // updateData with no data is a no-op
+    expect(workflowReducer(initialWorkflowState, { type: 'updateData', data: reviewData }).data).toBeNull();
+    // setBusy outside busy is a no-op
+    expect(workflowReducer(initialWorkflowState, { type: 'setBusy', message: 'x' }).busyMessage).toBe('');
   });
 });

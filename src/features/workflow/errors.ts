@@ -22,5 +22,7 @@ export function friendlyErrorMessage(reason: unknown, t: (key: string) => string
   if (/timed out/i.test(raw)) return t('errorTimedOut');
   if (/output budget/i.test(raw)) return t('errorTokenBudget');
   if (/preserved at/i.test(raw)) return raw;
+  if (/256 ?KB limit/i.test(raw)) return raw;
+  if (/already exists|no longer exists|invalid revision session|invalid session directory|artifact exceeds|too many artifacts|1 GB total limit|invalid generated workbook filename|maximum windows path|no master workbook|generation is already running|symbolic links|8 KB limit|too many events|is too long/i.test(raw)) return raw;
   return t('errorGeneric');
 }

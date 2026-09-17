@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { BootstrapInfo } from '../../bridge';
 import { WorkflowWorkspace } from '../workflow/components/WorkflowWorkspace';
 import { useLiveDemo } from './useLiveDemo';
@@ -24,6 +25,7 @@ const DEMO_BOOT: BootstrapInfo = {
 const noop = () => undefined;
 
 export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
+  const { t } = useTranslation();
   const [runId, setRunId] = useState(0);
   const [caption, setCaption] = useState('');
   const state = useLiveDemo(true, runId);
@@ -54,7 +56,7 @@ export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
           <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
           <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
           <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
-          <span className="ml-2 text-[11px] font-medium text-zinc-400">Tawreed — live demo</span>
+          <span className="ml-2 text-[11px] font-medium text-zinc-400">{t('demoFrameTitle')}</span>
         </div>
         <div className="pointer-events-none flex h-[380px] w-full flex-col overflow-hidden">
           <WorkflowWorkspace
@@ -77,7 +79,7 @@ export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
 
       <div className="mt-3 flex items-center justify-between">
         <p className="text-xs text-zinc-500">
-          Watching a real run against a sample BOQ — nothing is written to your files.
+          {t('demoCaption')}
         </p>
         <button
           type="button"
@@ -85,7 +87,7 @@ export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
           onClick={() => setRunId((value) => value + 1)}
         >
           <RotateCcw size={12} />
-          Replay
+          {t('demoReplay')}
         </button>
       </div>
 

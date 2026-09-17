@@ -78,8 +78,10 @@ function pipelineData(aiSkipped: number): PipelineData {
     trace: [],
     memoryApplied: 0,
     fileName: 'boq.xlsx',
-    bytes: new Uint8Array(),
+    fileHash: 'test-hash',
     startedAt: Date.now(),
+    autoPilot: null,
+    heldReasons: null,
   };
 }
 

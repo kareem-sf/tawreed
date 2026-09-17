@@ -17,7 +17,9 @@ full commercial content of the source BOQ and should be protected accordingly.
 ## Optional AI Processing
 
 AI enhancement is optional. After local extraction, Tawreed shows the selected
-provider and asks for explicit per-file approval. Only after approval may item
+provider and asks for explicit per-file approval — unless the project is trusted
+for auto-pilot, in which case a durable per-project grant (opt-in, revocable in
+Settings) covers the same sending. Only after approval or a grant may item
 identifiers, descriptions, units, quantities, grounded project candidates, and
 relevant comments be sent to that provider:
 
@@ -45,7 +47,9 @@ relevant comments be sent to that provider:
 
 Regardless of provider, only item identifiers, descriptions, units,
 quantities, grounded project candidates, and relevant comments are ever sent,
-and only after per-file approval.
+and only after per-file approval or a per-project auto-pilot grant. Grants are
+listed in Settings and can be revoked at any time, including mid-run (a revoked
+run is held for human review instead of publishing).
 
 Do not enable an external AI provider when project policy prohibits that data
 from leaving the device. Offline deterministic classification remains

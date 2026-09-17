@@ -58,6 +58,41 @@ describe('desktop guards', () => {
     await expect(bridge.makeGeminiTransport()(request)).rejects.toThrow(/only available in the desktop app/);
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it('round-trips base64 in chunks without the atob blowup', async () => {
+    const bridge = await loadBridge();
+    const original = new Uint8Array(100_000);
+    for (let i = 0; i < original.length; i++) original[i] = i % 251;
+    let binary = '';
+    for (let i = 0; i < original.length; i += 0x8000) {
+      binary += String.fromCharCode(...original.subarray(i, i + 0x8000));
+    }
+    expect(bridge.base64ToBytes(btoa(binary))).toEqual(original);
+    // Padding variants decode exactly.
+    expect(bridge.base64ToBytes(btoa('a'))).toEqual(new Uint8Array([97]));
+    expect(bridge.base64ToBytes(btoa('ab'))).toEqual(new Uint8Array([97, 98]));
+    expect(bridge.base64ToBytes(btoa('abc'))).toEqual(new Uint8Array([97, 98, 99]));
+  });
+
+  it('reads the auto-pilot trust list tolerantly (deny by default)', async () => {
+    const bridge = await loadBridge();
+    invoke.mockResolvedValue({ autopilot: { version: 1, trusted: [
+      { projectKey: 'tower c', projectName: 'Tower C', grantedAt: '2026-09-17T10:00:00.000Z' },
+      { projectKey: '', projectName: 'Bad', grantedAt: 'x' },
+      'garbage',
+    ] } });
+    expect(await bridge.getAutopilotTrust()).toEqual([
+      { projectKey: 'tower c', projectName: 'Tower C', grantedAt: '2026-09-17T10:00:00.000Z' },
+    ]);
+    invoke.mockResolvedValue({});
+    expect(await bridge.getAutopilotTrust()).toEqual([]);
+    invoke.mockResolvedValue({ autopilot: { version: 2, trusted: [] } });
+    expect(await bridge.getAutopilotTrust()).toEqual([]);
+    expect(bridge.findAutopilotGrant(
+      [{ projectKey: 'tower c', projectName: 'Tower C', grantedAt: 'g' }], 'tower c'))
+      .toMatchObject({ projectName: 'Tower C' });
+    expect(bridge.findAutopilotGrant([], 'tower c')).toBeNull();
+  });
 });
 
 describe('provider command names', () => {

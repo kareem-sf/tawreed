@@ -177,6 +177,40 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
   await invoke('set_setting', { key, value });
 }
 
+export interface AutopilotGrant {
+  projectKey: string;
+  projectName: string;
+  grantedAt: string;
+}
+
+/**
+ * Auto-pilot trust list: per-project grants to publish without human review.
+ * Tolerantly parsed — anything malformed reads as untrusted (deny by default).
+ */
+export async function getAutopilotTrust(): Promise<AutopilotGrant[]> {
+  const settings = await getSettings();
+  const root = settings.autopilot;
+  if (!root || typeof root !== 'object') return [];
+  const { version, trusted } = root as { version?: unknown; trusted?: unknown };
+  if (version !== 1 || !Array.isArray(trusted)) return [];
+  return trusted.flatMap((entry): AutopilotGrant[] => {
+    if (!entry || typeof entry !== 'object') return [];
+    const { projectKey, projectName, grantedAt } = entry as Record<string, unknown>;
+    if (typeof projectKey !== 'string' || !projectKey
+      || typeof projectName !== 'string' || !projectName
+      || typeof grantedAt !== 'string' || !grantedAt) return [];
+    return [{ projectKey, projectName, grantedAt }];
+  });
+}
+
+export function findAutopilotGrant(grants: AutopilotGrant[], projectKey: string): AutopilotGrant | null {
+  return grants.find((grant) => grant.projectKey === projectKey) ?? null;
+}
+
+export async function setAutopilotTrust(grants: AutopilotGrant[]): Promise<void> {
+  await setSetting('autopilot', { version: 1, trusted: grants });
+}
+
 export async function codexStatus(): Promise<CodexStatus> {
   if (!isDesktop()) {
     return {
@@ -238,9 +272,25 @@ export async function discardRevision(reservation: RevisionReservation): Promise
 
 export async function readInputFile(path: string): Promise<File> {
   const input = await invoke<{ bytes: string; name: string; mime: string }>('read_input_file', { path });
-  const binary = atob(input.bytes);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  const bytes = base64ToBytes(input.bytes);
   return new File([bytes], input.name || path.split(/[\\/]/).pop() || 'input', { type: input.mime });
+}
+
+/**
+ * Decode base64 without ever materializing the full binary string: `atob` on a
+ * 100MB payload plus `Uint8Array.from` mapping keeps 2–3× the file in memory and
+ * can throw. Chunked decode peaks at one output buffer plus a 32KB window.
+ */
+export function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const clean = b64.replace(/\s/g, '');
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  const out = new Uint8Array(Math.max(0, Math.floor((clean.length * 3) / 4) - padding));
+  let offset = 0;
+  for (let i = 0; i < clean.length; i += 32768) {
+    const binary = atob(clean.slice(i, i + 32768));
+    for (let j = 0; j < binary.length; j++) out[offset++] = binary.charCodeAt(j);
+  }
+  return offset === out.length ? out : out.subarray(0, offset);
 }
 
 export async function recordRun(entry: Omit<RunRecord, 'id'>): Promise<number> {
@@ -254,7 +304,11 @@ export async function listRuns(): Promise<RunRecord[]> {
   // Drop only the rows that genuinely do not fit, rather than asserting the whole array.
   return rows.flatMap((row) => {
     const parsed = runRecordSchema.safeParse(row);
-    return parsed.success ? [parsed.data as RunRecord] : [];
+    if (!parsed.success) {
+      void appLog(`history: dropped corrupt run row (${parsed.error.issues[0]?.message ?? 'schema mismatch'})`);
+      return [];
+    }
+    return [parsed.data as RunRecord];
   });
 }
 
@@ -269,13 +323,17 @@ export async function listRunClassifications(
   });
   return rows.flatMap((row) => {
     const parsed = runClassificationSchema.safeParse(row);
-    return parsed.success ? [{
+    if (!parsed.success) {
+      void appLog(`history: dropped corrupt classification row (${parsed.error.issues[0]?.message ?? 'schema mismatch'})`);
+      return [];
+    }
+    return [{
       itemId: parsed.data.itemId,
       description: parsed.data.description,
       packageCode: parsed.data.packageCode,
       source: parsed.data.source,
       confidence: parsed.data.confidence,
-    }] : [];
+    }];
   });
 }
 
