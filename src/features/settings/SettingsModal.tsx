@@ -1,6 +1,7 @@
 import { Button, Stack, Text } from '@mantine/core';
 import { HardDrive, PlayCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { AutopilotSetup } from './AutopilotSetup';
 import { GeneralPreferences } from './GeneralPreferences';
 import { ProviderSetup } from './ProviderSetup';
 
@@ -30,6 +31,13 @@ export default function SettingsModal({
       <Text size="xs" c="dimmed">{t('settingsSimpleDetail')}</Text>
 
       <GeneralPreferences />
+
+      <section>
+        <Text size="xs" fw={650}>{t('autopilotTitle')}</Text>
+        <div className="mt-2">
+          <AutopilotSetup />
+        </div>
+      </section>
 
       <section>
         <Text size="xs" fw={650}>{t('connection')}</Text>

@@ -1,6 +1,6 @@
 # Tawreed User Guide
 
-Tawreed turns a bill of quantities (BOQ) into a set of clear, procurement-ready work packages. Drop in your BOQ file and Tawreed organizes every line item into grouped work packages you can review, adjust, and approve — then it creates the final workbook files for you.
+Tawreed turns a bill of quantities (BOQ) into a set of clear, procurement-ready work packages. Drop in your BOQ file and Tawreed organizes every line item into grouped work packages you can review, adjust, and approve — then it creates the final workbook files for you. (Repeat work for a trusted project can run fully unattended — see Auto-pilot below.)
 
 ## What files can I use?
 
@@ -30,7 +30,7 @@ While Tawreed processes your file, you'll see plain progress messages — readin
 
 ### 4. Review the work packages
 
-Once processing finishes, you land on the review screen. Every work package shows:
+Unless the project runs on auto-pilot (below), once processing finishes you land on the review screen. Every work package shows:
 
 - how many items it contains
 - its share of the full BOQ
@@ -48,6 +48,12 @@ When the grouping looks right, click **Approve & generate**. Tawreed builds:
 ### 6. Open the result
 
 When generation finishes, use **Open workbook** to open the master file, or **Open packages folder** to see the individual package files. Both are ready to use immediately — nothing further to configure.
+
+## Auto-pilot (optional, per project, off by default)
+
+If the same kind of BOQ comes in again and again, you can trust its project: from any **History** row choose the auto-pilot action (twice, to confirm), or manage the list later in **Settings → Auto-pilot**. A trusted project's files then skip the consent question and the review screen entirely — machine-clean runs publish on their own.
+
+Machine checks still apply absolutely: anything with errors, unclassified items, or low-confidence assignments is held for your review with the reasons listed, never published. Revoking a project (in Settings) takes effect immediately, including for a run already in flight. Details and limits: [SPEC-autonomous-pipeline](../SPEC-autonomous-pipeline.md).
 
 ## What is a "work package"?
 

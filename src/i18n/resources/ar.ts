@@ -228,7 +228,21 @@ const ar = {
   "updateReleaseInvalid": "لم يجتز الإصدار الأخير فحوصات الأمان في توريد",
   "updateDownloadFailed": "تعذر فتح صفحة الإصدار الرسمية.",
   "tryAgain": "إعادة المحاولة",
-  "mitLicense": "رخصة MIT"
+  "mitLicense": "رخصة MIT",
+  "autopilotTitle": "التشغيل التلقائي",
+  "autopilotDetail": "المشاريع الموثوقة تُنشر دون مراجعة بشرية عندما تكون سليمة آلياً. يشمل التفويض إرسال جدول الكميات إلى المزوّد المضبوط. يمكن الإلغاء في أي وقت.",
+  "autopilotTrust": "تفعيل التشغيل التلقائي",
+  "autopilotConfirm": "انقر مجدداً للتأكيد",
+  "autopilotTrusted": "التشغيل التلقائي مفعّل",
+  "autopilotManageInSettings": "التشغيل التلقائي مفعّل — يُدار من الإعدادات",
+  "autopilotRevoke": "إلغاء التفويض",
+  "autopilotEmpty": "لا مشاريع موثوقة.",
+  "autopilotHeld": "أوقف التشغيل التلقائي هذا التشغيل للمراجعة البشرية:",
+  "autopilotTip": "أعمال متكررة؟ يمكن للمشاريع الموثوقة أن تعمل دون مراجعة — راجع الإعدادات ← التشغيل التلقائي.",
+  "onboardingLanguageTitle": "اختر لغة التطبيق",
+  "demoFrameTitle": "توريد — عرض مباشر",
+  "demoCaption": "تشاهد تشغيلاً حقيقياً على جدول كميات تجريبي — لن تُكتب أي ملفات.",
+  "demoReplay": "إعادة التشغيل"
 } as const;
 
 export default ar;

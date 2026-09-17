@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
 import { ActionIcon, ScrollArea, Table, Text, Tooltip } from '@mantine/core';
-import { Check, ClipboardCopy, FileSpreadsheet, FolderOpen, Sparkles, Workflow } from 'lucide-react';
+import { Check, ClipboardCopy, FileSpreadsheet, FolderOpen, Sparkles, Workflow, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { listRuns, openGeneratedFolder, openWorkbook } from '../../bridge';
+import { appLog, getAutopilotTrust, listRuns, openGeneratedFolder, openWorkbook, setAutopilotTrust } from '../../bridge';
 import type { RunRecord } from '../../../shared/types';
-import { formatRunForSupport } from './formatRunForSupport';
+import { memoryKey } from '../../../engine/agent-workflow';
+import { formatRunDate, formatRunForSupport } from './formatRunForSupport';
 
 export default function HistoryDrawer({ opened }: { opened: boolean }) {
   const { t, i18n } = useTranslation();
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [trustedKeys, setTrustedKeys] = useState<Set<string>>(new Set());
+  const [armingKey, setArmingKey] = useState<string | null>(null);
 
   const copyForSupport = (run: RunRecord) => {
     void navigator.clipboard.writeText(formatRunForSupport(run)).then(() => {
@@ -19,23 +24,63 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
     }).catch(() => undefined);
   };
 
+  /** Two-step grant: first click arms (showing the scope), second click grants. */
+  const trustProject = async (run: RunRecord) => {
+    const displayName = run.projectName || run.fileName;
+    const key = memoryKey(displayName);
+    if (!key) return;
+    if (armingKey !== key) {
+      setArmingKey(key);
+      return;
+    }
+    setArmingKey(null);
+    setActionError(null);
+    try {
+      const current = await getAutopilotTrust();
+      if (!current.some((grant) => grant.projectKey === key)) {
+        await setAutopilotTrust([
+          ...current,
+          { projectKey: key, projectName: displayName, grantedAt: new Date().toISOString() },
+        ]);
+      }
+      setTrustedKeys((prev) => new Set(prev).add(key));
+    } catch {
+      setActionError(t('errorGeneric'));
+    }
+  };
+
   useEffect(() => {
     if (opened) {
       // Guarded by `opened`, so this runs once per open rather than every render.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(true);
+      setLoadError(null);
+      setArmingKey(null);
       listRuns()
         .then(setRuns)
-        .catch(() => setRuns([]))
+        .catch((reason) => {
+          setRuns([]);
+          setLoadError(reason instanceof Error ? reason.message : String(reason));
+          void appLog(`history load failed: ${reason instanceof Error ? reason.message : String(reason)}`);
+        })
         .finally(() => setLoading(false));
+      void getAutopilotTrust()
+        .then((grants) => setTrustedKeys(new Set(grants.map((grant) => grant.projectKey))))
+        .catch(() => setTrustedKeys(new Set()));
     }
   }, [opened]);
 
   if (loading) return <Text c="dimmed" ta="center" mt="xl">{t('loading')}</Text>;
+  if (loadError) return <Text c="red" ta="center" mt="xl" role="alert">{t('errorGeneric')}</Text>;
   if (runs.length === 0) return <Text c="dimmed" ta="center" mt="xl">{t('emptyHistory')}</Text>;
 
   return (
     <ScrollArea h="calc(100vh - 78px)" offsetScrollbars scrollbarSize={4}>
+      {actionError && (
+        <Text c="red" ta="center" mt="sm" size="xs" role="alert">
+          {actionError}
+        </Text>
+      )}
       <Table highlightOnHover verticalSpacing="sm">
         <Table.Thead>
           <Table.Tr>
@@ -48,14 +93,17 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
         </Table.Thead>
         <Table.Tbody>
           {runs.map((run) => {
-            const date = new Date(run.startedAt);
+            const dateLabel = formatRunDate(run.startedAt, (date) => date.toLocaleString(i18n.language));
+            const datePart = formatRunDate(run.startedAt, (date) => date.toLocaleDateString(i18n.language));
+            const timePart = formatRunDate(run.startedAt, (date) =>
+              date.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' }));
             return (
               <Table.Tr key={run.id}>
                 <Table.Td>
-                  <Tooltip label={date.toLocaleString(i18n.language)} openDelay={220}>
+                  <Tooltip label={dateLabel} openDelay={220}>
                     <div className="whitespace-nowrap text-[10px] leading-4 text-zinc-500">
-                      <div>{date.toLocaleDateString(i18n.language)}</div>
-                      <div>{date.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div>{datePart}</div>
+                      <div>{timePart}</div>
                     </div>
                   </Tooltip>
                 </Table.Td>
@@ -110,7 +158,10 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
                       variant="subtle"
                       color="gold"
                       size="sm"
-                      onClick={() => openWorkbook(run.outputFile).catch(() => undefined)}
+                      onClick={() => {
+                        setActionError(null);
+                        openWorkbook(run.outputFile).catch(() => setActionError(t('errorGeneric')));
+                      }}
                       aria-label={t('openWorkbook')}
                     >
                       <FileSpreadsheet size={14} />
@@ -122,7 +173,10 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
                         variant="subtle"
                         color="gray"
                         size="sm"
-                        onClick={() => openGeneratedFolder(run.packageFolder!).catch(() => undefined)}
+                        onClick={() => {
+                          setActionError(null);
+                          openGeneratedFolder(run.packageFolder!).catch(() => setActionError(t('errorGeneric')));
+                        }}
                         aria-label={t('openPackages')}
                       >
                         <FolderOpen size={14} />
@@ -140,6 +194,33 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
                       {copiedId === (run.id ?? null) ? <Check size={14} /> : <ClipboardCopy size={14} />}
                     </ActionIcon>
                   </Tooltip>
+                  {(() => {
+                    const key = memoryKey(run.projectName || run.fileName);
+                    if (!key) return null;
+                    if (trustedKeys.has(key)) {
+                      return (
+                        <Tooltip label={t('autopilotManageInSettings')} openDelay={180}>
+                          <ActionIcon variant="subtle" color="green" size="sm" aria-label={t('autopilotTrusted')}>
+                            <Zap size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      );
+                    }
+                    const arming = armingKey === key;
+                    return (
+                      <Tooltip label={arming ? t('autopilotConfirm') : `${t('autopilotTrust')} — ${t('autopilotDetail')}`} openDelay={180} multiline maw={260}>
+                        <ActionIcon
+                          variant={arming ? 'filled' : 'subtle'}
+                          color={arming ? 'gold' : 'gray'}
+                          size="sm"
+                          onClick={() => void trustProject(run)}
+                          aria-label={arming ? t('autopilotConfirm') : t('autopilotTrust')}
+                        >
+                          <Zap size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                    );
+                  })()}
                 </Table.Td>
               </Table.Tr>
             );

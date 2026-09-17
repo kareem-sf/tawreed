@@ -14,7 +14,8 @@ export type WorkflowView = 'idle' | 'busy' | 'consent' | 'review' | 'done';
 export interface PendingInspection {
   inspection: InspectionResult;
   fileName: string;
-  bytes: Uint8Array;
+  /** SHA-256 of the source bytes, hashed before the worker transfer neuters them. */
+  fileHash: string;
   startedAt: number;
   trace: AgentEvent[];
 }
@@ -39,8 +40,13 @@ export interface PipelineData {
   trace: AgentEvent[];
   memoryApplied: number;
   fileName: string;
-  bytes: Uint8Array;
+  /** SHA-256 of the source bytes — the bytes themselves live in the worker. */
+  fileHash: string;
   startedAt: number;
+  /** Set when this run is unattended under an auto-pilot grant (null = human-driven). */
+  autoPilot: { grantedAt: string } | null;
+  /** Machine-clean verdict failures that held an auto run for human review (null = not held). */
+  heldReasons: { en: string[]; ar: string[] } | null;
 }
 
 export interface WorkflowState {

@@ -49,6 +49,9 @@ export function useLiveDemo(active: boolean, runId: number) {
       const trace = [workflowEvent('inspect', 'started', 'Local document inspection started')];
       const startedAt = Date.now();
       const inspection = await inspectDocument(bytes, 'demo-boq.csv');
+      // These compute steps ignore the signal: a rapid Replay during one must not
+      // let this superseded run dispatch into the new run's reducer afterwards.
+      signal.throwIfAborted();
       trace.push(workflowEvent(
         'inspect',
         'completed',
@@ -58,6 +61,7 @@ export function useLiveDemo(active: boolean, runId: number) {
       dispatch({ type: 'setBusy', message: 'Classifying items…', progress: null });
       await delay(500, signal);
       const plan = await classifyPlan(inspection.items, { useLlm: false });
+      signal.throwIfAborted();
       trace.push(workflowEvent('classify', 'completed', `${inspection.items.length} items classified`));
 
       const packages = buildPackages(inspection.items, plan.classifications);
@@ -86,8 +90,10 @@ export function useLiveDemo(active: boolean, runId: number) {
         trace,
         memoryApplied: 0,
         fileName: 'demo-boq.csv',
-        bytes,
+        fileHash: 'live-demo',
         startedAt,
+        autoPilot: null,
+        heldReasons: null,
       };
       dispatch({ type: 'showReview', data });
       await delay(1000, signal);

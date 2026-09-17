@@ -228,7 +228,21 @@ const en = {
   "updateReleaseInvalid": "The latest release failed Tawreed security checks",
   "updateDownloadFailed": "Could not open the official release page.",
   "tryAgain": "Try again",
-  "mitLicense": "MIT License"
+  "mitLicense": "MIT License",
+  "autopilotTitle": "Auto-pilot",
+  "autopilotDetail": "Trusted projects publish without human review when machine-clean. The grant covers sending the BOQ to the configured provider. Revoke anytime.",
+  "autopilotTrust": "Trust for auto-pilot",
+  "autopilotConfirm": "Click again to confirm",
+  "autopilotTrusted": "Auto-pilot on",
+  "autopilotManageInSettings": "Auto-pilot on — manage in Settings",
+  "autopilotRevoke": "Revoke",
+  "autopilotEmpty": "No trusted projects.",
+  "autopilotHeld": "Auto-pilot held this run for human review:",
+  "autopilotTip": "Repeat work? Trusted projects can run unattended — see Settings → Auto-pilot.",
+  "onboardingLanguageTitle": "Choose your language",
+  "demoFrameTitle": "Tawreed — live demo",
+  "demoCaption": "Watching a real run against a sample BOQ — nothing is written to your files.",
+  "demoReplay": "Replay"
 } as const;
 
 export default en;

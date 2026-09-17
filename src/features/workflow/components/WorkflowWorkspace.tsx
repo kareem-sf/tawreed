@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Button, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { AnimatePresence } from 'motion/react';
 import { FileSpreadsheet, FolderOpen, LockKeyhole } from 'lucide-react';
@@ -21,6 +22,15 @@ interface Props {
   onClassificationChange: (itemId: number, packageCode: string) => void;
 }
 
+export function consentProviderName(provider: BootstrapInfo['provider'], t: (key: string) => string): string {
+  if (provider === 'codex') return 'Codex';
+  if (provider === 'compatible') return t('connectedService');
+  if (provider === 'gemini') return 'Gemini';
+  if (provider === 'grok') return 'Grok';
+  if (provider === 'anthropic') return 'Anthropic';
+  return t('connectedService');
+}
+
 export function WorkflowWorkspace({
   boot,
   state,
@@ -32,11 +42,8 @@ export function WorkflowWorkspace({
   onClassificationChange,
 }: Props) {
   const { t } = useTranslation();
-  const consentProvider = boot.provider === 'codex'
-    ? 'Codex'
-    : boot.provider === 'compatible'
-      ? t('connectedService')
-      : 'Anthropic';
+  const consentProvider = consentProviderName(boot.provider, t);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   return (
     <main className="relative z-10 min-h-0 flex-1 overflow-hidden">
@@ -61,7 +68,11 @@ export function WorkflowWorkspace({
           <Modal
             key="consent"
             opened
-            onClose={() => onConsent(false)}
+            // No implicit close: ESC/backdrop must not silently start an offline
+            // run behind the user's back — the choice has to be explicit.
+            onClose={() => undefined}
+            closeOnEscape={false}
+            closeOnClickOutside={false}
             centered
             radius="lg"
             padding="xl"
@@ -78,6 +89,7 @@ export function WorkflowWorkspace({
               })}
             </div>
             <Text size="xs" c="dimmed" mt="sm">{t('aiConsentPrivacy')}</Text>
+            <Text size="xs" c="dimmed" mt={4}>{t('autopilotTip')}</Text>
             <Group mt="lg" justify="flex-end">
               <Button variant="subtle" color="gray" onClick={() => onConsent(false)}>
                 {t('stayOffline')}
@@ -158,12 +170,20 @@ export function WorkflowWorkspace({
                 {state.error}
               </Text>
             )}
+            {openError && (
+              <Text size="xs" c="red" ta="center" maw={400} role="alert" className="allow-select">
+                {openError}
+              </Text>
+            )}
             <Group gap="xs">
               <Tooltip label={t('openWorkbookDetail')} openDelay={180}>
                 <Button
                   size="xs"
                   leftSection={<FileSpreadsheet size={13} aria-hidden="true" />}
-                  onClick={() => void openWorkbook(state.output!.masterPath).catch(() => undefined)}
+                  onClick={() => {
+                    setOpenError(null);
+                    void openWorkbook(state.output!.masterPath).catch(() => setOpenError(t('errorGeneric')));
+                  }}
                   styles={{ root: { background: 'var(--surface-2)', color: 'var(--gold)', fontWeight: 600 } }}
                 >
                   {t('openWorkbook')}
@@ -175,7 +195,10 @@ export function WorkflowWorkspace({
                   variant="subtle"
                   color="gray"
                   leftSection={<FolderOpen size={13} aria-hidden="true" />}
-                  onClick={() => void openGeneratedFolder(state.output!.packageFolder).catch(() => undefined)}
+                  onClick={() => {
+                    setOpenError(null);
+                    void openGeneratedFolder(state.output!.packageFolder).catch(() => setOpenError(t('errorGeneric')));
+                  }}
                 >
                   {t('openPackages')}
                 </Button>

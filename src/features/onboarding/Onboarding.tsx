@@ -36,6 +36,7 @@ export default function Onboarding({
   const { t, i18n } = useTranslation();
   const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [finishing, setFinishing] = useState(false);
+  const [stepError, setStepError] = useState<string | null>(null);
   const appWindow = useMemo(() => currentDesktopWindow(), []);
   const ar = i18n.language === 'ar';
   const index = stepOrder.indexOf(step);
@@ -48,22 +49,37 @@ export default function Onboarding({
   }, [initialStep]);
 
   const persistStep = async (next: OnboardingStep | 'complete') => {
-    await setSetting('onboarding', { version: 1, step: next });
+    try {
+      await setSetting('onboarding', { version: 1, step: next });
+    } catch (reason) {
+      setStepError(reason instanceof Error ? reason.message : String(reason));
+      throw reason;
+    }
     if (next !== 'complete') setStep(next);
   };
 
   const chooseLanguage = async (language: 'en' | 'ar') => {
-    await i18n.changeLanguage(language);
-    await setSetting('language', language);
-    await persistStep('video');
+    const previous = i18n.language;
+    try {
+      setStepError(null);
+      await i18n.changeLanguage(language);
+      await setSetting('language', language);
+      await persistStep('video');
+    } catch (reason) {
+      await i18n.changeLanguage(previous).catch(() => undefined);
+      setStepError(reason instanceof Error ? reason.message : String(reason));
+    }
   };
 
   const finish = async (offline = false) => {
     setFinishing(true);
     try {
+      setStepError(null);
       if (offline) await setSetting('processingMode', 'offline');
       await persistStep('complete');
       onComplete();
+    } catch (reason) {
+      setStepError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setFinishing(false);
     }
@@ -128,7 +144,7 @@ export default function Onboarding({
             <section className="mx-auto max-w-lg text-center">
               <Globe2 className="mx-auto size-9 text-gold" strokeWidth={1.5} />
               <h1 className="font-serif-display mt-6 text-2xl font-semibold tracking-[-0.01em]">
-                Choose your language
+                {t('onboardingLanguageTitle')}
               </h1>
               <p className="mt-2 text-sm text-ledger-ink-faint">اختر لغة التطبيق</p>
               <div className="mt-8 grid grid-cols-2 gap-3">
@@ -167,14 +183,14 @@ export default function Onboarding({
                   variant="subtle"
                   color="gray"
                   leftSection={<ChevronLeft size={14} className="rtl:rotate-180" />}
-                  onClick={() => void persistStep('language')}
+                  onClick={() => void persistStep('language').catch(() => undefined)}
                 >
                   {t('back')}
                 </Button>
                 <Button
                   color="gold"
                   rightSection={<ChevronRight size={14} className="rtl:rotate-180" />}
-                  onClick={() => void persistStep('connection')}
+                  onClick={() => void persistStep('connection').catch(() => undefined)}
                 >
                   {t('continue')}
                 </Button>
@@ -201,7 +217,7 @@ export default function Onboarding({
                   variant="subtle"
                   color="gray"
                   leftSection={<ChevronLeft size={14} className="rtl:rotate-180" />}
-                  onClick={() => void persistStep('video')}
+                  onClick={() => void persistStep('video').catch(() => undefined)}
                 >
                   {t('back')}
                 </Button>
@@ -225,6 +241,11 @@ export default function Onboarding({
                 </Group>
               </Group>
             </section>
+          )}
+          {stepError && (
+            <Text size="xs" c="red" ta="center" mt="md" role="alert">
+              {stepError}
+            </Text>
           )}
         </div>
       </main>

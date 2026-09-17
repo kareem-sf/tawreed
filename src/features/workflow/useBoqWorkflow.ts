@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import {
   appLog,
   discardRevision,
+  findAutopilotGrant,
+  getAutopilotTrust,
   getSettings,
   listClassificationMemory,
   makeCodexTransport,
@@ -16,6 +18,7 @@ import {
   saveClassificationMemory,
   sha256Hex,
   writeRevisionBundle,
+  type AutopilotGrant,
   type BootstrapInfo,
   type RevisionOutput,
 } from '../../bridge';
@@ -23,9 +26,11 @@ import { DEFAULT_MODEL } from '../../../engine/classify/llm';
 import {
   applyClassificationMemory,
   memoryFromApprovedReview,
+  memoryKey,
   reviseClassification,
   workflowEvent,
 } from '../../../engine/agent-workflow';
+import { autopilotVerdict } from '../../../engine/autopilot';
 import { buildPackages, validate } from '../../../engine/validate';
 import type { AiProvider, WorkPackage } from '../../../shared/types';
 import { generateInWorker, inspectInWorker } from '../../boq-worker';
@@ -68,7 +73,7 @@ function emptyPackage(code: string, nameEn: string, nameAr: string): WorkPackage
 }
 
 export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkflowOptions) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [state, dispatch] = useReducer(workflowReducer, initialWorkflowState);
   const stateRef = useRef(state);
   useEffect(() => {
@@ -76,6 +81,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
   }, [state]);
   const generatingRef = useRef(false);
   const cancelJobRef = useRef<(() => void) | null>(null);
+  const runIdRef = useRef(0);
 
   const clearCancellation = useCallback(() => {
     cancelJobRef.current = null;
@@ -83,6 +89,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
   }, []);
 
   const reset = useCallback(() => {
+    runIdRef.current++;
     cancelJobRef.current?.();
     const pending = stateRef.current.pendingPublication;
     if (pending) void discardRevision(pending.reservation).catch(() => undefined);
@@ -94,7 +101,12 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
     cancelJobRef.current?.();
   }, []);
 
-  const analyze = useCallback(async (pending: PendingInspection, allowAi: boolean) => {
+  const analyze = useCallback(async (
+    pending: PendingInspection,
+    allowAi: boolean,
+    auto: AutopilotGrant | null = null,
+  ): Promise<PipelineData | null> => {
+    const runId = runIdRef.current;
     dispatch({ type: 'startBusy' });
     const resolvedProvider = allowAi && boot?.provider !== 'none' ? boot?.provider : 'offline';
     const provider: AiProvider = resolvedProvider ?? 'offline';
@@ -107,9 +119,11 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
     const trace = [...pending.trace, workflowEvent(
       'consent',
       'completed',
-      provider === 'offline'
-        ? 'Local-only processing selected'
-        : `User approved ${provider} for this document`,
+      auto !== null
+        ? `Auto-pilot grant ${auto.grantedAt} covered this run for ${pending.inspection.projectName} — no human review`
+        : provider === 'offline'
+          ? 'Local-only processing selected'
+          : `User approved ${provider} for this document`,
     )];
 
     try {
@@ -224,132 +238,73 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         'completed',
         `${issues.length} validation findings; source quantities remain authoritative`,
       ));
-      trace.push(workflowEvent('human-review', 'started', 'Waiting for item-level approval'));
+      if (auto === null) {
+        trace.push(workflowEvent('human-review', 'started', 'Waiting for item-level approval'));
+      }
 
-      dispatch({
-        type: 'showReview',
-        data: {
-          inspection,
-          classifications,
-          packages,
-          packageCatalog,
-          issues,
-          llmUsed: provider !== 'offline' && !llmFailed && llmApplied,
-          llmFailed,
-          aiSkipped,
-          provider,
-          model,
-          trace,
-          memoryApplied,
-          fileName: pending.fileName,
-          bytes: pending.bytes,
-          startedAt: pending.startedAt,
-        },
-      });
+      if (runId !== runIdRef.current) return null;
+      const data: PipelineData = {
+        inspection,
+        classifications,
+        packages,
+        packageCatalog,
+        issues,
+        llmUsed: provider !== 'offline' && !llmFailed && llmApplied,
+        llmFailed,
+        aiSkipped,
+        provider,
+        model,
+        trace,
+        memoryApplied,
+        fileName: pending.fileName,
+        fileHash: pending.fileHash,
+        startedAt: pending.startedAt,
+        autoPilot: auto !== null ? { grantedAt: auto.grantedAt } : null,
+        heldReasons: null,
+      };
+      if (auto === null) {
+        dispatch({ type: 'showReview', data });
+        return data;
+      }
+      // Unattended path: machine-clean verdict decides publish vs human hold.
+      // The caller proceeds to generate() on a returned data object.
+      const verdict = autopilotVerdict(issues, classifications);
+      if (!verdict.clean) {
+        trace.push(workflowEvent('human-review', 'started', 'Auto-pilot held this run for human review'));
+        dispatch({
+          type: 'showReview',
+          data: { ...data, trace, heldReasons: { en: verdict.reasonsEn, ar: verdict.reasonsAr } },
+        });
+        return null;
+      }
+      return data;
     } catch (reason) {
       if (isCancellation(reason)) {
         reset();
-        return;
+        return null;
       }
       dispatch({ type: 'reset' });
       void appLog(`workflow error: ${errorMessage(reason)}`);
       dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
+      return null;
     } finally {
       clearCancellation();
     }
   }, [boot, clearCancellation, modelSlug, reset, t]);
 
-  const handleFile = useCallback(async (file: File) => {
-    dispatch({ type: 'startBusy', message: t('parsing'), progress: null });
-    const trace = [workflowEvent('inspect', 'started', 'Local document inspection started')];
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const startedAt = Date.now();
-      const inspectJob = inspectInWorker(bytes, file.name, (progress) => {
-        if (progress.phase === 'ocr') {
-          dispatch({
-            type: 'setBusy',
-            progress: (progress.progress ?? 0) * 100,
-            message: t('ocrProgress', {
-              page: progress.page,
-              total: progress.total,
-              percent: Math.round((progress.progress ?? 0) * 100),
-            }),
-          });
-        } else if (progress.phase === 'pdf') {
-          dispatch({
-            type: 'setBusy',
-            progress: progress.total ? (progress.page / progress.total) * 100 : null,
-            message: t('pdfProgress', { page: progress.page, total: progress.total }),
-          });
-        } else {
-          dispatch({ type: 'setBusy', message: t('analyzingDocument'), progress: null });
-        }
-      });
-      cancelJobRef.current = inspectJob.cancel;
-      dispatch({ type: 'setCancellable', value: true });
-      const inspection = await inspectJob.promise;
-      clearCancellation();
-      trace.push(workflowEvent(
-        'inspect',
-        'completed',
-        `${inspection.items.length} source-backed items extracted locally`,
-      ));
-      void appLog(
-        `inspection: file=${file.name} source=${inspection.sourceKind} project=${inspection.projectName} items=${inspection.items.length} confidence=${inspection.mapping.confidence.toFixed(2)}`,
-      );
-      const pending = { inspection, fileName: file.name, bytes, startedAt, trace };
-      if (boot?.provider && boot.provider !== 'none' && processingMode === 'online') {
-        await analyze(pending, true);
-      } else if (boot?.provider && boot.provider !== 'none' && processingMode === 'ask') {
-        dispatch({ type: 'requestConsent', pending });
-      } else {
-        await analyze(pending, false);
-      }
-    } catch (reason) {
-      clearCancellation();
-      if (isCancellation(reason)) {
-        reset();
-        return;
-      }
-      dispatch({ type: 'reset' });
-      void appLog(`workflow error: ${errorMessage(reason)}`);
-      dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
-    }
-  }, [analyze, boot, clearCancellation, processingMode, reset, t]);
-
-  const analyzePending = useCallback((allowAi: boolean) => {
-    const pending = stateRef.current.pendingInspection;
-    if (pending) void analyze(pending, allowAi);
-  }, [analyze]);
-
-  const changeClassification = useCallback((itemId: number, packageCode: string) => {
+  const generate = useCallback(async (overrideData?: PipelineData) => {
     const current = stateRef.current;
-    const data = current.data;
-    if (!data) return;
-    if (current.pendingPublication) {
-      void discardRevision(current.pendingPublication.reservation).catch(() => undefined);
-      dispatch({ type: 'setPendingPublication', pending: null });
-    }
-    const workPackage = data.packageCatalog.find((candidate) => candidate.code === packageCode)
-      ?? emptyPackage('WP-99', 'Unclassified', 'غير مصنف');
-    const classifications = reviseClassification(data.classifications, itemId, workPackage);
-    const packages = buildPackages(data.inspection.items, classifications);
-    const issues = validate(data.inspection.items, classifications, packages);
-    dispatch({ type: 'updateData', data: { ...data, classifications, packages, issues } });
-  }, []);
-
-  const generate = useCallback(async () => {
-    const current = stateRef.current;
-    const data = current.data;
+    // Auto-pilot runs pass their data directly: no review screen was ever shown,
+    // so there is no staged state to read — and no pending publication to reuse.
+    const data = overrideData ?? current.data;
     if (generatingRef.current || !data) return;
     generatingRef.current = true;
     dispatch({ type: 'setGenerating', value: true });
     dispatch({ type: 'startBusy' });
-    let reservation = current.pendingPublication?.reservation ?? null;
-    let artifacts = current.pendingPublication?.artifacts ?? null;
+    let reservation = overrideData === undefined ? current.pendingPublication?.reservation ?? null : null;
+    let artifacts = overrideData === undefined ? current.pendingPublication?.artifacts ?? null : null;
     const trace = [...data.trace];
-    if (!trace.some((event) => event.stage === 'human-review' && event.status === 'completed')) {
+    if (data.autoPilot === null && !trace.some((event) => event.stage === 'human-review' && event.status === 'completed')) {
       trace.push(workflowEvent('human-review', 'completed', 'User approved item classifications'));
     }
 
@@ -396,6 +351,28 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         });
       }
 
+      // Auto-pilot grants can be revoked mid-flight: re-check immediately before
+      // the irreversible publish. A revoked grant holds the run for human review.
+      if (data.autoPilot !== null) {
+        const fresh = await getAutopilotTrust().catch((): AutopilotGrant[] => []);
+        if (findAutopilotGrant(fresh, memoryKey(data.inspection.projectName)) === null) {
+          trace.push(workflowEvent('publish', 'failed', 'Auto-pilot grant revoked before publish'));
+          if (reservation) await discardRevision(reservation).catch(() => undefined);
+          dispatch({
+            type: 'showReview',
+            data: {
+              ...data,
+              trace,
+              heldReasons: {
+                en: ['The auto-pilot grant was revoked before publishing.'],
+                ar: ['تم إلغاء تفويض التشغيل التلقائي قبل النشر.'],
+              },
+            },
+          });
+          return;
+        }
+      }
+
       dispatch({
         type: 'setBusy',
         message: t('publishingRevision', { revision: reservation.revisionLabel }),
@@ -415,9 +392,16 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
           return;
         }
         await discardRevision(reservation).catch(() => undefined);
+        reservation = null;
         throw reason;
       }
-      trace.push(workflowEvent('publish', 'completed', `${published.revisionLabel} published`));
+      trace.push(workflowEvent(
+        'publish',
+        'completed',
+        data.autoPilot !== null
+          ? `${published.revisionLabel} published by auto-pilot without human review`
+          : `${published.revisionLabel} published`,
+      ));
       const completedData: PipelineData = { ...data, trace };
       const itemsById = new Map(data.inspection.items.map((item) => [item.id, item]));
 
@@ -425,7 +409,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         await recordRun({
           startedAt: new Date(data.startedAt).toISOString(),
           fileName: data.fileName,
-          fileHash: await sha256Hex(data.bytes),
+          fileHash: data.fileHash,
           itemCount: data.inspection.items.length,
           packageCount: data.packages.length,
           errorCount: data.issues.filter((issue) => issue.severity === 'error').length,
@@ -468,6 +452,8 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         void appLog(`generate error: ${errorMessage(reason)}`);
         dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
       }
+      // A reset during generation means the user abandoned this run — do not resurrect stale review.
+      if (stateRef.current.view === 'idle') return;
       dispatch({ type: 'showReview', data: { ...data, trace } });
     } finally {
       clearCancellation();
@@ -475,6 +461,115 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
       dispatch({ type: 'setGenerating', value: false });
     }
   }, [clearCancellation, t]);
+
+  const handleFile = useCallback(async (file: File) => {
+    // A second drop supersedes the first: cancel the prior worker so its late
+    // completion cannot overwrite the newer run.
+    cancelJobRef.current?.();
+    const runId = ++runIdRef.current;
+    dispatch({ type: 'startBusy', message: t('parsing'), progress: null });
+    const trace = [workflowEvent('inspect', 'started', 'Local document inspection started')];
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const startedAt = Date.now();
+      // Hash before the worker transfer neuters the buffer (see boq-worker.ts).
+      const fileHash = await sha256Hex(bytes);
+      // Re-read the mode at drop time: the settings dialog writes it directly,
+      // so the prop can be stale while settings are open.
+      let mode = processingMode;
+      try {
+        const fresh = (await getSettings()).processingMode;
+        if (fresh === 'ask' || fresh === 'online' || fresh === 'offline') mode = fresh;
+      } catch {
+        // Fall through with the prop when settings are unreadable.
+      }
+      const inspectJob = inspectInWorker(bytes, file.name, (progress) => {
+        if (progress.phase === 'ocr') {
+          dispatch({
+            type: 'setBusy',
+            progress: (progress.progress ?? 0) * 100,
+            message: t('ocrProgress', {
+              page: progress.page,
+              total: progress.total,
+              percent: Math.round((progress.progress ?? 0) * 100),
+            }),
+          });
+        } else if (progress.phase === 'pdf') {
+          dispatch({
+            type: 'setBusy',
+            progress: progress.total ? (progress.page / progress.total) * 100 : null,
+            message: t('pdfProgress', { page: progress.page, total: progress.total }),
+          });
+        } else {
+          dispatch({ type: 'setBusy', message: t('analyzingDocument'), progress: null });
+        }
+      });
+      cancelJobRef.current = inspectJob.cancel;
+      dispatch({ type: 'setCancellable', value: true });
+      const inspection = await inspectJob.promise;
+      if (runId !== runIdRef.current) {
+        inspectJob.cancel();
+        return;
+      }
+      clearCancellation();
+      trace.push(workflowEvent(
+        'inspect',
+        'completed',
+        `${inspection.items.length} source-backed items extracted locally`,
+      ));
+      void appLog(
+        `inspection: file=${file.name} source=${inspection.sourceKind} project=${inspection.projectName} items=${inspection.items.length} confidence=${inspection.mapping.confidence.toFixed(2)}`,
+      );
+      const pending = { inspection, fileName: file.name, fileHash, startedAt, trace };
+      // Auto-pilot: a per-project grant skips consent and, on a machine-clean
+      // verdict, publishes without review. Anything else follows the manual flow.
+      const trust = await getAutopilotTrust().catch((): AutopilotGrant[] => []);
+      const grant = findAutopilotGrant(trust, memoryKey(inspection.projectName));
+      if (grant !== null) {
+        const autoData = await analyze(pending, mode !== 'offline', grant);
+        if (autoData !== null) await generate(autoData);
+        return;
+      }
+      if (boot?.provider && boot.provider !== 'none' && mode === 'online') {
+        await analyze(pending, true);
+      } else if (boot?.provider && boot.provider !== 'none' && mode === 'ask') {
+        dispatch({ type: 'requestConsent', pending });
+      } else {
+        await analyze(pending, false);
+      }
+    } catch (reason) {
+      clearCancellation();
+      if (isCancellation(reason)) {
+        reset();
+        return;
+      }
+      dispatch({ type: 'reset' });
+      void appLog(`workflow error: ${errorMessage(reason)}`);
+      dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
+    }
+  }, [analyze, boot, clearCancellation, generate, processingMode, reset, t]);
+
+  const analyzePending = useCallback((allowAi: boolean) => {
+    const pending = stateRef.current.pendingInspection;
+    if (pending) void analyze(pending, allowAi);
+  }, [analyze]);
+
+  const changeClassification = useCallback((itemId: number, packageCode: string) => {
+    const current = stateRef.current;
+    const data = current.data;
+    if (!data) return;
+    if (current.pendingPublication) {
+      void discardRevision(current.pendingPublication.reservation).catch(() => undefined);
+      dispatch({ type: 'setPendingPublication', pending: null });
+    }
+    const workPackage = data.packageCatalog.find((candidate) => candidate.code === packageCode)
+      ?? emptyPackage('WP-99', i18n.getFixedT('en')('unclassified'), i18n.getFixedT('ar')('unclassified'));
+    const classifications = reviseClassification(data.classifications, itemId, workPackage);
+    const packages = buildPackages(data.inspection.items, classifications);
+    const issues = validate(data.inspection.items, classifications, packages);
+    const trace = [...data.trace, workflowEvent('human-review', 'completed', `Item ${itemId} reassigned to ${workPackage.code}`)];
+    dispatch({ type: 'updateData', data: { ...data, classifications, packages, issues, trace } });
+  }, [i18n]);
 
   return {
     state,
