@@ -50,7 +50,7 @@ pub struct RunEntry {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RunClassification {
     item_id: i64,
     #[serde(default)]
@@ -69,6 +69,7 @@ fn default_provider() -> String {
 }
 
 const MAX_TRACE_BYTES: usize = 256 * 1024;
+const MAX_TRACE_EVENTS: usize = 10_000;
 const MAX_RUN_CLASSIFICATIONS: usize = 20_000;
 const MAX_DESCRIPTION_CHARS: usize = 1_000;
 
@@ -88,6 +89,24 @@ impl RunEntry {
         }
         if self.model.chars().count() > 160 {
             return Err("Run model identifier is too long".into());
+        }
+        // Bound IPC payloads before SQLite (unbounded trace OOMs the serializer).
+        if self.trace.len() > MAX_TRACE_EVENTS {
+            return Err("Run trace carries too many events".into());
+        }
+        for (value, limit) in [
+            &self.file_name,
+            &self.file_hash,
+            &self.output_file,
+            &self.project_name,
+            &self.package_folder,
+        ]
+        .into_iter()
+        .zip([512, 256, 1024, 220, 1024])
+        {
+            if value.chars().count() > limit {
+                return Err("Run text field is too long".into());
+            }
         }
         for count in [
             self.item_count,

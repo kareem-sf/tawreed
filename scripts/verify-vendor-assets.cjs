@@ -29,6 +29,14 @@ assertSame('public/ocr/worker.min.js', 'node_modules/tesseract.js/dist/worker.mi
 for (const entry of fs.readdirSync(path.join(root, 'public/ocr/core'))) {
   assertSame(`public/ocr/core/${entry}`, `node_modules/tesseract.js-core/${entry}`);
 }
+// Bidirectional: public/ocr/core is an intentional subset (wasm runtimes only — not
+// package metadata or plain .js loaders), so require every installed *vendored-kind*
+// artifact (*.wasm, *.wasm.js) to be present. A deleted wasm file would otherwise pass silently.
+for (const entry of fs.readdirSync(path.join(root, 'node_modules/tesseract.js-core'))) {
+  if (!/^tesseract-core-.*\.wasm(\.js)?$/.test(entry)) continue;
+  requireFile(`public/ocr/core/${entry}`);
+  assertSame(`public/ocr/core/${entry}`, `node_modules/tesseract.js-core/${entry}`);
+}
 
 // engine/pdf-ingest.ts loads these runtime paths directly; fail if any are absent.
 const requireNonEmptyDirectory = (relative) => {
@@ -52,6 +60,16 @@ for (const file of walk(path.join(root, 'public/pdfjs'))) {
   const relative = path.relative(path.join(root, 'public/pdfjs'), file);
   assertSame(`public/pdfjs/${relative}`, `node_modules/pdfjs-dist/${relative}`);
 }
+// Bidirectional: engine/pdf-ingest.ts loads cmaps/standard_fonts/wasm directly —
+// require every installed file under those three dirs to be vendored. Other
+// installed dirs (legacy/, web/, types/) are intentionally not vendored.
+for (const subdir of ['cmaps', 'standard_fonts', 'wasm']) {
+  for (const file of walk(path.join(root, 'node_modules/pdfjs-dist', subdir))) {
+    const relative = path.relative(path.join(root, 'node_modules/pdfjs-dist', subdir), file);
+    requireFile(`public/pdfjs/${subdir}/${relative}`);
+    assertSame(`public/pdfjs/${subdir}/${relative}`, `node_modules/pdfjs-dist/${subdir}/${relative}`);
+  }
+}
 
 // The onboarding tour is a live in-app demo (src/features/onboarding/LiveDemo.tsx)
 // narrated by TTS audio — see scripts/generate-onboarding-media.mjs. No video/poster
@@ -69,6 +87,10 @@ for (const language of ['en', 'ar']) {
 }
 
 const dist = path.join(root, 'dist');
+const skipDist = process.argv.includes('--skip-dist');
+if (!skipDist && !fs.statSync(dist, { throwIfNoEntry: false })?.isDirectory()) {
+  throw new Error('dist/ is missing — run `npm run build` first (or pass --skip-dist to skip the public→dist copy check).');
+}
 if (fs.statSync(dist, { throwIfNoEntry: false })?.isDirectory()) {
   for (const file of walk(path.join(root, 'public'))) {
     const relative = path.relative(path.join(root, 'public'), file);

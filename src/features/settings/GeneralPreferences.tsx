@@ -9,6 +9,7 @@ export function GeneralPreferences() {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const [processingMode, setProcessingMode] = useState<ProcessingMode>('ask');
   const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     void getSettings()
@@ -22,8 +23,15 @@ export function GeneralPreferences() {
   }, []);
 
   const changeLanguage = async (language: string) => {
-    await i18n.changeLanguage(language);
-    await setSetting('language', language);
+    const previous = i18n.language;
+    try {
+      setSaveError(null);
+      await i18n.changeLanguage(language);
+      await setSetting('language', language);
+    } catch {
+      await i18n.changeLanguage(previous).catch(() => undefined);
+      setSaveError(t('errorGeneric'));
+    }
   };
 
   return (
@@ -50,8 +58,13 @@ export function GeneralPreferences() {
           value={colorScheme}
           onChange={(value) => {
             const scheme = value as 'auto' | 'light' | 'dark';
+            const previous = colorScheme;
             setColorScheme(scheme);
-            void setSetting('theme', scheme);
+            setSaveError(null);
+            void setSetting('theme', scheme).catch(() => {
+              setColorScheme(previous);
+              setSaveError(t('errorGeneric'));
+            });
           }}
           data={[
             { value: 'auto', label: t('systemTheme') },
@@ -78,10 +91,20 @@ export function GeneralPreferences() {
             ]}
             onChange={(value) => {
               const next = (value ?? 'ask') as ProcessingMode;
+              const previous = processingMode;
               setProcessingMode(next);
-              void setSetting('processingMode', next);
+              setSaveError(null);
+              void setSetting('processingMode', next).catch(() => {
+                setProcessingMode(previous);
+                setSaveError(t('errorGeneric'));
+              });
             }}
           />
+        )}
+        {saveError && (
+          <Text size="xs" c="red" role="alert">
+            {saveError}
+          </Text>
         )}
       </section>
     </div>

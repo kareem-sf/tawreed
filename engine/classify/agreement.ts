@@ -37,6 +37,8 @@ export function flagHeuristicDisagreement(
   const plurality = new Map<string, string>();
   for (const [heuristicCode, tally] of votes) {
     // A trade the heuristic saw only once carries no majority to disagree with.
+    // A tied trade (no strict majority) carries no "where most of it went" either —
+    // abstain rather than flag arbitrary halves as breakaways.
     let total = 0;
     let bestCode = '';
     let bestCount = 0;
@@ -47,7 +49,7 @@ export function flagHeuristicDisagreement(
         bestCode = code;
       }
     }
-    if (total > 1) plurality.set(heuristicCode, bestCode);
+    if (total > 1 && bestCount > total / 2) plurality.set(heuristicCode, bestCode);
   }
 
   return classifications.map((entry) => {

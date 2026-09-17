@@ -1,4 +1,5 @@
 // Project revision reservation / publish / discard workflow (Rev NN folders).
+use super::revision_lock::{acquire_file_lock, release_file_lock};
 use crate::store;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -134,6 +135,10 @@ fn reserve_revision_inner(project_name: &str) -> Result<RevisionReservation, Str
     let temp = project_dir.join(&session);
     std::fs::create_dir_all(temp.join("Packages"))
         .map_err(|e| format!("reserve revision directory: {e}"))?;
+    if let Err(error) = acquire_file_lock(&project_dir, &session) {
+        let _ = std::fs::remove_dir_all(&temp);
+        return Err(error);
+    }
     Ok(RevisionReservation {
         project_name: project_name.to_string(),
         revision,
@@ -173,6 +178,9 @@ pub fn write_revision_bundle(
     let project_name = safe_component(&project_name, 100);
     let result = write_revision_bundle_inner(&project_name, session, revision, artifacts);
     release_generation(&project_name);
+    if let Ok(dir) = store::output_dir() {
+        release_file_lock(&dir.join(&project_name));
+    }
     result
 }
 
@@ -182,12 +190,17 @@ fn write_revision_bundle_inner(
     revision: u32,
     artifacts: Vec<RevisionArtifact>,
 ) -> Result<RevisionOutput, String> {
+    // The session embeds its reserved revision (".tawreed-rev-{NN}-…"), so a caller
+    // cannot reserve Rev 01 and publish it as Rev 99.
     if artifacts.is_empty()
         || session.contains(['/', '\\'])
-        || !session.starts_with(".tawreed-rev-")
+        || !session.starts_with(&format!(".tawreed-rev-{revision:02}-"))
         || !session.ends_with(".tmp")
     {
         return Err("Invalid revision session".into());
+    }
+    if artifacts.len() > 64 {
+        return Err("Too many artifacts in the revision bundle".into());
     }
     let project_dir = store::output_dir()?.join(project_name);
     let temp = project_dir.join(&session);
@@ -214,6 +227,7 @@ fn write_revision_bundle_inner(
 
     let mut files = Vec::new();
     let mut master_relative: Option<String> = None;
+    let mut total_decoded: usize = 0;
     let write_result = (|| -> Result<(), String> {
         for artifact in artifacts {
             if artifact.bytes_b64.len() > 268_435_456 {
@@ -228,6 +242,11 @@ fn write_revision_bundle_inner(
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(&artifact.bytes_b64)
                 .map_err(|e| format!("decode generated workbook: {e}"))?;
+            total_decoded = total_decoded.saturating_add(bytes.len());
+            if total_decoded > 1_073_741_824 {
+                let _ = std::fs::remove_dir_all(&temp);
+                return Err("Revision bundle exceeds the 1 GB total limit".into());
+            }
             let tmp_file = path.with_extension("xlsx.tmp");
             std::fs::write(&tmp_file, &bytes)
                 .map_err(|e| format!("write generated workbook: {e}"))?;
@@ -258,10 +277,19 @@ fn write_revision_bundle_inner(
         ));
     }
 
-    let master = final_dir.join(master_relative.ok_or("Generated bundle has no master workbook")?);
+    let master = final_dir.join(
+        master_relative
+            .ok_or("Generated bundle has no master workbook")?
+            .replace('\\', "/"),
+    );
     let absolute_files = files
         .iter()
-        .map(|relative| final_dir.join(relative).to_string_lossy().to_string())
+        .map(|relative| {
+            final_dir
+                .join(relative.replace('\\', "/"))
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     store::log_line(&format!(
         "revision published: {project_name} Rev {revision:02} ({} files)",
@@ -297,6 +325,9 @@ pub fn discard_revision(project_name: String, session: String) -> Result<(), Str
     // A malformed or already-missing reservation must not permanently strand the
     // process-wide project guard.
     release_generation(&project_name);
+    if let Ok(dir) = store::output_dir() {
+        release_file_lock(&dir.join(&project_name));
+    }
     result
 }
 
@@ -396,6 +427,14 @@ mod path_safety_tests {
 #[cfg(test)]
 mod tests {
     use super::safe_component;
+
+    #[test]
+    fn session_prefix_is_bound_to_the_reserved_revision() {
+        // ".tawreed-rev-{NN}-…" must match the revision being published.
+        let session_01 = ".tawreed-rev-01-12345-999.tmp";
+        assert!(session_01.starts_with(&format!(".tawreed-rev-{:02}-", 1)));
+        assert!(!session_01.starts_with(&format!(".tawreed-rev-{:02}-", 99)));
+    }
 
     #[test]
     fn path_traversal_and_separators_cannot_survive_into_a_path_segment() {

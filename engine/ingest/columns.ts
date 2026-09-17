@@ -4,7 +4,7 @@
 import ExcelJS from 'exceljs';
 import type { ColumnMapping } from '../../shared/types';
 import { canonicalUnit, normalizeText } from '../normalize';
-import { cellText, cellNumber, isNumericLike } from './cells';
+import { cellText, cellNumber } from './cells';
 import { MAX_INFER_COLUMNS } from './constants';
 import type { DataBlock } from './rows';
 
@@ -36,7 +36,9 @@ function profileColumns(sheet: ExcelJS.Worksheet, rows: number[]): ColumnStats[]
       const number = cellNumber(value);
       if (!text && number === null) continue;
       stat.nonEmpty++;
-      if (number !== null && isNumericLike(value)) {
+      // One numeric definition for profiling: cellNumber already rejects text-first
+      // specs ("Concrete C30") while accepting inline units ("12 m3").
+      if (number !== null) {
         stat.numeric++;
         stat.numbers.push(number);
         if (Number.isInteger(number)) stat.integerNumbers++;
@@ -63,13 +65,13 @@ function inferArithmeticColumns(
   sheet: ExcelJS.Worksheet,
   rows: number[],
   numericCols: number[],
-): { qty: number; rate: number; total: number; score: number } | null {
+): { qty: number; rate: number; total: number; score: number; rolesAmbiguous: boolean } | null {
   // Cell values don't change across candidate triples — read each numeric column once up front.
   const colValues = new Map<number, (number | null)[]>();
   for (const col of numericCols) {
     colValues.set(col, rows.map((r) => cellNumber(sheet.getRow(r).getCell(col).value)));
   }
-  let best: { qty: number; rate: number; total: number; score: number } | null = null;
+  let best: { qty: number; rate: number; total: number; score: number; rolesAmbiguous: boolean } | null = null;
   for (let i = 0; i < numericCols.length; i++) {
     for (let j = i + 1; j < numericCols.length; j++) {
       for (let k = 0; k < numericCols.length; k++) {
@@ -98,7 +100,10 @@ function inferArithmeticColumns(
           const bMedian = median(bValues);
           // Prefer the column with more integers as qty; break ties by smaller median
           const qty = aIntegers > bIntegers ? a : bIntegers > aIntegers ? b : (aMedian <= bMedian ? a : b);
-          best = { qty, rate: qty === a ? b : a, total, score };
+          // Equal integer counts mean the qty/rate assignment is a guess — flag it
+          // so the mapping confidence does not reward this arithmetic match.
+          const rolesAmbiguous = aIntegers === bIntegers;
+          best = { qty, rate: qty === a ? b : a, total, score, rolesAmbiguous };
         }
       }
     }
@@ -131,7 +136,10 @@ export function inferMapping(
     .filter((s) => s.col !== description && s.units >= 2)
     .sort((a, b) => b.units - a.units)[0]?.col ?? null;
 
-  const numericStats = stats.filter((s) => s.numeric >= Math.max(2, Math.floor(block.rows.length * 0.3)));
+  // Single-row tables cannot meet a count floor — one numeric cell suffices there;
+  // larger blocks keep the stricter floor so sparse columns don't become qty/rate.
+  const minNumeric = block.rows.length === 1 ? 1 : Math.max(2, Math.floor(block.rows.length * 0.3));
+  const numericStats = stats.filter((s) => s.numeric >= minNumeric);
   const numericCols = numericStats.map((s) => s.col);
   const arithmetic = numericCols.length >= 3 ? inferArithmeticColumns(sheet, block.rows, numericCols) : null;
 
@@ -154,6 +162,7 @@ export function inferMapping(
 
   const remarks = seed?.remarks ?? null;
   const found = [code, unit, qty, rate, total, remarks].filter((v) => v !== null).length;
-  const confidence = Math.min(0.95, 0.35 + found * 0.09 + (arithmetic ? 0.15 : 0) + (seed ? 0.1 : 0));
+  const arithmeticBonus = arithmetic && !arithmetic.rolesAmbiguous ? 0.15 : 0;
+  const confidence = Math.min(0.95, 0.35 + found * 0.09 + arithmeticBonus + (seed ? 0.1 : 0));
   return { code, description, unit, qty, rate, total, remarks, confidence };
 }

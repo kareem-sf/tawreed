@@ -11,6 +11,7 @@ pub(crate) mod ai;
 mod codex_provider;
 mod credentials;
 mod history;
+mod revision_lock;
 mod revisions;
 mod system;
 

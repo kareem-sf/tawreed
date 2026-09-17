@@ -49,4 +49,18 @@ describe('heuristic agreement', () => {
     const flagged = flagHeuristicDisagreement(items, [llm(1, 'WP-A'), llm(2, 'WP-B')]);
     expect(flagged.some((c) => c.heuristicDisagreement)).toBe(false);
   });
+
+  it('abstains on a tied trade instead of flagging arbitrary halves', () => {
+    // 2-2 split: no strict majority, so no "where most of it went" exists.
+    const classifications = [llm(1, 'WP-A'), llm(2, 'WP-A'), llm(3, 'WP-B'), llm(4, 'WP-B')];
+    const flagged = flagHeuristicDisagreement(concrete, classifications);
+    expect(flagged.some((c) => c.heuristicDisagreement)).toBe(false);
+  });
+
+  it('flags the minority half of a 3-1 split', () => {
+    const classifications = [llm(1, 'WP-A'), llm(2, 'WP-A'), llm(3, 'WP-A'), llm(4, 'WP-B')];
+    const flagged = flagHeuristicDisagreement(concrete, classifications);
+    expect(flagged.find((c) => c.itemId === 4)?.heuristicDisagreement).toBe(true);
+    expect(flagged.filter((c) => c.heuristicDisagreement)).toHaveLength(1);
+  });
 });

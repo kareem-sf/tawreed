@@ -2,7 +2,9 @@ const { existsSync, readFileSync, readdirSync } = require('node:fs');
 const { dirname, extname, join, relative, resolve } = require('node:path');
 
 const root = resolve(__dirname, '..');
-const documentationRoots = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'docs'];
+// README/CONTRIBUTING/SECURITY/docs plus user-support and repo-config docs — a
+// broken link outside this scope used to merge green.
+const documentationRoots = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md', 'THIRD_PARTY_NOTICES.md', 'docs', '.github'];
 const errors = [];
 
 function collect(path) {

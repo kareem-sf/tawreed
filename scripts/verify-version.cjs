@@ -8,8 +8,14 @@ const packageLock = json('package-lock.json');
 const tauri = json('src-tauri/tauri.conf.json');
 const releaseManifest = json('.release-please-manifest.json');
 const cargoToml = fs.readFileSync(path.join(root, 'src-tauri/Cargo.toml'), 'utf8');
+// Scope to [package]: an unscoped first-match would misread a dependency's
+// version if one ever precedes it in the file.
+const tomlLines = cargoToml.split(/\r?\n/);
+const pkgStart = tomlLines.findIndex((line) => line.trim() === '[package]');
+const pkgEnd = tomlLines.findIndex((line, i) => i > pkgStart && /^\s*\[.*\]\s*$/.test(line));
+const packageSection = tomlLines.slice(pkgStart, pkgEnd === -1 ? undefined : pkgEnd).join('\n');
+const cargoVersion = packageSection.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 const cargoLock = fs.readFileSync(path.join(root, 'src-tauri/Cargo.lock'), 'utf8');
-const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 const cargoLockVersion = cargoLock.match(/\[\[package\]\]\r?\nname = "tawreed"\r?\nversion = "([^"]+)"/)?.[1];
 const versions = {
   'package.json': packageJson.version,

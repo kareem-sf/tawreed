@@ -1,5 +1,5 @@
 // Heuristic classifier — deterministic, offline, bilingual. Also the LLM fallback.
-import type { BoqItem, Classification } from '../../shared/types';
+import { REVIEW_CONFIDENCE_THRESHOLD, type BoqItem, type Classification } from '../../shared/types';
 import { normalizeText } from '../normalize';
 import { TAXONOMY } from './taxonomy';
 
@@ -90,12 +90,15 @@ export function heuristicClassify(items: BoqItem[]): { classified: Classificatio
 /** Force-assign an item using the best available (possibly weak) heuristic guess. */
 export function heuristicFallback(item: BoqItem): Classification {
   const s = score(item);
+  // A guess too weak to classify offline (below MIN_SCORE) must not outscore
+  // human review: cap it below the review threshold so LOW_CONFIDENCE flags it.
+  const confidence = s.hits >= MIN_SCORE ? s.confidence : Math.min(s.confidence, REVIEW_CONFIDENCE_THRESHOLD - 0.05);
   return {
     itemId: item.id,
     packageCode: s.packageCode || 'WP-99',
     packageNameEn: s.packageNameEn,
     packageNameAr: s.packageNameAr,
-    confidence: +s.confidence.toFixed(2),
+    confidence: +confidence.toFixed(2),
     source: 'fallback',
   };
 }

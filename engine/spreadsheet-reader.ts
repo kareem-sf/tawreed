@@ -54,23 +54,68 @@ function isValidUtf8(bytes: Uint8Array): boolean {
 }
 
 /**
+ * Decode legacy single-byte text with the Windows-1256 table. SheetJS ignores
+ * the `codepage` option for `type: 'array'` input (verified: identical mojibake
+ * with and without it), so decode here and hand SheetJS a string instead.
+ */
+function decode1256(bytes: Uint8Array): string {
+  const table = (codepageExports.cptable[1256] as unknown as { dec: unknown[] } | undefined)?.dec ?? [];
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 4096) {
+    let chunk = '';
+    for (let j = i; j < Math.min(i + 4096, bytes.length); j++) {
+      const byte = bytes[j]!;
+      if (byte < 128) chunk += String.fromCharCode(byte);
+      else chunk += typeof table[byte] === 'string' ? (table[byte] as string) : '?';
+    }
+    out += chunk;
+  }
+  return out;
+}
+
+/**
  * Read any spreadsheet the tolerant engine supports and return an in-memory ExcelJS workbook
  * holding the same cell values. Styling is intentionally dropped — the rescue path
  * favors recovering data over preserving formatting. Cells covered by a merge range are
  * forward-filled with the top-left value so merged rows survive downstream analysis.
  */
+/** Container magic: binary workbooks take the array reader whatever their bytes look like. */
+function looksBinaryContainer(bytes: Uint8Array): boolean {
+  const zip = bytes.length >= 4
+    && bytes[0] === 0x50 && bytes[1] === 0x4b
+    && (bytes[2] === 0x03 || bytes[2] === 0x05 || bytes[2] === 0x07);
+  const cfb = bytes.length >= 8
+    && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0
+    && bytes[4] === 0xa1 && bytes[5] === 0xb1 && bytes[6] === 0x1a && bytes[7] === 0xe1;
+  return zip || cfb;
+}
+
 export function readSpreadsheetToWorkbook(bytes: Uint8Array): ExcelJS.Workbook {
   let source: XLSX.WorkBook;
-  try {
-    // A file that is not valid UTF-8 may be a legacy Arabic text export (Windows-1256, no BOM).
-    source = XLSX.read(bytes, isValidUtf8(bytes) ? { type: 'array' } : { type: 'array', codepage: 1256 });
-  } catch (error) {
-    if (isEncryptionError(error)) {
-      throw new EncryptedWorkbookError(
-        'This workbook is password-protected. Remove the password in Excel (File → Info → Protect Workbook) and save a copy, then try again.',
-      );
+  // Array input never throws on plain text — it parses mojibake — so route first:
+  // containers and UTF-8 go to the array reader, anything else is legacy text.
+  if (!looksBinaryContainer(bytes) && !isValidUtf8(bytes)) {
+    try {
+      source = XLSX.read(decode1256(bytes), { type: 'string' });
+    } catch (error) {
+      if (isEncryptionError(error)) {
+        throw new EncryptedWorkbookError(
+          'This workbook is password-protected. Remove the password in Excel (File → Info → Protect Workbook) and save a copy, then try again.',
+        );
+      }
+      throw error;
     }
-    throw error;
+  } else {
+    try {
+      source = XLSX.read(bytes, { type: 'array' });
+    } catch (error) {
+      if (isEncryptionError(error)) {
+        throw new EncryptedWorkbookError(
+          'This workbook is password-protected. Remove the password in Excel (File → Info → Protect Workbook) and save a copy, then try again.',
+        );
+      }
+      throw error;
+    }
   }
 
   const target = new ExcelJS.Workbook();
@@ -91,7 +136,7 @@ export function readSpreadsheetToWorkbook(bytes: Uint8Array): ExcelJS.Workbook {
         }
       }
     }
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: null, blankrows: false });
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: null, blankrows: true });
     if (!rows.length) return;
     const worksheet = target.addWorksheet(safeSheetName(name, usedNames, index));
     for (const row of rows) worksheet.addRow(row as ExcelJS.CellValue[]);

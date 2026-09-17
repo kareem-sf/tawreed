@@ -109,6 +109,32 @@ function groupLines(tokens: PositionedToken[]): PositionedLine[] {
     .sort((a, b) => a.page - b.page || a.y - b.y);
 }
 
+/**
+ * Attach annotations to their nearest same-page item. Pure seam for testing.
+ *
+ * Scale caveat (unverified headless): native tokens use PDF points while OCR tokens
+ * use image pixels, so the distance cutoff mixes units on OCR pages and may attach
+ * nothing there. A browser-OCR + annotation fixture is needed to calibrate.
+ */
+export function assignAnnotationsToItems(
+  positions: Array<{ itemId: number; page?: number; y?: number }>,
+  annotations: Array<{ text: string; page: number; y: number }>,
+  maxDistance = 100,
+): Map<number, string[]> {
+  const assignments = new Map<number, string[]>();
+  for (const annotation of annotations) {
+    const nearest = positions
+      .filter((position) => position.page === annotation.page)
+      .map((position) => ({ position, distance: Math.abs(annotation.y - (position.y ?? annotation.y)) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    if (!nearest || nearest.distance > maxDistance) continue;
+    const current = assignments.get(nearest.position.itemId) ?? [];
+    current.push(annotation.text);
+    assignments.set(nearest.position.itemId, current);
+  }
+  return assignments;
+}
+
 function columnAnchors(lines: PositionedLine[]): number[] {
   const clusters: Array<{ x: number; count: number }> = [];
   for (const line of lines.filter((candidate) => candidate.cells.length >= 3)) {
@@ -303,6 +329,7 @@ export async function inspectPdf(
   let ocrWorker: OcrWorkerLike | null = null;
   let ocrCurrentPage = 0;
   const ocrFailedPages: number[] = [];
+  const ocrSkippedNodePages: number[] = [];
 
   try {
     try {
@@ -331,6 +358,11 @@ export async function inspectPdf(
         let pageTokens = await nativePageTokens(page, pageNumber);
         const nativeText = pageTokens.map((token) => token.text).join(' ');
         let usedOcr = false;
+        const sparseNative = pageTokens.length < 8 || nativeText.length < 80;
+        if (nodeRuntime && sparseNative && options.enableOcr !== false) {
+          // Desktop/Node runtime has no bundled OCR — record instead of silently yielding 0 items.
+          ocrSkippedNodePages.push(pageNumber);
+        }
         if (options.enableOcr !== false && !nodeRuntime && (pageTokens.length < 8 || nativeText.length < 80)) {
           try {
             ocrCurrentPage = pageNumber;
@@ -406,17 +438,10 @@ export async function inspectPdf(
     const result = await inspectWorkbook(syntheticBytes, fileName);
 
     const itemPositions = result.items.map((item) => ({ item, source: rowSources.get(item.row) }));
-    const annotationAssignments = new Map<number, string[]>();
-    for (const annotation of annotations) {
-      const nearest = itemPositions
-        .filter((candidate) => candidate.source?.page === annotation.page)
-        .map((candidate) => ({ candidate, distance: Math.abs(annotation.y - (candidate.source?.y ?? annotation.y)) }))
-        .sort((a, b) => a.distance - b.distance)[0];
-      if (!nearest || nearest.distance > 100) continue; // don't assign annotations more than 100 units away
-      const current = annotationAssignments.get(nearest.candidate.item.id) ?? [];
-      current.push(annotation.text);
-      annotationAssignments.set(nearest.candidate.item.id, current);
-    }
+    const annotationAssignments = assignAnnotationsToItems(
+      itemPositions.map(({ item, source }) => ({ itemId: item.id, page: source?.page, y: source?.y })),
+      annotations,
+    );
     for (const { item, source } of itemPositions) {
       if (source) item.page = source.page;
       const assigned = annotationAssignments.get(item.id) ?? [];
@@ -439,9 +464,15 @@ export async function inspectPdf(
       ocrPages,
       annotationCount: annotations.length,
       sheetName: 'PDF BOQ',
-      warnings: ocrFailedPages.length
-        ? [...result.warnings, `OCR failed for page(s) ${ocrFailedPages.join(', ')} — kept sparse native tokens`]
-        : result.warnings,
+      warnings: [
+        ...result.warnings,
+        ...(ocrFailedPages.length
+          ? [`OCR failed for page(s) ${ocrFailedPages.join(', ')} — kept sparse native tokens`]
+          : []),
+        ...(ocrSkippedNodePages.length
+          ? [`OCR is unavailable in the desktop runtime — scanned page(s) ${ocrSkippedNodePages.join(', ')} may be incomplete; use a searchable PDF or the browser build`]
+          : []),
+      ],
     };
   } finally {
     if (ocrWorker?.terminate) await ocrWorker.terminate().catch(() => {});

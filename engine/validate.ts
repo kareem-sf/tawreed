@@ -131,13 +131,13 @@ export function validate(items: BoqItem[], classifications: Classification[], pa
     const mean = rates.reduce((s, r) => s + r, 0) / rates.length;
     const sd = Math.sqrt(rates.reduce((s, r) => s + (r - mean) ** 2, 0) / rates.length);
     if (sd === 0) continue;
-    for (const i of priced) if ((i.rate! - mean) / sd > OUTLIER_Z) outliers.push(i.id);
+    for (const i of priced) if (Math.abs((i.rate! - mean) / sd) > OUTLIER_Z) outliers.push(i.id);
   }
   if (outliers.length > 0) {
     issues.push({
       severity: 'warning', code: 'RATE_OUTLIER',
-      messageEn: `${outliers.length} item(s) with rates >${OUTLIER_Z}σ above their package mean.`,
-      messageAr: `${outliers.length} بند بأسعار أعلى من متوسط الحزمة بأكثر من ${OUTLIER_Z} انحراف معياري.`,
+      messageEn: `${outliers.length} item(s) with rates beyond ±${OUTLIER_Z}σ from their package mean.`,
+      messageAr: `${outliers.length} بند بأسعار خارج ±${OUTLIER_Z} انحراف معياري عن متوسط الحزمة.`,
       itemIds: outliers,
     });
   }

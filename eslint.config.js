@@ -41,4 +41,20 @@ export default tseslint.config(
       }],
     },
   },
+  {
+    // Delivery gates are code too — lint the scripts and configs the check pipeline runs.
+    files: ['scripts/**/*.{cjs,mjs}', '*.config.{js,ts}', 'playwright.config.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      'no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+    },
+  },
 );

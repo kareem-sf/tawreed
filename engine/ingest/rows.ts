@@ -72,9 +72,16 @@ export function findDataBlock(sheet: ExcelJS.Worksheet, minRow = 1): DataBlock |
   return { start: best[0]!, end: best[best.length - 1]!, rows: best };
 }
 
-export function isSummaryDescription(text: string): boolean {
+/**
+ * True when a row is a summary (grand total, carried forward, …). A description that
+ * merely *starts* with a total word can still be a real line item ("Total station
+ * surveying instrument…"), so the prefix rule only fires when the row carries no item
+ * evidence — a parseable quantity. Exact matches always stay summaries.
+ */
+export function isSummaryDescription(text: string, hasItemEvidence = false): boolean {
   const normalized = normalizeText(text);
-  return TOTAL_WORDS.some((word) => normalized === word || normalized.startsWith(`${word} `));
+  return TOTAL_WORDS.some((word) => normalized === word
+    || (!hasItemEvidence && normalized.startsWith(`${word} `)));
 }
 
 const COMMENT_PREFIXES = [

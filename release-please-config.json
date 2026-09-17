@@ -9,8 +9,7 @@
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "draft-pull-request": false,
-      "bump-minor-pre-major": true,
-      "release-as": "0.0.1"
+      "bump-minor-pre-major": true
     }
   }
 }

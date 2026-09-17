@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { inspectPdf } from '../engine/pdf-ingest';
+import { assignAnnotationsToItems, inspectPdf } from '../engine/pdf-ingest';
 import { detectDocumentKind } from '../engine/inspect-document';
 
 async function searchableBoqPdf(): Promise<Uint8Array> {
@@ -65,5 +65,54 @@ describe('PDF ingestion', () => {
   it('accepts .xlsm files as xlsx', () => {
     const zipMagic = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
     expect(detectDocumentKind(zipMagic, 'macro.xlsm')).toBe('xlsx');
+  });
+
+  it('tracks source pages across a multi-page BOQ', async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const columns = [34, 95, 250, 320, 390, 460];
+    const headers = ['Code', 'Description', 'Unit', 'Qty', 'Rate', 'Total'];
+    const pages: string[][][] = [
+      [['C-01', 'Reinforced concrete foundations', 'm3', '12', '4100', '49200']],
+      [['E-01', 'Low voltage power cabling', 'm', '250', '75', '18750']],
+    ];
+    pages.forEach((rows) => {
+      const page = pdf.addPage([720, 300]);
+      headers.forEach((text, index) => page.drawText(text, { x: columns[index], y: 240, size: 9, font }));
+      rows.forEach((row, rowIndex) => row.forEach((text, columnIndex) => {
+        page.drawText(text, { x: columns[columnIndex], y: 210 - rowIndex * 24, size: 8, font });
+      }));
+    });
+    const result = await inspectPdf(await pdf.save(), 'two-page.pdf', { enableOcr: false });
+    expect(result.pageCount).toBe(2);
+    expect(result.items.map((item) => item.code)).toEqual(['C-01', 'E-01']);
+    expect(result.items.find((item) => item.code === 'C-01')!.page).toBe(1);
+    expect(result.items.find((item) => item.code === 'E-01')!.page).toBe(2);
+  }, 20_000);
+});
+
+describe('assignAnnotationsToItems', () => {
+  const positions = [
+    { itemId: 1, page: 1, y: 100 },
+    { itemId: 2, page: 1, y: 200 },
+    { itemId: 3, page: 2, y: 100 },
+  ];
+
+  it('attaches each annotation to its nearest same-page item', () => {
+    const assigned = assignAnnotationsToItems(positions, [
+      { text: 'verify pour', page: 1, y: 110 },
+      { text: 'other page', page: 2, y: 105 },
+    ]);
+    expect(assigned.get(1)).toEqual(['verify pour']);
+    expect(assigned.get(2) ?? []).toEqual([]);
+    expect(assigned.get(3)).toEqual(['other page']);
+  });
+
+  it('drops annotations with no same-page item or beyond the cutoff', () => {
+    const assigned = assignAnnotationsToItems(positions, [
+      { text: 'far away', page: 1, y: 500 },
+      { text: 'no page', page: 9, y: 100 },
+    ]);
+    expect([...assigned.values()].flat()).toEqual([]);
   });
 });

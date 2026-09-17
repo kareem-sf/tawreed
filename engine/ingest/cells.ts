@@ -30,8 +30,16 @@ export function cellNumber(v: ExcelJS.CellValue): number | null {
     .replace(/\b(?:egp|usd|eur|gbp|sar|aed|qar|kwd|omr)\b/gi, '')
     .replace(/(?:ج\.?\s?م|ريال|دولار|درهم)/g, '')
     .trim();
-  if (!/^[\d٠-٩۰-۹\s.,٬٫()\-+%]+$/.test(numericText)) return null;
-  return parseNumber(numericText);
+  // Quantities may carry inline units ("12 m3", "250 TR", "(500) m3") — accept
+  // leading-numeric text, but still reject text-first specs ("Concrete C30").
+  // The unit suffix must be whitespace-separated: glued forms ("4x25", "250TR")
+  // stay rejected, preserving the old dimension-spec guard.
+  if (!/^[\d٠-٩۰-۹]/.test(numericText) && !/^[(\-.][\d٠-٩۰-۹\s]/.test(numericText)) return null;
+  if (!/^[\d٠-٩۰-۹\s.,٬٫()\-+%a-zA-Z\u0600-\u06FF]+$/.test(numericText)) return null;
+  const head = numericText.match(/^[^a-zA-Z\u0600-\u06FF]*/)?.[0] ?? '';
+  const tail = numericText.slice(head.length);
+  if (tail !== '' && !/\s$/.test(head) && !/^\s/.test(tail)) return null;
+  return parseNumber(head);
 }
 
 /** Shared numeric classifier — aligned with cellNumber's currency stripping + Arabic-Indic digit/separator handling. */

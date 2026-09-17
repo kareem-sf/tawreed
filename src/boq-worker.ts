@@ -79,10 +79,11 @@ export function inspectInWorker(
   fileName: string,
   onProgress?: (progress: PdfProgress) => void,
 ): WorkerJob<InspectionResult> {
-  const copy = bytes.slice();
+  // Transfer (not copy) the buffer: the caller's copy is neutered, so hash the
+  // bytes BEFORE calling. One resident copy instead of two for large files.
   return execute<InspectionResult>(
-    { type: 'inspect', bytes: copy, fileName },
-    [copy.buffer],
+    { type: 'inspect', bytes, fileName },
+    [bytes.buffer],
     { timeoutMs: 15 * 60_000, onProgress },
   );
 }

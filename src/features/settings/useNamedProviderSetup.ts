@@ -33,9 +33,13 @@ export function useNamedProviderSetup(
   const { setKey: bridgeSetKey, deleteKey: bridgeDeleteKey, test, models } = bridge;
 
   const chooseModel = useCallback((value: string | null) => {
+    const previous = model;
     setModel(value);
-    void setSetting(id, { model: value ?? '' });
-  }, [id]);
+    void setSetting(id, { model: value ?? '' }).catch((reason) => {
+      setModel(previous);
+      setMessage({ color: 'red', text: errorMessage(reason) });
+    });
+  }, [id, model, setMessage]);
 
   const save = useCallback(async () => {
     setWorking(id);
@@ -69,7 +73,12 @@ export function useNamedProviderSetup(
   ]);
 
   const remove = useCallback(async () => {
-    await bridgeDeleteKey();
+    try {
+      await bridgeDeleteKey();
+    } catch (reason) {
+      setMessage({ color: 'red', text: errorMessage(reason) });
+      return;
+    }
     setModelList([]);
     setMessage({ color: 'green', text: removedText });
     onConfigured?.('offline');

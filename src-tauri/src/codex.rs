@@ -359,28 +359,36 @@ fn candidate_paths() -> Vec<CodexCandidate> {
         }
     }
 
+    #[cfg(windows)]
+    candidates.extend(appx_candidates());
+
+    // Deliberately last: an early-PATH binary wins version probing by printing
+    // any version string, so managed, standalone, npm, and appx sources must be
+    // probed first. A PATH-only install is still used when nothing else exists.
     if let Some(path) = std::env::var_os("PATH") {
         let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
         for directory in std::env::split_paths(&path) {
             let candidate = directory.join(binary);
             candidates.push(CodexCandidate {
                 path: candidate,
-                source: "system PATH",
+                source: "system PATH (unverified)",
             });
         }
     }
 
-    #[cfg(windows)]
-    candidates.extend(appx_candidates());
-
     let mut seen = HashSet::new();
     candidates.retain(|candidate| {
-        let normalized = candidate
+        let canonical = candidate
             .path
             .canonicalize()
             .unwrap_or_else(|_| candidate.path.clone())
             .to_string_lossy()
-            .to_ascii_lowercase();
+            .to_string();
+        // Windows filesystems are case-insensitive; Unix ones are not.
+        #[cfg(windows)]
+        let normalized = canonical.to_ascii_lowercase();
+        #[cfg(not(windows))]
+        let normalized = canonical;
         seen.insert(normalized)
     });
     candidates
@@ -492,7 +500,15 @@ fn create_request_dir() -> Result<PathBuf, String> {
             std::process::id()
         ));
         match std::fs::create_dir(&path) {
-            Ok(()) => return Ok(path),
+            Ok(()) => {
+                // Prompts, schemas, and responses carry BOQ text: owner-only on Unix.
+                #[cfg(unix)]
+                let _ = std::fs::set_permissions(
+                    &path,
+                    std::os::unix::fs::PermissionsExt::from_mode(0o700),
+                );
+                return Ok(path);
+            }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(format!("create isolated Codex directory: {error}")),
         }
@@ -908,5 +924,15 @@ mod detection_tests {
         candidates
             .retain(|candidate| seen.insert(candidate.path.to_string_lossy().to_ascii_lowercase()));
         assert_eq!(candidates.len(), 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn request_dirs_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = create_request_dir().expect("allocate request dir");
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(mode & 0o777, 0o700);
     }
 }

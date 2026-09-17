@@ -75,8 +75,17 @@ where
             }
         }
         let send = build().send();
+        // Race the send against the remaining budget: without this a stalled
+        // server burns the full 120s client timeout per attempt and the "60s
+        // budget" is really ~8 minutes of wall time.
+        let remaining = RETRY_BUDGET
+            .checked_sub(started.elapsed())
+            .unwrap_or_default();
         let outcome = tokio::select! {
-            response = send => response,
+            response = tokio::time::timeout(remaining, send) => match response {
+                Ok(outcome) => outcome,
+                Err(_) => break,
+            },
             _ = wait_for_cancellation(cancelled.clone()) => {
                 return Err("AI job cancelled".into());
             }

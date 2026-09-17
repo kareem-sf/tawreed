@@ -99,4 +99,35 @@ describe('agent workflow guardrails', () => {
       packageCode: 'WP-CONCRETE',
     })]);
   });
+
+  it('keeps first on conflicting memory entries and does not overcount no-ops', () => {
+    const key = 'reinforced concrete walls';
+    const mem = [
+      { descriptionKey: key, packageCode: 'WP-A', packageNameEn: 'A', packageNameAr: 'أ' },
+      { descriptionKey: key, packageCode: 'WP-B', packageNameEn: 'B', packageNameAr: 'ب' },
+    ];
+    const res = applyClassificationMemory(items, classifications, mem);
+    expect(res.classifications[0]!.packageCode).toBe('WP-A');
+    // Second apply with same memory is a no-op — applied must be 0
+    const again = applyClassificationMemory(items, res.classifications, mem);
+    expect(again.applied).toBe(0);
+  });
+
+  it('never overwrites an explicit human decision with memory', () => {
+    const reviewed = reviseClassification(classifications, 1, concrete);
+    const res = applyClassificationMemory(items, reviewed, [{
+      descriptionKey: 'reinforced concrete walls',
+      packageCode: 'WP-OTHER',
+      packageNameEn: 'Other',
+      packageNameAr: 'أخرى',
+    }]);
+    expect(res.classifications[0]).toMatchObject({ packageCode: 'WP-CONCRETE', source: 'user' });
+  });
+
+  it('memorizes only explicit human corrections, never machine guesses', () => {
+    const machineGuessed = classifications.map((c) => ({ ...c, source: 'llm' as const, confidence: 0.9 }));
+    expect(memoryFromApprovedReview(items, machineGuessed, [concrete])).toEqual([]);
+    const reviewed = reviseClassification(classifications, 1, concrete);
+    expect(memoryFromApprovedReview(items, reviewed, [concrete])).toHaveLength(1);
+  });
 });

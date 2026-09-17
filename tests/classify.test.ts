@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { inspectWorkbook } from '../engine/ingest';
 import { classifyAll } from '../engine/classify';
-import { heuristicClassify } from '../engine/classify/heuristic';
+import { heuristicClassify, heuristicFallback } from '../engine/classify/heuristic';
 import { requestToPrompt, type LlmRequest } from '../engine/classify/llm';
 import { buildPackages } from '../engine/validate';
 import { enFixture, arFixture, EN_ROWS } from './fixtures';
@@ -64,6 +64,19 @@ describe('heuristic classifier (offline)', () => {
     expect(all).toHaveLength(EN_ROWS.length);
     const gibberish = all.find((c) => c.itemId === 11)!;
     expect(gibberish.source).toBe('fallback');
+  });
+
+  it('caps a below-threshold fallback guess so review catches it', () => {
+    const weak: BoqItem = {
+      id: 1, code: 'D1', description: 'Door supply', unit: 'm3',
+      qty: 2, rate: 3000, total: 6000, row: 2,
+    };
+    // Single weak keyword hit: too weak to classify offline (stays remaining)…
+    expect(heuristicClassify([weak]).remaining).toHaveLength(1);
+    // …so the fallback guess must stay below the review threshold.
+    const fallback = heuristicFallback(weak);
+    expect(fallback.source).toBe('fallback');
+    expect(fallback.confidence).toBeLessThan(0.55);
   });
 });
 
@@ -234,5 +247,23 @@ describe('LLM batching (BATCH_SIZE = 100)', () => {
     const failed = all.filter((c) => c.itemId > 100);
     expect(failed).toHaveLength(150);
     expect(failed.every((c) => c.packageCode === 'WP-99' && c.source === 'fallback')).toBe(true);
+  });
+
+  it('keeps first on duplicate itemId from the model instead of last-wins', async () => {
+    const items = gibberishItems(3);
+    const transport = async (req: LlmRequest): Promise<string> => {
+      if (isProposal(req)) return proposal(STRUCTURE);
+      const ids = requestedIds(req);
+      const dup = ids[0]!;
+      return JSON.stringify({
+        classifications: [
+          { itemId: dup, packageCode: 'WP-MISC', confidence: 0.9 },
+          { itemId: dup, packageCode: 'WP-99', confidence: 0.9 },
+          ...ids.slice(1).map((id) => ({ itemId: id, packageCode: 'WP-MISC', confidence: 0.8 })),
+        ],
+      });
+    };
+    const all = await classifyAll(items, { useLlm: true, transport });
+    expect(all.find((c) => c.itemId === items[0]!.id)!.packageCode).toBe('WP-MISC');
   });
 });

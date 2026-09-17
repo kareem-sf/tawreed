@@ -78,6 +78,22 @@ describe('workbook generation', () => {
     expect(totalCells).toBe(result.inspection.items.length);
   });
 
+  it('formats whole quantities without forced decimals', async () => {
+    const result = await runPipeline(await enFixture(), 'en.xlsx', { useLlm: false });
+    const bytes = await buildWorkbook({
+      packages: result.packages,
+      items: result.inspection.items,
+      projectName: 'Green Avenue',
+      revision: 1,
+      locale: 'en',
+      documentLanguage: 'en',
+    });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(bytes.buffer as ArrayBuffer);
+    const sheet = wb.worksheets.find((candidate) => candidate.name.startsWith('WP-'))!;
+    expect(sheet.findRow(5)!.getCell(4).numFmt).toBe('#,##0.##');
+  });
+
   it('places only meaningful comments in Remarks and native notes without visible NOTE rows', async () => {
     const result = await runPipeline(await commentsFixture(), 'comments.xlsx', { useLlm: false });
     result.inspection.items[0]!.comments = [...(result.inspection.items[0]!.comments ?? []), '-', 'THANK YOU'];
@@ -129,6 +145,20 @@ describe('workbook generation', () => {
     expect(row.height).toBeGreaterThan(70);
   });
 
+  it('honors explicit locale ar for RTL even with an English project name', async () => {
+    const result = await runPipeline(await enFixture(), 'en.xlsx', { useLlm: false });
+    const bytes = await buildWorkbook({
+      packages: result.packages,
+      items: result.inspection.items,
+      projectName: 'Green Avenue',
+      revision: 1,
+      locale: 'ar',
+    });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(bytes.buffer as ArrayBuffer);
+    expect(wb.worksheets[0]!.views[0]?.rightToLeft).toBe(true);
+  });
+
   it('generates a professionally named master and standalone package files', async () => {
     const result = await runPipeline(await enFixture(), 'en.xlsx', { useLlm: false });
     const artifacts = await buildWorkbooks({
@@ -154,6 +184,11 @@ describe('workbook generation', () => {
 
   it('sanitizes Windows names and applies the selected naming policy', () => {
     expect(safeFileComponent('Gas: Ovens / Factory. ')).toBe('Gas Ovens Factory');
+    expect(safeFileComponent('CON')).toBe('Project CON');
+    expect(safeFileComponent('nul.xlsx')).toBe('nul.xlsx');
+    expect(safeFileComponent('COM4')).toBe('Project COM4');
+    expect(safeFileComponent('.')).toBe('Untitled Project');
+    expect(safeFileComponent(`Tower ${'A'.repeat(200)}`).length).toBeLessThanOrEqual(100);
     expect(masterFileName('Green Avenue', 3)).toBe('Green Avenue - Work Packages - Rev 03.xlsx');
     expect(packageFileName('Green Avenue', {
       code: 'WP-07', nameEn: 'Plumbing & Fire Fighting', nameAr: 'أعمال السباكة', itemIds: [1], itemCount: 1, totalCost: 10,

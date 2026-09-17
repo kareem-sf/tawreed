@@ -42,10 +42,21 @@ pub fn read_input_file(path: String) -> Result<Value, String> {
     if !metadata.is_file() {
         return Err("The dropped path is not a file".into());
     }
+    // A renderer-supplied path ending in .csv would otherwise read any text file
+    // through a symlink — refuse links outright with an actionable message.
+    if std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("Symbolic links are not accepted — drop the original file".into());
+    }
     if metadata.len() > 100 * 1024 * 1024 {
         return Err("The input file is larger than the 100 MB limit".into());
     }
     let bytes = std::fs::read(path).map_err(|e| format!("read input file: {e}"))?;
+    if bytes.len() > 100 * 1024 * 1024 {
+        return Err("The input file is larger than the 100 MB limit".into());
+    }
     if !has_valid_signature(&extension, &bytes) {
         return Err(format!(
             "The selected .{extension} file has an invalid file signature"
@@ -154,6 +165,9 @@ pub fn open_workbook(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn app_log(message: String) -> Result<(), String> {
+    if message.chars().count() > 8 * 1024 {
+        return Err("Log message exceeds the 8 KB limit".into());
+    }
     store::log_line(&message);
     Ok(())
 }

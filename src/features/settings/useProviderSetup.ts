@@ -129,9 +129,15 @@ export function useProviderSetup({ onConfigured }: Options = {}) {
   }, [codex?.authenticated]);
 
   const selectProvider = useCallback(async (next: Provider) => {
+    const previous: Provider = provider;
     setProvider(next);
-    await setSetting('activeProvider', next);
-  }, []);
+    try {
+      await setSetting('activeProvider', next);
+    } catch (reason) {
+      setProvider(previous);
+      setMessage({ color: 'red', text: errorMessage(reason) });
+    }
+  }, [provider]);
 
   const installCodex = useCallback(async () => {
     setWorking('codex-install');
@@ -164,9 +170,13 @@ export function useProviderSetup({ onConfigured }: Options = {}) {
   }, [refreshCodex]);
 
   const chooseModel = useCallback((value: string | null) => {
+    const previous = model;
     setModel(value);
-    void setSetting('model', value ?? '');
-  }, []);
+    void setSetting('model', value ?? '').catch((reason) => {
+      setModel(previous);
+      setMessage({ color: 'red', text: errorMessage(reason) });
+    });
+  }, [model]);
 
   const saveAnthropic = useCallback(async () => {
     setWorking('anthropic');
