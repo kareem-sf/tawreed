@@ -5,7 +5,6 @@
 // acting on silently-ungrouped items is this banner, so it is worth a test.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
-import { MantineProvider } from '@mantine/core';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach } from 'vitest';
 import i18n from '../src/i18n';
@@ -88,18 +87,16 @@ function pipelineData(aiSkipped: number): PipelineData {
 function renderPanel(aiSkipped: number) {
   return render(
     <I18nextProvider i18n={i18n}>
-      <MantineProvider>
-        <ReviewPanel
-          data={pipelineData(aiSkipped)}
-          busy={false}
-          error={null}
-          hasErrors={false}
-          retryingPublication={false}
-          onGenerate={() => {}}
-          onReset={() => {}}
-          onClassificationChange={() => {}}
-        />
-      </MantineProvider>
+      <ReviewPanel
+        data={pipelineData(aiSkipped)}
+        busy={false}
+        error={null}
+        hasErrors={false}
+        retryingPublication={false}
+        onGenerate={() => {}}
+        onReset={() => {}}
+        onClassificationChange={() => {}}
+      />
     </I18nextProvider>,
   );
 }

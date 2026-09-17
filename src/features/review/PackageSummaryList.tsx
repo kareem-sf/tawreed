@@ -1,5 +1,6 @@
 import { AlertTriangle, ChevronRight } from 'lucide-react';
 import type { WorkPackage } from '../../../shared/types';
+import { Badge } from '../../components/ui/badge';
 
 interface Props {
   packages: WorkPackage[];
@@ -57,9 +58,9 @@ export function PackageSummaryList({
                         <span className="text-ledger-ink-dim">{itemCountLabel(workPackage.itemCount)}</span>
                         <span>{percentage.format(share)}</span>
                         {flagged && (
-                          <span className="inline-flex items-center gap-1 font-medium text-ledger-danger">
+                          <Badge variant="outline" className="border-ledger-danger/30 text-ledger-danger">
                             <AlertTriangle size={10} aria-hidden="true" /> {needsReviewLabel}
-                          </span>
+                          </Badge>
                         )}
                       </div>
                     </div>

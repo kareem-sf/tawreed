@@ -41,20 +41,21 @@ describe('accessible UI contracts', () => {
   });
 
   it('renders the AI consent step as a real dialog, not a styled section', () => {
-    // Mantine's <Modal> renders role="dialog" and aria-modal="true" automatically
-    // (plus focus trapping/restoration), which a hand-rolled <section> cannot provide.
-    // The project has no component-rendering test harness (no @testing-library/react
-    // devDependency), so this asserts the source uses Modal for the consent view
-    // rather than rendering the DOM directly.
+    // Radix Dialog renders role="dialog" and aria-modal="true" automatically
+    // (plus focus trapping), which a hand-rolled <section> cannot provide.
     const workspace = readSource('../src/features/workflow/components/WorkflowWorkspace.tsx');
-    expect(workspace).toMatch(/import\s*\{[^}]*\bModal\b[^}]*\}\s*from\s*'@mantine\/core'/);
-    const consentBlockMatch = workspace.match(/state\.view === 'consent'[\s\S]*?withCloseButton=\{[^}]*\}/);
+    expect(workspace).toContain('ResponsiveModal');
+    expect(workspace).toContain('ResponsiveModalOverlay');
+    expect(workspace).toContain('DialogPrimitive.Content');
+    const consentBlockMatch = workspace.match(/state\.view === 'consent'[\s\S]*?onPointerDownOutside/);
     expect(consentBlockMatch).not.toBeNull();
-    expect(consentBlockMatch![0]).toContain('<Modal');
     expect(consentBlockMatch![0]).not.toContain('<section');
-    // Explicit choice only: no implicit close may start a run behind the user's back.
-    expect(consentBlockMatch![0]).toContain('closeOnEscape={false}');
-    expect(consentBlockMatch![0]).toContain('closeOnClickOutside={false}');
+    // Explicit choice only: no implicit close may start a run behind the user's back,
+    // so there is deliberately no close button either.
+    expect(consentBlockMatch![0]).toContain('onEscapeKeyDown');
+    expect(consentBlockMatch![0]).toContain('onPointerDownOutside');
+    expect(consentBlockMatch![0]).toContain('preventDefault');
+    expect(consentBlockMatch![0]).not.toContain('ResponsiveModalClose');
     expect(consentBlockMatch![0]).not.toContain('onConsent(false)');
   });
 });

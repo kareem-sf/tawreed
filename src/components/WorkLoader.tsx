@@ -1,10 +1,15 @@
 import { motion, useReducedMotion } from 'motion/react';
+import type { OrbState } from 'thinking-orbs';
+import { AiOrb } from './AiOrb';
+import { Progress } from './ui/progress';
 
 interface WorkLoaderProps {
   title: string;
   subtitle?: string;
   progress?: number | null;
   size?: 'sm' | 'md' | 'lg';
+  /** AI thinking state: renders the orb instead of the quiet arc. */
+  orbState?: OrbState;
 }
 
 const sizes = {
@@ -18,6 +23,7 @@ export default function WorkLoader({
   subtitle,
   progress = null,
   size = 'lg',
+  orbState,
 }: WorkLoaderProps) {
   const reduceMotion = useReducedMotion();
   const config = sizes[size];
@@ -27,34 +33,31 @@ export default function WorkLoader({
 
   return (
     <div className="flex flex-col items-center text-center" role="status" aria-live="polite">
-      <motion.div
-        className="relative text-ledger-ink"
-        style={{ width: config.box, height: config.box }}
-        animate={reduceMotion ? undefined : { scale: [1, 1.025, 1] }}
-        transition={{ duration: 2.4, ease: 'easeInOut', repeat: Infinity }}
-        aria-hidden="true"
-      >
-        {[0, 1, 2, 3].map((ring) => (
-          <motion.span
-            key={ring}
-            className="absolute rounded-full"
-            style={{
-              inset: ring * 8,
-              background: `conic-gradient(from ${ring * 55}deg, currentColor 0deg, currentColor ${64 - ring * 7}deg, transparent ${98 - ring * 5}deg, transparent 360deg)`,
-              mask: `radial-gradient(farthest-side, transparent calc(100% - ${config.ring}px), #000 calc(100% - ${config.ring - 0.5}px))`,
-              WebkitMask: `radial-gradient(farthest-side, transparent calc(100% - ${config.ring}px), #000 calc(100% - ${config.ring - 0.5}px))`,
-              opacity: 0.95 - ring * 0.16,
-            }}
-            animate={reduceMotion ? undefined : { rotate: ring % 2 ? -360 : 360 }}
-            transition={{
-              duration: 2.8 + ring * 0.8,
-              ease: 'linear',
-              repeat: Infinity,
-            }}
-          />
-        ))}
-        <span className="absolute inset-[42%] rounded-full bg-gold" />
-      </motion.div>
+      {orbState ? (
+        <AiOrb state={orbState} size={size === 'sm' ? 20 : 64} />
+      ) : (
+        /* Quiet arc for non-AI waits (boot): signals "working", not content. */
+        <div
+          className="relative text-gold-deep dark:text-gold"
+          style={{ width: config.box, height: config.box }}
+          aria-hidden="true"
+        >
+        <span
+          className="absolute inset-0 rounded-full"
+          style={{ border: `${config.ring}px solid var(--line)` }}
+        />
+        <motion.span
+          className="absolute inset-0 rounded-full"
+          style={{
+            background: 'conic-gradient(from 0deg, currentColor 0deg, currentColor 80deg, transparent 140deg, transparent 360deg)',
+            mask: `radial-gradient(farthest-side, transparent calc(100% - ${config.ring}px), #000 calc(100% - ${config.ring - 0.5}px))`,
+            WebkitMask: `radial-gradient(farthest-side, transparent calc(100% - ${config.ring}px), #000 calc(100% - ${config.ring - 0.5}px))`,
+          }}
+          animate={reduceMotion ? undefined : { rotate: 360 }}
+          transition={{ duration: 1.4, ease: 'linear', repeat: Infinity }}
+        />
+        </div>
+      )}
 
       <h2 className="font-serif-display mt-5 text-lg font-semibold tracking-[-0.01em] text-ledger-ink">
         {title}
@@ -66,14 +69,7 @@ export default function WorkLoader({
       )}
       {boundedProgress !== null && (
         <div className="mt-4 w-52">
-          <div className="h-1 overflow-hidden rounded-full bg-ledger-surface-2">
-            <motion.div
-              className="h-full rounded-full bg-gold"
-              initial={false}
-              animate={{ width: `${boundedProgress}%` }}
-              transition={{ duration: reduceMotion ? 0 : 0.25, ease: 'easeOut' }}
-            />
-          </div>
+          <Progress value={boundedProgress} aria-label={`${boundedProgress}%`} />
           <div className="mt-1.5 text-[11px] tabular-nums text-zinc-500">
             {boundedProgress}%
           </div>

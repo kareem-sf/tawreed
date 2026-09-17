@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { Button, Group, ScrollArea, Text } from '@mantine/core';
 import { AlertTriangle, ArrowLeft, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { REVIEW_CONFIDENCE_THRESHOLD, type WorkPackage } from '../../../shared/types';
@@ -7,6 +6,8 @@ import { PackageSummaryList } from './PackageSummaryList';
 import { ReviewItemsDialog } from './ReviewItemsDialog';
 import type { PipelineData } from '../workflow/types';
 import { NumberTicker } from '../../components/ui/number-ticker';
+import { Button } from '../../components/ui/button';
+import { HeroButton } from '../../components/HeroButton';
 
 interface Props {
   data: PipelineData;
@@ -107,20 +108,20 @@ export default function ReviewPanel({
     <div className="flex h-full flex-col gap-3 px-4 pb-3">
       <header className="flex items-start justify-between gap-4 px-1">
         <div className="min-w-0">
-          <Text className="font-serif-display" size="sm" fw={650} truncate c="var(--ink)">
+          <p className="font-serif-display truncate text-sm font-semibold text-ledger-ink">
             {data.inspection.projectName}
-          </Text>
-          <Text size="xs" c="dimmed" truncate>
+          </p>
+          <p className="truncate text-xs text-ledger-ink-dim">
             {data.fileName} · {t('summaryLine', {
               items: totalItems,
               packages: data.packages.length,
             })}
-          </Text>
+          </p>
         </div>
         <div className="shrink-0 text-end">
-          <Text size="xs" tt="uppercase" style={{ letterSpacing: '0.09em' }} c="dimmed">
+          <p className="text-xs uppercase tracking-[0.09em] text-ledger-ink-dim">
             {t('totalValue')}
-          </Text>
+          </p>
           <NumberTicker
             value={grandTotal}
             locale={locale}
@@ -130,11 +131,10 @@ export default function ReviewPanel({
       </header>
 
       <section
-        className="min-h-0 flex-1 rounded-2xl border border-ledger-line bg-ledger-surface shadow-sm"
+        className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-ledger-line bg-ledger-surface shadow-sm"
         aria-label={t('workPackage')}
       >
-        <ScrollArea h="100%" offsetScrollbars scrollbarSize={4}>
-          <PackageSummaryList
+        <PackageSummaryList
             packages={data.packages}
             totalItems={totalItems}
             locale={locale}
@@ -144,7 +144,6 @@ export default function ReviewPanel({
             packageName={(workPackage) => ar ? workPackage.nameAr : workPackage.nameEn}
             onSelect={openItems}
           />
-        </ScrollArea>
       </section>
 
       {(hasErrors || reviewItemIds.size > 0) && (
@@ -182,47 +181,37 @@ export default function ReviewPanel({
       )}
 
       {error && (
-        <Text size="xs" c="red" ta="center" role="alert" className="allow-select">{error}</Text>
+        <p role="alert" className="allow-select text-center text-xs text-ledger-danger">{error}</p>
       )}
 
       <footer className="flex items-center justify-between gap-3">
         <Button
-          variant="subtle"
-          size="xs"
-          color="gray"
-          leftSection={<ArrowLeft size={13} className="rtl:rotate-180" aria-hidden="true" />}
+          variant="ghost"
+          size="sm"
           onClick={onReset}
         >
+          <ArrowLeft size={13} className="rtl:rotate-180" aria-hidden="true" />
           {t('newFile')}
         </Button>
-        <Group gap="xs">
-          <Button variant="subtle" color="gray" size="xs" onClick={() => openItems()}>
+        <div className="flex items-center gap-2.5">
+          <Button variant="ghost" size="sm" onClick={() => openItems()}>
             {reviewItemIds.size
               ? t('reviewCountItems', { count: reviewItemIds.size })
               : t('reviewItems')}
           </Button>
-          <Button
-            color="gold"
+          <HeroButton
             size="sm"
             disabled={busy || hasErrors}
             onClick={onGenerate}
-            leftSection={<Check size={15} aria-hidden="true" />}
-            styles={{
-              root: {
-                color: '#1c1408',
-                fontWeight: 700,
-                background: 'linear-gradient(180deg, #f3c968, var(--gold))',
-                boxShadow: '0 8px 20px -6px rgba(232,181,74,0.5)',
-              },
-            }}
           >
+            <Check size={15} aria-hidden="true" />
             {busy
               ? t('generatingShort')
               : retryingPublication
                 ? t('retryPublish')
                 : t('approveGenerate')}
-          </Button>
-        </Group>
+          </HeroButton>
+        </div>
       </footer>
 
       <ReviewItemsDialog

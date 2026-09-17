@@ -2,8 +2,11 @@
 @layer theme, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+/* Enter/exit animation utilities used by vendored overlay components
+   (dialog, popover, tooltip). See F1 decision in SPEC-ui-redesign.md. */
+@import "tw-animate-css";
 
-/* Sync Tailwind's dark: variant with Mantine's color-scheme attribute. */
+/* Sync Tailwind's dark: variant with the app color-scheme attribute. */
 @custom-variant dark (&:where([data-mantine-color-scheme=dark], [data-mantine-color-scheme=dark] *));
 
 html,
@@ -60,20 +63,6 @@ body {
   background: rgba(161, 121, 37, 0.58);
 }
 
-[data-mantine-scrollbar] {
-  --scrollarea-scrollbar-size: 4px !important;
-  padding: 0.5px !important;
-  background: transparent !important;
-}
-
-[data-mantine-scrollbar] > div {
-  background: rgba(113, 113, 122, 0.3) !important;
-}
-
-[data-mantine-scrollbar]:hover > div {
-  background: rgba(161, 121, 37, 0.55) !important;
-}
-
 .app-frame {
   height: 100%;
   display: flex;
@@ -95,12 +84,12 @@ body {
 
 /* Custom titlebar */
 .titlebar {
-  height: 38px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-block: 0;
-  padding-inline-start: 14px;
+  padding-inline-start: 12px;
   padding-inline-end: 6px;
   flex-shrink: 0;
   position: relative;
@@ -136,7 +125,7 @@ body {
   height: 28px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 0 9px;
   border: 0;
   border-radius: 7px;
@@ -180,6 +169,22 @@ body {
   animation: spin-around calc(var(--speed) * 2) infinite linear;
 }
 
+/* shadcn accordion — height keyframes driven by the Radix content height var */
+@keyframes accordion-down {
+  from { height: 0; }
+  to { height: var(--radix-accordion-content-height); }
+}
+@keyframes accordion-up {
+  from { height: var(--radix-accordion-content-height); }
+  to { height: 0; }
+}
+.animate-accordion-down {
+  animation: accordion-down 0.2s ease-out;
+}
+.animate-accordion-up {
+  animation: accordion-up 0.2s ease-out;
+}
+
 /* Magic UI — AnimatedShinyText */
 .shiny-text {
   background: linear-gradient(
@@ -202,6 +207,11 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-shimmer-slide,
   .animate-spin-around,
+  .animate-accordion-down,
+  .animate-accordion-up,
+  .animate-in,
+  .animate-out,
+  .animate-pulse,
   .shiny-text {
     animation: none;
   }
@@ -232,6 +242,28 @@ body {
   --line-soft: rgba(0, 0, 0, 0.05);
   --danger: #c2472e;
 
+  /* shadcn/Spectrum token bridge — maps registry class names (bg-background,
+     text-muted-foreground, ring-ring, ...) onto the ledger palette so vendored
+     components theme with the app. No .dark class: dark values key off the
+     same data-mantine-color-scheme attribute the rest of the app uses. */
+  --background: var(--surface);
+  --foreground: var(--ink);
+  --primary: var(--gold-deep);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--ink-dim);
+  --accent: var(--surface-2);
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--gold-deep);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+
   --legend: oklch(1 0 0);
   --legend-foreground: oklch(0.141 0.005 285.823);
   --legend-muted: oklch(0.967 0.001 286.375);
@@ -251,6 +283,8 @@ body {
   --line: rgba(255, 255, 255, 0.09);
   --line-soft: rgba(255, 255, 255, 0.05);
   --danger: #e2745a;
+  --primary-foreground: #1c1408;
+  --destructive-foreground: #14100a;
 
   --legend: oklch(0.21 0.006 285.885);
   --legend-foreground: oklch(0.985 0 0);
@@ -276,4 +310,22 @@ body {
   --color-ledger-ink-faint: var(--ink-faint);
   --color-ledger-line: var(--line);
   --color-ledger-danger: var(--danger);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
 }

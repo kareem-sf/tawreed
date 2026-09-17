@@ -1,6 +1,6 @@
-import { Drawer, Modal } from '@mantine/core';
 import { useTranslation } from 'react-i18next';
 import { openUpdateRelease, type BootstrapInfo } from '../bridge';
+import { DialogShell } from '../components/DialogShell';
 import AboutModal from '../features/about/AboutModal';
 import HistoryDrawer from '../features/history/HistoryDrawer';
 import SettingsModal from '../features/settings/SettingsModal';
@@ -31,16 +31,15 @@ export function AppDialogs({
 
   return (
     <>
-      <Modal
-        opened={active === 'settings'}
+      <DialogShell
+        open={active === 'settings'}
         onClose={() => {
           onChange(null);
           onSettingsClosed();
         }}
         title={t('settings')}
-        centered
-        size="sm"
-        closeButtonProps={{ 'aria-label': t('close') }}
+        closeLabel={t('close')}
+        contentClassName="max-w-md"
       >
         <SettingsModal
           hasKey={boot.has_api_key}
@@ -54,14 +53,12 @@ export function AppDialogs({
             onRunOnboarding();
           }}
         />
-      </Modal>
+      </DialogShell>
 
-      <Modal
-        opened={active === 'about'}
+      <DialogShell
+        open={active === 'about'}
         onClose={() => onChange(null)}
-        centered
-        size="md"
-        withCloseButton={false}
+        contentClassName="max-w-md"
       >
         <AboutModal
           version={boot.version}
@@ -70,18 +67,17 @@ export function AppDialogs({
           onOpenUpdate={openUpdateRelease}
           onClose={() => onChange(null)}
         />
-      </Modal>
+      </DialogShell>
 
-      <Drawer
-        opened={active === 'history'}
+      <DialogShell
+        open={active === 'history'}
         onClose={() => onChange(null)}
         title={t('history')}
-        position={i18n.language === 'ar' ? 'left' : 'right'}
-        size={560}
-        closeButtonProps={{ 'aria-label': t('close') }}
+        closeLabel={t('close')}
+        side={i18n.language === 'ar' ? 'left' : 'right'}
       >
         <HistoryDrawer opened={active === 'history'} />
-      </Drawer>
+      </DialogShell>
     </>
   );
 }

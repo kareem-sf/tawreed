@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AppDialogs } from './app/AppDialogs';
 import type { AppDialog } from './app/types';
 import { useAppConfiguration } from './app/useAppConfiguration';
+import { useColorScheme } from './app/useColorScheme';
 import Onboarding from './features/onboarding/Onboarding';
 import TitleBar from './components/TitleBar';
 import WorkLoader from './components/WorkLoader';
@@ -12,6 +13,8 @@ import { useBoqWorkflow } from './features/workflow/useBoqWorkflow';
 
 export default function App() {
   const { t } = useTranslation();
+  // Owns the color-scheme attribute (previously MantineProvider's job).
+  useColorScheme();
   const [dialog, setDialog] = useState<AppDialog>(null);
   const configuration = useAppConfiguration();
   const workflow = useBoqWorkflow({

@@ -3,6 +3,8 @@ import { Clock3, Maximize2, Minus, Settings2, Square, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { currentDesktopWindow } from '../platform/desktop/window';
 import { appendAccessibleStatus } from '../lib/accessibility';
+import { Kbd } from './ui/kbd';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import Logo from './Logo';
 
 interface Props {
@@ -71,18 +73,36 @@ export default function TitleBar({ onSettings, onHistory, updateAvailable, modal
       </div>
 
       <div className="flex h-full items-center gap-0.5">
-        <button className="titlebar-nav" onClick={onHistory} aria-label={t('history')}>
-          <Clock3 size={13} /> <span>{t('history')}</span>
-        </button>
-        <button className="titlebar-nav relative" onClick={onSettings} aria-label={settingsLabel}>
-          <Settings2 size={13} /> <span>{t('settings')}</span>
-          {updateAvailable && (
-            <span
-              aria-hidden="true"
-              className="absolute end-1 top-1 h-1.5 w-1.5 rounded-full bg-gold"
-            />
-          )}
-        </button>
+        <Tooltip delayDuration={400}>
+          <TooltipTrigger asChild>
+            <button className="titlebar-nav" onClick={onHistory} aria-label={t('history')}>
+              <Clock3 size={13} /> <span>{t('history')}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <span className="inline-flex items-center gap-1.5">
+              {t('history')} <Kbd className="border-white/30 bg-white/10 text-inherit">Alt+H</Kbd>
+            </span>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip delayDuration={400}>
+          <TooltipTrigger asChild>
+            <button className="titlebar-nav relative" onClick={onSettings} aria-label={settingsLabel}>
+              <Settings2 size={13} /> <span>{t('settings')}</span>
+              {updateAvailable && (
+                <span
+                  aria-hidden="true"
+                  className="absolute end-1 top-1 h-1.5 w-1.5 rounded-full bg-gold"
+                />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <span className="inline-flex items-center gap-1.5">
+              {settingsLabel} <Kbd className="border-white/30 bg-white/10 text-inherit">Alt+S</Kbd>
+            </span>
+          </TooltipContent>
+        </Tooltip>
 
         <div aria-hidden="true" className="mx-1.5 h-3.5 w-px bg-ledger-line" />
 
