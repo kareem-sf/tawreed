@@ -15,25 +15,14 @@ Use Conventional Commit titles on merged pull requests:
   single breaking change would jump straight from 0.x to 1.0.0.
 - Other commit types can appear in generated notes but do not force a release.
 
-### Version pin — remove after 0.0.1 ships
-
-`release-please-config.json` currently carries `"release-as": "0.0.1"` to restart
-the version line. It is **not** one-shot: while it is present every release comes
-out as 0.0.1 and no version can ever advance. Delete that one key as soon as
-v0.0.1 is tagged.
-
-Note that 0.0.1 sorts below the retired v0.3.0-v0.5.6 tags, so `update.rs`, which
-compares the GitHub `releases/latest` version against the running one, offers no
-update to anyone still on a retired build.
-
 After a qualifying change reaches `main`, `.github/workflows/release-please.yml`
 creates or updates the Release Please pull request. The workflow explicitly
 dispatches CI for that bot-created branch, waits for the protected checks, merges
 the pull request, and finalizes the release in the same run:
 
-1. Updates `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`,
-   `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` to one semantic
-   version.
+1. Reads the version from `package.json` and writes it to `package-lock.json`,
+   `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`
+   (via `npm run sync:version`; `package.json` is the source of truth).
 2. Generates the matching `CHANGELOG.md` entry from merged GitHub pull requests.
 3. Creates the canonical `vX.Y.Z` tag and GitHub Release.
 4. Calls the reusable release workflow at the immutable release commit.
