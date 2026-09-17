@@ -28,8 +28,9 @@ export function extractItems(
     const qty = cellNumber(get(mapping.qty));
     // "Real content" = a parseable quantity, or a description that is not a structural line
     // (blank / repeated header / summary total / explicit comment) — only those count as rejected.
-    const headerLike = isHeaderLike(description);
-    const summary = isSummaryDescription(description);
+    // A header-word description with a quantity is a real line item (parity with isSummaryDescription).
+    const headerLike = isHeaderLike(description) && qty === null;
+    const summary = isSummaryDescription(description, qty !== null);
     const meaningful = description ? !headerLike && !summary && !explicitComment : qty !== null;
     if (!description || (headerLike && !explicitComment) || summary) {
       if (meaningful) rejectedCount++;

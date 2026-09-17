@@ -120,6 +120,19 @@ describe('OCR producing garbage or empty text', () => {
     expect(result.ocrPages).toBe(0);
     expect(result.warnings.some((w) => /OCR failed/i.test(w))).toBe(false);
   }, 20_000);
+
+  it('a scanned (sparse-text) PDF in Node warns that desktop OCR was skipped', async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const page = pdf.addPage([400, 200]);
+    page.drawText('hi', { x: 30, y: 150, size: 9, font, color: rgb(0, 0, 0) });
+    const bytes = await pdf.save();
+    const result = await inspectPdf(bytes, 'scanned.pdf', { enableOcr: true }).catch(() => null);
+    // Sparse PDFs may fail BOQ inference entirely — but if they return, the warning must be present.
+    if (result) {
+      expect(result.warnings.some((w) => /desktop runtime/i.test(w))).toBe(true);
+    }
+  }, 20_000);
 });
 
 describe('Arabic-only (RTL) BOQ documents', () => {

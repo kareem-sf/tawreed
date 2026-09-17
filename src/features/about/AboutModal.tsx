@@ -87,12 +87,19 @@ export default function AboutModal({
       </div>
 
       <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border-ledger-line p-3">
-        <div className="flex min-w-0 items-center gap-2 text-xs text-ledger-ink-dim">
-          {update.status === 'checking' && <Loader size={13} color="gold" />}
-          {update.status === 'current' && <CheckCircle2 size={14} className="text-emerald-600" />}
-          {update.status === 'available' && <Download size={14} className="text-gold-deep dark:text-gold" />}
-          {update.status === 'error' && <AlertCircle size={14} className="text-ledger-danger" />}
-          <span>{updateMessage}</span>
+        <div className="flex min-w-0 flex-col gap-1 text-xs text-ledger-ink-dim">
+          <div className="flex min-w-0 items-center gap-2">
+            {update.status === 'checking' && <Loader size={13} color="gold" />}
+            {update.status === 'current' && <CheckCircle2 size={14} className="text-emerald-600" />}
+            {update.status === 'available' && <Download size={14} className="text-gold-deep dark:text-gold" />}
+            {update.status === 'error' && <AlertCircle size={14} className="text-ledger-danger" />}
+            <span>{updateMessage}</span>
+          </div>
+          {update.status === 'available' && update.info.asset_sha256 && (
+            <span className="allow-select font-mono-figures break-all">
+              {t('updateChecksum', { asset: update.info.asset_name, hash: update.info.asset_sha256 })}
+            </span>
+          )}
         </div>
         {update.status === 'available' ? (
           <Button
@@ -122,7 +129,7 @@ export default function AboutModal({
 
       <div className="mt-6 border-t border-ledger-line pt-4">
         <p className="text-sm font-semibold text-ledger-ink">
-          Developed by Kareem Safwat
+          {t('aboutCreatorLabel')} {t('aboutCreatorCredit')}
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
           <button

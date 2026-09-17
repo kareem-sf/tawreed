@@ -19,7 +19,9 @@ export default function TitleBar({ onSettings, onHistory, updateAvailable, modal
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (!event.altKey || modalOpen) return;
+      if (!event.altKey || modalOpen || event.repeat) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
       const action: Record<string, () => void> = {
         KeyH: onHistory,
         KeyS: onSettings,

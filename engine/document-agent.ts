@@ -89,9 +89,11 @@ Return ONLY JSON: {"projectName":"exact candidate","comments":[{"commentId":"exa
   return {
     ...inspection,
     projectName: parsed.projectName,
-    // Boost confidence only when the model confirms the deterministic pick, not when it overrides it.
     projectNameConfidence: Math.max(inspection.projectNameConfidence, 0.85),
-    language: detectDocumentLanguage([parsed.projectName, ...refinedItems.map((item) => item.description)]),
+    language: detectDocumentLanguage([
+      parsed.projectName,
+      ...refinedItems.flatMap((item) => [item.description, ...(item.comments ?? [])]),
+    ]),
     items: refinedItems,
   };
 }

@@ -32,7 +32,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "eval": "node scripts/run-eval.mjs",
-    "lint": "eslint \"{engine,shared,src,tests}/**/*.{ts,tsx}\" vite.config.ts",
+    "lint": "eslint \"{engine,shared,src,tests}/**/*.{ts,tsx}\" vite.config.ts playwright.config.ts eslint.config.js \"scripts/**/*.{cjs,mjs}\"",
     "typecheck": "tsc --noEmit --incremental false",
     "verify:assets": "node scripts/verify-vendor-assets.cjs",
     "verify:notices": "node scripts/verify-notices.cjs",

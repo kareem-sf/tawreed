@@ -25,4 +25,26 @@ describe('grounded document agent', () => {
       comments: comments.map((_, index) => ({ commentId: `1-${index + 1}`, itemId: 1 })),
     }))).rejects.toThrow(/ungrounded project/i);
   });
+
+  it.each([
+    ['Original Project', 0.39, 0.85],
+    ['Alternative Project', 0.39, 0.85],
+    ['Original Project', 0.95, 0.95],
+    ['Alternative Project', 0.95, 0.95],
+  ] as const)('applies the existing confidence floor for %s at %s', async (projectName, confidence, expected) => {
+    const inspection = await inspectWorkbook(await commentsFixture(), 'Factory.xlsx');
+    inspection.projectName = 'Original Project';
+    inspection.projectNameConfidence = confidence;
+    inspection.projectNameCandidates = ['Original Project', 'Alternative Project'];
+    const comments = inspection.items.flatMap((item) =>
+      (item.comments ?? []).map((_, index) => ({ commentId: `${item.id}-${index + 1}`, itemId: item.id })),
+    );
+
+    const refined = await refineInspectionWithAgent(inspection, async () => JSON.stringify({ projectName, comments }));
+
+    expect(refined.projectName).toBe(projectName);
+    expect(refined.projectNameConfidence).toBe(expected);
+    expect(inspection.projectName).toBe('Original Project');
+    expect(inspection.projectNameConfidence).toBe(confidence);
+  });
 });

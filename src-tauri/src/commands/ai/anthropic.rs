@@ -23,6 +23,7 @@ async fn llm_complete_inner(request: Value, cancelled: Arc<AtomicBool>) -> Resul
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| format!("http client: {e}"))?;
 
@@ -88,6 +89,9 @@ async fn llm_complete_inner(request: Value, cancelled: Arc<AtomicBool>) -> Resul
     .await?;
 
     let status = response.status();
+    if status.is_redirection() {
+        return Err("Anthropic attempted an unsafe redirect".into());
+    }
     if !status.is_success() {
         let snippet: String = response
             .text()
@@ -98,10 +102,20 @@ async fn llm_complete_inner(request: Value, cancelled: Arc<AtomicBool>) -> Resul
             .collect();
         return Err(format!("Anthropic API error {status}: {snippet}"));
     }
-    let body: Value = response
-        .json()
+    if response
+        .content_length()
+        .is_some_and(|length| length > 10 * 1024 * 1024)
+    {
+        return Err("Anthropic response exceeded the 10 MB limit".into());
+    }
+    let bytes = response
+        .bytes()
         .await
-        .map_err(|e| format!("parse response: {e}"))?;
+        .map_err(|e| format!("read Anthropic response: {e}"))?;
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err("Anthropic response exceeded the 10 MB limit".into());
+    }
+    let body: Value = serde_json::from_slice(&bytes).map_err(|e| format!("parse response: {e}"))?;
     let text = body
         .get("content")
         .and_then(Value::as_array)

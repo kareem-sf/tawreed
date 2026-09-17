@@ -32,17 +32,25 @@ export function applyClassificationMemory(
   classifications: Classification[],
   memory: ClassificationMemory[],
 ): { classifications: Classification[]; applied: number } {
-  const memoryByDescription = new Map(
-    memory
-      .filter((entry) => entry.descriptionKey && entry.packageCode)
-      .map((entry) => [entry.descriptionKey, entry]),
-  );
+  const memoryByDescription = new Map<string, ClassificationMemory>();
+  for (const entry of memory) {
+    if (!entry.descriptionKey || !entry.packageCode) continue;
+    const existing = memoryByDescription.get(entry.descriptionKey);
+    // Conflicting duplicates: keep first for determinism, ignore later divergent entries.
+    if (existing && existing.packageCode !== entry.packageCode) continue;
+    if (!existing) memoryByDescription.set(entry.descriptionKey, entry);
+  }
   const itemsById = new Map(items.map((item) => [item.id, item]));
   let applied = 0;
   const next = classifications.map((classification) => {
+    // Never clobber an explicit human decision with memory.
+    if (classification.source === 'user') return classification;
     const item = itemsById.get(classification.itemId);
     const entry = item ? memoryByDescription.get(memoryKey(item.description)) : undefined;
     if (!entry) return classification;
+    // No-op when memory already applied — don't inflate applied counts.
+    if (classification.source === 'memory' && classification.packageCode === entry.packageCode) return classification;
+    if (classification.packageCode === entry.packageCode && classification.packageNameEn === entry.packageNameEn) return classification;
     applied++;
     return {
       itemId: classification.itemId,
@@ -81,6 +89,9 @@ export function memoryFromApprovedReview(
   const packagesByCode = new Map(packages.map((workPackage) => [workPackage.code, workPackage]));
   const itemsById = new Map(items.map((item) => [item.id, item]));
   return classifications.flatMap((classification) => {
+    // Only explicit human corrections are "approved". Memorizing unreviewed
+    // heuristic/llm guesses would propagate machine errors as confidence-1 truth.
+    if (classification.source !== 'user') return [];
     const item = itemsById.get(classification.itemId);
     const workPackage = packagesByCode.get(classification.packageCode);
     if (!item || !workPackage || workPackage.code === 'WP-99') return [];

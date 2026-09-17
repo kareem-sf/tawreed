@@ -31,8 +31,14 @@ export function parseNumber(raw: unknown): number | null {
   if (paren) s = '-' + paren[1];
   // Comma disambiguation: a single comma with 1-2 trailing digits is a decimal separator
   // ("1,5" → 1.5, "1,50" → 1.5); 3-digit groups or repeated commas are thousands ("1,500" → 1500).
-  const decimalComma = /^(-?\d+),(\d{1,2})$/.exec(s);
-  s = decimalComma ? `${decimalComma[1]}.${decimalComma[2]}` : s.replace(/,/g, '');
+  // European dot-thousands + comma-decimal ("1.250,50" → 1250.5): strip dots when a comma-decimal is present.
+  const euroDecimal = /^(-?[\d.]+),(\d{1,2})$/.exec(s);
+  if (euroDecimal && euroDecimal[1]!.includes('.')) {
+    s = `${euroDecimal[1]!.replace(/\./g, '')}.${euroDecimal[2]}`;
+  } else {
+    const decimalComma = /^(-?\d+),(\d{1,2})$/.exec(s);
+    s = decimalComma ? `${decimalComma[1]}.${decimalComma[2]}` : s.replace(/,/g, '');
+  }
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }

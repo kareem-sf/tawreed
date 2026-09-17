@@ -10,6 +10,7 @@ const installedVersion = (pkg) =>
 
 const tracked = {
   'tesseract.js': /`tesseract\.js` (\S+)/,
+  'tesseract.js-core': /`tesseract\.js-core` (\S+)/,
   'exceljs': /`exceljs` (\S+)/,
   'pdfjs-dist': /`pdfjs-dist` (\S+)/,
 };

@@ -6,6 +6,7 @@ import type { BoqItem, Classification } from '../shared/types';
 import { inspectWorkbook } from '../engine/ingest';
 import { classifyAll } from '../engine/classify';
 import { buildPackages, validate } from '../engine/validate';
+import { heuristicFallback } from '../engine/classify/heuristic';
 
 async function baseItems(): Promise<BoqItem[]> {
   return (await inspectWorkbook(await enFixture(), 'en.xlsx')).items;
@@ -86,6 +87,18 @@ describe('validation rules', () => {
     expect(rule.itemIds).not.toContain(items[0]!.id);
   });
 
+  it('flags low-side rate outliers (cheap typo)', () => {
+    const items: BoqItem[] = [];
+    for (let i = 1; i <= 8; i++) items.push(mkItem(i, { rate: 10000, total: 10000 }));
+    const outlier = mkItem(9, { rate: 100, total: 100 });
+    items.push(outlier);
+    const cls = items.map((i) => mkCls(i.id));
+    const issues = validate(items, cls, buildPackages(items, cls));
+    const rule = issues.find((i) => i.code === 'RATE_OUTLIER')!;
+    expect(rule).toBeTruthy();
+    expect(rule.itemIds).toContain(outlier.id);
+  });
+
   it('does not flag rate outlier with fewer than 8 priced items', () => {
     const items: BoqItem[] = [];
     for (let i = 1; i <= 6; i++) items.push(mkItem(i, { rate: 100, total: 100 }));
@@ -103,6 +116,16 @@ describe('validation rules', () => {
     expect(rule).toBeTruthy();
     expect(rule.severity).toBe('warning');
     expect(rule.itemIds).toContain(1);
+  });
+
+  it('flags weak heuristic fallback guesses for review', () => {
+    const weak: BoqItem = {
+      id: 1, code: 'D1', description: 'Door supply', unit: 'm3',
+      qty: 2, rate: 3000, total: 6000, row: 2,
+    };
+    const cls = [{ ...heuristicFallback(weak), packageCode: 'WP-02', packageNameEn: 'P', packageNameAr: 'P' }];
+    const issues = validate([weak], cls, buildPackages([weak], cls));
+    expect(issues.some((i) => i.code === 'LOW_CONFIDENCE' && i.itemIds.includes(1))).toBe(true);
   });
 
   it('flags negative quantities as a bilingual warning', () => {

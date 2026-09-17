@@ -19,6 +19,10 @@ describe('parseNumber', () => {
   it('handles Arabic digits + Arabic decimal separator', () => expect(parseNumber('١٢٥٠٫٥')).toBe(1250.5));
   it('handles accounting parentheses as negative', () => expect(parseNumber('(500)')).toBe(-500));
   it('strips currency symbols', () => expect(parseNumber('EGP 4,200')).toBe(4200));
+  it('handles European dot-thousands + comma-decimal', () => {
+    expect(parseNumber('1.250,50')).toBe(1250.5);
+    expect(parseNumber('12.345,67')).toBe(12345.67);
+  });
   it('returns null for garbage', () => expect(parseNumber('abc')).toBeNull());
   it('returns null for null/undefined', () => {
     expect(parseNumber(null)).toBeNull();

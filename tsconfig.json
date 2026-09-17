@@ -20,5 +20,5 @@
     },
     "types": ["vite/client"]
   },
-  "include": ["src", "engine", "shared", "tests"]
+  "include": ["src", "engine", "shared", "tests", "vite.config.ts", "playwright.config.ts"]
 }

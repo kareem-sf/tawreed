@@ -60,7 +60,9 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
     let data_dir_existed = dir.exists();
     fs::create_dir_all(dir.join("output")).map_err(|e| format!("create output dir: {e}"))?;
     fs::create_dir_all(dir.join("logs")).map_err(|e| format!("create logs dir: {e}"))?;
-    // Interrupted generations remain hidden temp directories; remove them on the next launch.
+    // Interrupted generations remain hidden temp directories. A publish failure
+    // deliberately preserves them for retry ("preserved at …"), so only sweep
+    // orphans older than 24h — never a fresh retry candidate from the last run.
     if let Ok(projects) = fs::read_dir(dir.join("output")) {
         for project in projects.flatten().filter(|entry| entry.path().is_dir()) {
             if let Ok(entries) = fs::read_dir(project.path()) {
@@ -70,7 +72,19 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
                         && name.starts_with(".tawreed-rev-")
                         && name.ends_with(".tmp")
                     {
-                        let _ = fs::remove_dir_all(entry.path());
+                        let stale = entry
+                            .metadata()
+                            .and_then(|meta| meta.modified())
+                            .and_then(|modified| {
+                                modified
+                                    .elapsed()
+                                    .map_err(|_| std::io::Error::other("clock"))
+                            })
+                            .map(|age| age.as_secs() > 86_400)
+                            .unwrap_or(false);
+                        if stale {
+                            let _ = fs::remove_dir_all(entry.path());
+                        }
                     }
                 }
             }
@@ -82,10 +96,23 @@ pub fn bootstrap_data_dir() -> Result<BootstrapInfo, String> {
     // still read once, migrated, and cleared — see api_key.
     let settings = dir.join("settings.json");
     let settings_existed = settings.exists();
-    let current_settings = fs::read_to_string(&settings)
-        .ok()
-        .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
+    let raw_settings = std::fs::read_to_string(&settings).ok();
+    let parsed_settings = raw_settings
+        .as_deref()
+        .and_then(|content| serde_json::from_str(content).ok());
+    if settings_existed && raw_settings.is_some() && parsed_settings.is_none() {
+        // Preserve evidence instead of silently resetting user preferences.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let backup = dir.join(format!("settings.corrupt.{stamp}.json"));
+        if let Some(raw) = raw_settings.as_deref() {
+            let _ = std::fs::write(&backup, raw);
+        }
+        log_line("settings.json was corrupt; backed up and reset to defaults");
+    }
+    let current_settings = parsed_settings.unwrap_or_else(|| serde_json::json!({}));
     let migrated_settings = migrate_settings(current_settings.clone(), !settings_existed);
     if !settings_existed || migrated_settings != current_settings {
         write_settings(&settings, &migrated_settings)
@@ -309,7 +336,11 @@ const ALLOWED_SETTINGS: &[&str] = &[
     "compatible",
     "gemini",
     "grok",
+    "autopilot",
 ];
+
+const MAX_TRUSTED_PROJECTS: usize = 200;
+const MAX_PROJECT_KEY_CHARS: usize = 1000;
 
 /// Pure validation, split out from `set_setting` so it's testable without touching disk.
 fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(), String> {
@@ -361,6 +392,32 @@ fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(), String> 
             let model = value.get("model").and_then(serde_json::Value::as_str);
             if model.is_none_or(|text| text.len() > 160) {
                 return Err(format!("invalid {key} settings"));
+            }
+        }
+        "autopilot" => {
+            // Per-project auto-pilot grants. Deny by default: missing or malformed
+            // means untrusted, never the reverse.
+            if value.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
+                return Err("invalid autopilot state".into());
+            }
+            let trusted = value
+                .get("trusted")
+                .and_then(serde_json::Value::as_array)
+                .ok_or("invalid autopilot state")?;
+            if trusted.len() > MAX_TRUSTED_PROJECTS {
+                return Err("autopilot trust list is too long".into());
+            }
+            for entry in trusted {
+                let key = entry.get("projectKey").and_then(serde_json::Value::as_str);
+                let name = entry.get("projectName").and_then(serde_json::Value::as_str);
+                let granted = entry.get("grantedAt").and_then(serde_json::Value::as_str);
+                if key.is_none_or(str::is_empty)
+                    || key.is_some_and(|text| text.chars().count() > MAX_PROJECT_KEY_CHARS)
+                    || name.is_none_or(str::is_empty)
+                    || granted.is_none_or(str::is_empty)
+                {
+                    return Err("invalid autopilot trust entry".into());
+                }
             }
         }
         _ => {}
@@ -511,7 +568,9 @@ pub fn write_env_key(value: Option<&str>) -> Result<(), String> {
                     log_line(&format!(
                         "credential store unavailable during key removal: {error}"
                     ));
-                    Ok(())
+                    Err(format!(
+                        "remove API key from operating system credential store: credential store unavailable: {error}"
+                    ))
                 }
             }
         }
@@ -590,14 +649,44 @@ pub fn write_grok_api_key(value: Option<&str>) -> Result<(), String> {
     write_named_api_key(GROK_KEYRING_ACCOUNT, "Grok", value)
 }
 
+/// Flood guard: at most LOG_BURST lines per wall-clock second per process.
+// A compromised renderer spamming `app_log` would otherwise spike memory (one
+// 8KB allocation per call) and churn the 10MB rotation into evidence loss.
+static LOG_WINDOW_SEC: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static LOG_WINDOW_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const LOG_BURST_PER_SEC: u64 = 100;
+
+/// Pure burst policy, split out so it is testable without touching the log file.
+fn log_burst_allows(now_secs: u64, window_secs: u64, window_count: u64) -> bool {
+    window_secs != now_secs || window_count < LOG_BURST_PER_SEC
+}
+
 pub fn log_line(message: &str) {
     // Strip newlines so a caller-supplied message can't forge extra log lines.
-    let sanitized = message.replace(['\n', '\r'], " ");
+    // Bound single-message size so a compromised renderer cannot spike memory/disk.
+    let sanitized: String = message
+        .replace(['\n', '\r'], " ")
+        .chars()
+        .take(8 * 1024)
+        .collect();
+    // Drop anything past the per-second burst budget (see statics above).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let window = LOG_WINDOW_SEC.load(std::sync::atomic::Ordering::Relaxed);
+    let count = LOG_WINDOW_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+    if !log_burst_allows(now, window, count) {
+        return;
+    }
+    if window != now {
+        LOG_WINDOW_SEC.store(now, std::sync::atomic::Ordering::Relaxed);
+        LOG_WINDOW_COUNT.store(1, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        LOG_WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     if let Ok(path) = log_path() {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let stamp = now;
         if let Ok(meta) = std::fs::metadata(&path) {
             if meta.len() > 10 * 1024 * 1024 {
                 // Rotate instead of truncating so a crash right after the threshold
@@ -619,7 +708,63 @@ pub fn log_line(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clear_env_key, migrate_settings, validate_setting};
+    use super::{
+        clear_env_key, log_burst_allows, migrate_settings, validate_setting, LOG_BURST_PER_SEC,
+    };
+
+    #[test]
+    fn log_flood_is_capped_per_second() {
+        assert!(log_burst_allows(100, 99, 10_000));
+        assert!(log_burst_allows(100, 100, 0));
+        assert!(log_burst_allows(100, 100, LOG_BURST_PER_SEC - 1));
+        assert!(!log_burst_allows(100, 100, LOG_BURST_PER_SEC));
+        assert!(!log_burst_allows(100, 100, LOG_BURST_PER_SEC + 500));
+    }
+
+    #[test]
+    fn autopilot_trust_list_is_accepted_and_validated() {
+        let grant = serde_json::json!({
+            "version": 1,
+            "trusted": [{
+                "projectKey": "tower c",
+                "projectName": "Tower C",
+                "grantedAt": "2026-09-17T10:00:00.000Z",
+            }],
+        });
+        assert!(validate_setting("autopilot", &grant).is_ok());
+        assert!(validate_setting(
+            "autopilot",
+            &serde_json::json!({"version": 1, "trusted": []})
+        )
+        .is_ok());
+        // Wrong version, empty key, overlong key, malformed entry, oversize list.
+        assert!(validate_setting(
+            "autopilot",
+            &serde_json::json!({"version": 2, "trusted": []})
+        )
+        .is_err());
+        assert!(validate_setting("autopilot", &serde_json::json!({"version": 1})).is_err());
+        let mut bad = grant.clone();
+        bad["trusted"][0]["projectKey"] = serde_json::json!("");
+        assert!(validate_setting("autopilot", &bad).is_err());
+        let mut long = grant.clone();
+        long["trusted"][0]["projectKey"] = serde_json::json!("x".repeat(1001));
+        assert!(validate_setting("autopilot", &long).is_err());
+        let mut missing = grant.clone();
+        missing["trusted"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("grantedAt");
+        assert!(validate_setting("autopilot", &missing).is_err());
+        let many: Vec<_> = (0..201)
+            .map(|i| serde_json::json!({"projectKey": format!("p{i}"), "projectName": "P", "grantedAt": "2026-09-17T10:00:00.000Z"}))
+            .collect();
+        assert!(validate_setting(
+            "autopilot",
+            &serde_json::json!({"version": 1, "trusted": many})
+        )
+        .is_err());
+    }
 
     #[test]
     fn every_provider_can_be_saved_as_the_active_provider() {

@@ -33,7 +33,7 @@ const INK = 'FF20242D';
 const MUTED = 'FF687386';
 const LINE = 'FFD9DEE7';
 const MONEY_FMT = '#,##0.00';
-const QTY_FMT = '#,##0.00';
+const QTY_FMT = '#,##0.##';
 
 function solid(argb: string): ExcelJS.Fill {
   return { type: 'pattern', pattern: 'solid', fgColor: { argb } };
@@ -272,7 +272,7 @@ function populateProjectCover(
   packageSheets: PackageSheetInfo[],
 ) {
   const { projectName, items, packages } = input;
-  const ar = containsArabic(projectName) || input.documentLanguage === 'ar';
+  const ar = input.locale === 'ar' || containsArabic(projectName) || input.documentLanguage === 'ar';
   cover.columns = [{ width: 15 }, { width: 44 }, { width: 19 }, { width: 14 }];
 
   cover.mergeCells('A1:D1');
@@ -379,7 +379,7 @@ function populateProjectCover(
 }
 
 function populateMiniCover(cover: ExcelJS.Worksheet, input: GenerateInput, p: WorkPackage, calculatedTotal: number) {
-  const ar = containsArabic(input.projectName) || input.documentLanguage === 'ar';
+  const ar = input.locale === 'ar' || containsArabic(input.projectName) || input.documentLanguage === 'ar';
   cover.columns = [{ width: 18 }, { width: 52 }, { width: 18 }];
   cover.mergeCells('A1:C1');
   cover.getCell('A1').value = 'TAWREED';
@@ -424,7 +424,7 @@ async function workbookBytes(wb: ExcelJS.Workbook): Promise<Uint8Array> {
 export async function buildWorkbooks(input: GenerateInput): Promise<GeneratedArtifact[]> {
   const displayProjectName = input.projectName || 'Untitled Project';
   const fileProjectName = safeFileComponent(input.projectName);
-  const ar = containsArabic(displayProjectName) || input.documentLanguage === 'ar';
+  const ar = input.locale === 'ar' || containsArabic(displayProjectName) || input.documentLanguage === 'ar';
   const byItem = new Map(input.items.map((item) => [item.id, item]));
 
   const master = createWorkbook(displayProjectName);

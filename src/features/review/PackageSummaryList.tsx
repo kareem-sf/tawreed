@@ -42,6 +42,7 @@ export function PackageSummaryList({
             <button
               type="button"
               className="group w-full bg-transparent px-5 py-3.5 text-start text-inherit transition-colors duration-150 hover:bg-gold/6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-deep/70 aria-[flagged]:bg-[linear-gradient(90deg,rgba(226,116,90,0.08),transparent_60%)]"
+              aria-flagged={flagged ? 'true' : undefined}
               onClick={() => onSelect(workPackage)}
             >
               <div className="flex items-start gap-3">

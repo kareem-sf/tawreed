@@ -281,8 +281,12 @@ async function classifyBatch(
   const allowed = new Set([...byCode.keys(), UNCLASSIFIED_CODE]);
   const parsed = await callJson(transport, buildClassifyRequest(items, model, structure), classificationSchema);
   const byId = new Map<number, Classification>();
+  const seenIds = new Set<number>();
   if (parsed) {
     for (const c of parsed.classifications) {
+      // Duplicate itemId from the model signals inconsistency — keep first, ignore repeats.
+      if (seenIds.has(c.itemId)) continue;
+      seenIds.add(c.itemId);
       const code = normalizeCode(c.packageCode);
       if (!allowed.has(code)) continue;
       const pkg = byCode.get(code);

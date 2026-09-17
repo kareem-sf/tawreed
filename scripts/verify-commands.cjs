@@ -23,15 +23,17 @@ if (!handlerBlock) {
 
 const registered = new Set(
   handlerBlock[1]
+    .replace(/\/\*[\s\S]*?\*\//g, '')
     .split(',')
     .map((entry) => entry.replace(/\/\/.*$/gm, '').trim())
     .filter(Boolean)
     .map((entry) => entry.replace(/^\w+::/, '')),
 );
 
-// Literal invocations: invoke('name') / invoke<T>('name').
+// Literal invocations: invoke('name') / invoke("name") / invoke<T>('name'),
+// including nested generics like Record<string, unknown>.
 const invoked = new Set();
-for (const match of bridgeTs.matchAll(/invoke\w*\s*(?:<[^()]*>)?\s*\(\s*'([a-z0-9_]+)'/g)) {
+for (const match of bridgeTs.matchAll(/invoke\w*\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(\s*['"]([a-z0-9_]+)['"]/g)) {
   invoked.add(match[1]);
 }
 

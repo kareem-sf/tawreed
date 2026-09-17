@@ -46,6 +46,7 @@ export function workflowReducer(
         error: null,
       };
     case 'setBusy':
+      if (state.view !== 'busy') return state;
       return {
         ...state,
         busyMessage: action.message ?? state.busyMessage,
@@ -58,6 +59,7 @@ export function workflowReducer(
     case 'setError':
       return { ...state, error: action.error };
     case 'requestConsent':
+      if (state.view !== 'busy') return state;
       return {
         ...state,
         view: 'consent',
@@ -66,6 +68,7 @@ export function workflowReducer(
         cancellable: false,
       };
     case 'showReview':
+      if (state.view !== 'busy' && state.view !== 'consent' && state.view !== 'review') return state;
       return {
         ...state,
         view: 'review',
@@ -75,10 +78,12 @@ export function workflowReducer(
         cancellable: false,
       };
     case 'updateData':
+      if (state.data === null) return state;
       return { ...state, data: action.data };
     case 'setPendingPublication':
       return { ...state, pendingPublication: action.pending };
     case 'showDone':
+      if (state.view !== 'busy' && state.view !== 'review') return state;
       return {
         ...state,
         view: 'done',

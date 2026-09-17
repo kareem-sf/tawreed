@@ -101,7 +101,7 @@ export function analyzeLoadedWorkbook(wb: ExcelJS.Workbook, fileName: string, so
   const warnings: string[] = [];
   if (best.inferred) warnings.push('Column roles were inferred from workbook data because no recognized headers were found.');
   if (best.mapping.qty === null) warnings.push('No quantity column detected — rows without source quantities were excluded.');
-  if (best.mapping.unit === null) warnings.push('No unit column detected — rows without source units were excluded.');
+  if (best.mapping.unit === null) warnings.push('No unit column detected — units defaulted to "other"; review as needed.');
   if (best.mapping.rate === null) warnings.push('No unit-rate column detected — unpriced lines remain blank.');
   if (best.mapping.total === null && best.mapping.qty !== null && best.mapping.rate !== null) {
     warnings.push('No total column detected — totals were computed as quantity × rate.');

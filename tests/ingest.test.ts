@@ -58,6 +58,9 @@ describe('inspectWorkbook', () => {
     expect(res.mapping.rate).toBe(6);
     expect(res.items[3]!.total).toBe(560000);
     expect(res.warnings.some((w) => w.includes('inferred'))).toBe(true);
+    // All-integer qty/rate columns make the role assignment a guess: the arithmetic
+    // confidence bonus is withheld (0.35 + 6×0.09 = 0.89, not the capped 0.95).
+    expect(res.mapping.confidence).toBeLessThan(0.95);
   });
 
   it('keeps only quantified items and attaches BOQ comments to their related items', async () => {
@@ -149,6 +152,19 @@ describe('inspectWorkbook', () => {
     expect(res.warnings.some(w => w.includes('10,000') || w.includes('10000'))).toBe(false);
   });
 
+  it('keeps a quantified "Total station…" item and excludes the grand-total row', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('BOQ');
+    ws.addRow(['Item No', 'Description', 'Unit', 'Quantity', 'Rate', 'Amount']);
+    ws.addRow(['A1', 'Reinforced concrete foundations', 'm3', 10, 100, 1000]);
+    ws.addRow(['A2', 'Total station surveying instrument calibration', 'nr', 2, 250, 500]);
+    ws.addRow([null, 'Grand total', null, null, null, 1500]);
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer);
+    const result = await inspectWorkbook(bytes, 'surveying.xlsx');
+    expect(result.items.map((i) => i.code)).toEqual(['A1', 'A2']);
+    expect(result.items[1]!.qty).toBe(2);
+  });
+
   it('ingests a single-item BOQ', async () => {
     const bytes = await makeWorkbook({
       rows: [{ code: 'A1', description: 'Reinforced concrete C30', unit: 'm3', qty: 10, rate: 1000, total: 10000 }],
@@ -160,14 +176,53 @@ describe('inspectWorkbook', () => {
   });
 
   it('keeps items with unit "other" when no unit column is detected', async () => {
-    const bytes = await makeWorkbook({
-      rows: [
-        { code: 'A1', description: 'Reinforced concrete foundations C35', unit: 'm3', qty: 10, rate: 1000, total: 10000 },
-        { code: 'A2', description: 'High-yield rebar B500 supply and fix', unit: 'ton', qty: 4, rate: 200, total: 800 },
-      ],
-      headers: ['Ref', 'Description', 'Qty', 'Rate', 'Amount'], // no unit header
-    });
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('BOQ');
+    ws.addRow(['Ref', 'Description', 'Qty', 'Rate', 'Amount']);
+    ws.addRow(['A1', 'Reinforced concrete foundations C35', 10, 1000, 10000]);
+    ws.addRow(['A2', 'High-yield rebar B500 supply and fix', 4, 200, 800]);
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer);
     const res = await inspectWorkbook(bytes, 'nunit.xlsx');
     expect(res.items.length).toBeGreaterThan(0);
+    expect(res.items.every((i) => i.unit === 'other')).toBe(true);
+    expect(res.warnings.some((w) => w.includes('excluded'))).toBe(false);
+    expect(res.warnings.some((w) => w.includes('defaulted to "other"'))).toBe(true);
+  });
+
+  it('keeps a quantified header-word description as a line item', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('BOQ');
+    ws.addRow(['Item No', 'Description', 'Unit', 'Quantity', 'Rate', 'Amount']);
+    ws.addRow(['A1', 'Quantity', 'nr', 5, 100, 500]);
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer);
+    const result = await inspectWorkbook(bytes, 'headerword.xlsx');
+    expect(result.items.map((i) => i.code)).toEqual(['A1']);
+    expect(result.items[0]!.qty).toBe(5);
+  });
+
+  it('parses quantities with inline units in a headerless table', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Data Export');
+    ws.addRow(['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta']);
+    ws.addRow(['X-001', 'm3', 'Reinforced concrete for retaining walls C40', '12 m3', 4100, 49200]);
+    ws.addRow(['X-002', 'ton', 'Reinforcing steel bars grade B500', '6 ton', 42000, 252000]);
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer);
+    const result = await inspectWorkbook(bytes, 'inline-units.xlsx');
+    expect(result.items).toHaveLength(2);
+    expect(result.items.find((i) => i.code === 'X-001')!.qty).toBe(12);
+    expect(result.items.find((i) => i.code === 'X-002')!.qty).toBe(6);
+  });
+
+  it('ingests a single-row headerless table instead of yielding zero items', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Data Export');
+    ws.addRow(['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta']);
+    ws.addRow(['X-001', 'm3', 'Reinforced concrete for retaining walls C40', 8, 4500, 36000]);
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer);
+    const result = await inspectWorkbook(bytes, 'single-row.xlsx');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.qty).toBe(8);
+    expect(result.items[0]!.rate).toBe(4500);
+    expect(result.items[0]!.total).toBe(36000);
   });
 });

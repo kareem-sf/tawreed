@@ -60,6 +60,38 @@ describe('universal workbook ingestion', () => {
     expect(result.items[0]!.rate).toBe(4100);
   });
 
+  it('reads a Windows-1256 Arabic CSV without a BOM', async () => {
+    // Encode with the same codepage table the engine reads with (@e965/xlsx cptable):
+    // hand-rolled byte constants would silently test the wrong encoding.
+    const { cptable } = await import('@e965/xlsx/dist/cpexcel') as unknown as {
+      cptable: Record<number, { enc: Record<string, number> }>;
+    };
+    const enc = cptable[1256]!.enc;
+    const encode1256 = (text: string): Uint8Array => {
+      const out: number[] = [];
+      for (const ch of text) {
+        const cp = ch.codePointAt(0)!;
+        if (cp < 128) { out.push(cp); continue; }
+        const byte = enc[ch];
+        if (byte === undefined) throw new Error(`no cp1256 byte for U+${cp.toString(16)}`);
+        out.push(byte);
+      }
+      return new Uint8Array(out);
+    };
+    const csv = [
+      'رقم البند,الوصف,الوحدة,الكمية,الفئة,الإجمالي',
+      'ب1,خرسانة مسلحة للقواعد,م3,180,3700,666000',
+    ].join('\n');
+    const bytes = encode1256(csv);
+    // No BOM, not valid UTF-8: the legacy Arabic codepage path must engage.
+    expect(() => new TextDecoder('utf-8', { fatal: true }).decode(bytes)).toThrow();
+    const result = await inspectDocument(bytes, 'ar-legacy.csv');
+    expect(result.sourceKind).toBe('csv');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.description).toContain('خرسانة');
+    expect(result.items[0]!.total).toBe(666000);
+  });
+
   it('reads a legacy .xls BOQ', async () => {
     const result = await inspectDocument(buildSheetBytes('xls'), 'legacy.xls');
     expect(result.sourceKind).toBe('xls');

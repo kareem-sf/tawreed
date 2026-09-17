@@ -68,10 +68,14 @@ function expectPolicyRejection(packageJson, packageLock, message) {
 }
 
 function verifyProjectNpmConfiguration() {
-  const options = { cwd: root, encoding: 'utf8', timeout: 30_000 };
+  const args = ['config', 'get', 'strict-allow-scripts', '--location=project'];
+  // .cmd shims need a shell on Windows; node itself (path may contain spaces)
+  // must be spawned without one, so the shell flag is fallback-only.
   const result = process.env.npm_execpath
-    ? spawnSync(process.execPath, [process.env.npm_execpath, 'config', 'get', 'strict-allow-scripts', '--location=project'], options)
-    : spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['config', 'get', 'strict-allow-scripts', '--location=project'], options);
+    ? spawnSync(process.execPath, [process.env.npm_execpath, ...args], { cwd: root, encoding: 'utf8', timeout: 30_000 })
+    : process.platform === 'win32'
+      ? spawnSync('npm.cmd', args, { cwd: root, encoding: 'utf8', timeout: 30_000, shell: true })
+      : spawnSync('npm', args, { cwd: root, encoding: 'utf8', timeout: 30_000 });
 
   if (result.status !== 0 || result.stdout.trim() !== 'true') {
     fail('Project npm configuration must enable strict-allow-scripts=true.', result);
