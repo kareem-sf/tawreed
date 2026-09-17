@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Group, Text } from '@mantine/core';
-import { Check, ChevronLeft, ChevronRight, Globe2, Minus, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Globe2, Loader2, Minus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { setSetting } from '../../bridge';
 import { currentDesktopWindow } from '../../platform/desktop/window';
+import { Button } from '../../components/ui/button';
+import { HeroButton } from '../../components/HeroButton';
 import Logo from '../../components/Logo';
 import { ProviderSetup } from '../settings/ProviderSetup';
 import LiveDemo from './LiveDemo';
@@ -114,13 +115,8 @@ export default function Onboarding({
         <div className="mx-auto max-w-2xl">
           {!required && (
             <div className="mb-2 flex justify-end">
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="gray"
-                leftSection={<X size={12} />}
-                onClick={onClose}
-              >
+              <Button size="sm" variant="ghost" onClick={onClose}>
+                <X size={12} aria-hidden="true" />
                 {t('close')}
               </Button>
             </div>
@@ -175,26 +171,25 @@ export default function Onboarding({
             <section>
               <div className="text-center">
                 <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('tourTitle')}</h1>
-                <Text size="sm" c="dimmed" mt={5}>{t('tourDetail')}</Text>
+                <p className="mt-[5px] text-sm text-ledger-ink-dim">{t('tourDetail')}</p>
               </div>
               <LiveDemo lang={ar ? 'ar' : 'en'} />
-              <Group justify="space-between" mt="lg">
+              <div className="mt-5 flex items-center justify-between">
                 <Button
-                  variant="subtle"
-                  color="gray"
-                  leftSection={<ChevronLeft size={14} className="rtl:rotate-180" />}
+                  variant="ghost"
                   onClick={() => void persistStep('language').catch(() => undefined)}
                 >
+                  <ChevronLeft size={14} className="rtl:rotate-180" aria-hidden="true" />
                   {t('back')}
                 </Button>
                 <Button
-                  color="gold"
-                  rightSection={<ChevronRight size={14} className="rtl:rotate-180" />}
+                  variant="default"
                   onClick={() => void persistStep('connection').catch(() => undefined)}
                 >
                   {t('continue')}
+                  <ChevronRight size={14} className="rtl:rotate-180" aria-hidden="true" />
                 </Button>
-              </Group>
+              </div>
             </section>
           )}
 
@@ -202,7 +197,7 @@ export default function Onboarding({
             <section>
               <div className="text-center">
                 <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('connectTitle')}</h1>
-                <Text size="sm" c="dimmed" mt={5}>{t('connectDetail')}</Text>
+                <p className="mt-[5px] text-sm text-ledger-ink-dim">{t('connectDetail')}</p>
               </div>
               <div className="mt-6">
                 <ProviderSetup
@@ -212,40 +207,40 @@ export default function Onboarding({
                   hasGrokKey={hasGrokKey}
                 />
               </div>
-              <Group justify="space-between" mt="xl">
+              <div className="mt-8 flex items-center justify-between">
                 <Button
-                  variant="subtle"
-                  color="gray"
-                  leftSection={<ChevronLeft size={14} className="rtl:rotate-180" />}
+                  variant="ghost"
                   onClick={() => void persistStep('video').catch(() => undefined)}
                 >
+                  <ChevronLeft size={14} className="rtl:rotate-180" aria-hidden="true" />
                   {t('back')}
                 </Button>
-                <Group gap="xs">
+                <div className="flex items-center gap-2.5">
                   <Button
-                    variant="subtle"
-                    color="gray"
-                    leftSection={<Check size={14} />}
-                    loading={finishing}
+                    variant="ghost"
+                    disabled={finishing}
                     onClick={() => void finish(true)}
                   >
+                    {finishing
+                      ? <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />
+                      : <Check size={14} aria-hidden="true" />}
                     {t('useOffline')}
                   </Button>
-                  <Button
-                    color="gold"
-                    loading={finishing}
+                  <HeroButton
+                    disabled={finishing}
                     onClick={() => void finish(false)}
                   >
+                    {finishing && <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />}
                     {t('finishSetup')}
-                  </Button>
-                </Group>
-              </Group>
+                  </HeroButton>
+                </div>
+              </div>
             </section>
           )}
           {stepError && (
-            <Text size="xs" c="red" ta="center" mt="md" role="alert">
+            <p role="alert" className="allow-select mt-4 text-center text-xs text-ledger-danger">
               {stepError}
-            </Text>
+            </p>
           )}
         </div>
       </main>

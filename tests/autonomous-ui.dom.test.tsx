@@ -5,8 +5,8 @@
 // list must revoke with rollback (a failed revoke must not desync the UI).
 import { describe, it, expect, vi, beforeAll, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import { MantineProvider } from '@mantine/core';
 import { I18nextProvider } from 'react-i18next';
+import { TooltipProvider } from '../src/components/ui/tooltip';
 import i18n from '../src/i18n';
 import ReviewPanel from '../src/features/review/ReviewPanel';
 import { AutopilotSetup } from '../src/features/settings/AutopilotSetup';
@@ -49,7 +49,7 @@ vi.mock('../src/bridge', async (importOriginal) => ({
 function renderWithProviders(node: React.ReactNode) {
   return render(
     <I18nextProvider i18n={i18n}>
-      <MantineProvider>{node}</MantineProvider>
+      <TooltipProvider>{node}</TooltipProvider>
     </I18nextProvider>,
   );
 }
@@ -143,7 +143,22 @@ describe('AutopilotSetup trust list', () => {
     renderWithProviders(<AutopilotSetup />);
     expect(await screen.findByText('Tower C')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /revoke: tower c/i }));
+    // Destructive revoke needs an explicit confirm — the row click only arms it.
+    expect(await screen.findByText('Revoke auto-pilot?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Revoke$/ }));
     await waitFor(() => expect(trustBridge.setAutopilotTrust).toHaveBeenCalledWith([]));
+  });
+
+  it('cancelling the confirm leaves the grant untouched', async () => {
+    trustBridge.getAutopilotTrust.mockResolvedValue(grants);
+    trustBridge.setAutopilotTrust.mockResolvedValue(undefined);
+    renderWithProviders(<AutopilotSetup />);
+    expect(await screen.findByText('Tower C')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /revoke: tower c/i }));
+    expect(await screen.findByText('Revoke auto-pilot?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(trustBridge.setAutopilotTrust).not.toHaveBeenCalled();
+    expect(screen.getByText('Tower C')).toBeTruthy();
   });
 
   it('rolls the list back when the revoke write fails', async () => {
@@ -152,6 +167,8 @@ describe('AutopilotSetup trust list', () => {
     renderWithProviders(<AutopilotSetup />);
     expect(await screen.findByText('Tower C')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /revoke: tower c/i }));
+    expect(await screen.findByText('Revoke auto-pilot?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Revoke$/ }));
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     // Optimistic removal rolled back: the grant is still listed.
     expect(screen.getByText('Tower C')).toBeTruthy();

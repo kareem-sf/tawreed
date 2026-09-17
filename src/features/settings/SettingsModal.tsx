@@ -1,6 +1,7 @@
-import { Button, Stack, Text } from '@mantine/core';
 import { HardDrive, PlayCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '../../components/ui/button';
+import { Separator } from '../../components/ui/separator';
 import { AutopilotSetup } from './AutopilotSetup';
 import { GeneralPreferences } from './GeneralPreferences';
 import { ProviderSetup } from './ProviderSetup';
@@ -27,21 +28,21 @@ export default function SettingsModal({
   const { t } = useTranslation();
 
   return (
-    <Stack gap="lg">
-      <Text size="xs" c="dimmed">{t('settingsSimpleDetail')}</Text>
+    <div className="space-y-5">
+      <p className="text-xs text-ledger-ink-dim">{t('settingsSimpleDetail')}</p>
 
       <GeneralPreferences />
 
       <section>
-        <Text size="xs" fw={650}>{t('autopilotTitle')}</Text>
+        <p className="text-xs font-semibold text-ledger-ink">{t('autopilotTitle')}</p>
         <div className="mt-2">
           <AutopilotSetup />
         </div>
       </section>
 
       <section>
-        <Text size="xs" fw={650}>{t('connection')}</Text>
-        <Text size="xs" c="dimmed" mt={2} mb={8}>{t('connectionDetail')}</Text>
+        <p className="text-xs font-semibold text-ledger-ink">{t('connection')}</p>
+        <p className="mb-2 mt-0.5 text-xs text-ledger-ink-dim">{t('connectionDetail')}</p>
         <ProviderSetup
           hasKey={hasKey}
           hasCompatibleKey={hasCompatibleKey}
@@ -51,24 +52,25 @@ export default function SettingsModal({
         />
       </section>
 
-      <div className="grid grid-cols-2 gap-2 border-t border-ledger-line pt-4">
+      <div>
+        <Separator />
+        <div className="grid grid-cols-2 gap-2 pt-4">
         <Button
-          variant="light"
-          color="gray"
-          leftSection={<PlayCircle size={14} aria-hidden="true" />}
+          variant="secondary"
           onClick={onRunOnboarding}
         >
+          <PlayCircle size={14} aria-hidden="true" />
           {t('viewGuide')}
         </Button>
         <Button
-          variant="light"
-          color="gray"
-          leftSection={<HardDrive size={14} aria-hidden="true" />}
+          variant="secondary"
           onClick={onOpenAbout}
         >
+          <HardDrive size={14} aria-hidden="true" />
           {t('about')}
         </Button>
+        </div>
       </div>
-    </Stack>
+    </div>
   );
 }

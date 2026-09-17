@@ -1,16 +1,19 @@
 import { useState } from 'react';
-import { ActionIcon, Button, Loader } from '@mantine/core';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
   AlertCircle,
   ArrowUpRight,
   CheckCircle2,
   Download,
+  Loader2,
   RefreshCw,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { openLogsFolder, openUrl } from '../../bridge';
 import type { UpdateState } from '../../app/types';
+import { Button } from '../../components/ui/button';
+import { Separator } from '../../components/ui/separator';
 import Logo from '../../components/Logo';
 
 interface Props {
@@ -49,18 +52,25 @@ export default function AboutModal({
           : t('checkForUpdates');
 
   return (
-    <div className="-m-4 bg-ledger-bg p-7 text-start">
+    <div className="-m-6 bg-ledger-bg p-6 text-start">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <Logo size={30} />
           <div>
-            <h2 className="font-serif-display text-base font-semibold text-ledger-ink">Tawreed</h2>
+            <DialogPrimitive.Title asChild>
+              <h2 className="font-serif-display text-base font-semibold text-ledger-ink">Tawreed</h2>
+            </DialogPrimitive.Title>
             <p className="text-xs text-ledger-ink-faint">v{version}</p>
           </div>
         </div>
-        <ActionIcon variant="subtle" color="gray" onClick={onClose} aria-label={t('close')}>
-          <X size={15} />
-        </ActionIcon>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t('close')}
+          className="rounded-md p-1.5 text-ledger-ink-faint transition hover:bg-ledger-surface-2 hover:text-ledger-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <X size={15} aria-hidden="true" />
+        </button>
       </div>
 
       <p className="mt-6 text-sm font-medium text-ledger-ink">
@@ -89,7 +99,7 @@ export default function AboutModal({
       <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border-ledger-line p-3">
         <div className="flex min-w-0 flex-col gap-1 text-xs text-ledger-ink-dim">
           <div className="flex min-w-0 items-center gap-2">
-            {update.status === 'checking' && <Loader size={13} color="gold" />}
+            {update.status === 'checking' && <Loader2 size={13} className="text-gold-deep motion-safe:animate-spin dark:text-gold" aria-hidden="true" />}
             {update.status === 'current' && <CheckCircle2 size={14} className="text-emerald-600" />}
             {update.status === 'available' && <Download size={14} className="text-gold-deep dark:text-gold" />}
             {update.status === 'error' && <AlertCircle size={14} className="text-ledger-danger" />}
@@ -103,8 +113,8 @@ export default function AboutModal({
         </div>
         {update.status === 'available' ? (
           <Button
-            size="compact-xs"
-            color="gold"
+            size="sm"
+            variant="default"
             onClick={() => {
               setDownloadFailed(false);
               void onOpenUpdate(update.info.latest_version).catch(() => setDownloadFailed(true));
@@ -114,20 +124,21 @@ export default function AboutModal({
           </Button>
         ) : (
           <Button
-            size="compact-xs"
-            variant="subtle"
-            color="gray"
-            leftSection={<RefreshCw size={11} />}
+            size="sm"
+            variant="ghost"
             disabled={update.status === 'checking'}
             onClick={() => void onCheckUpdate()}
           >
+            <RefreshCw size={11} aria-hidden="true" />
             {update.status === 'error' ? t('tryAgain') : t('checkForUpdates')}
           </Button>
         )}
       </div>
       {downloadFailed && <p className="mt-1 text-xs text-ledger-danger">{t('updateDownloadFailed')}</p>}
 
-      <div className="mt-6 border-t border-ledger-line pt-4">
+      <div className="mt-6">
+        <Separator />
+        <div className="pt-4">
         <p className="text-sm font-semibold text-ledger-ink">
           {t('aboutCreatorLabel')} {t('aboutCreatorCredit')}
         </p>
@@ -162,6 +173,7 @@ export default function AboutModal({
           >
             {t('reportProblem')}
           </button>
+        </div>
         </div>
       </div>
     </div>

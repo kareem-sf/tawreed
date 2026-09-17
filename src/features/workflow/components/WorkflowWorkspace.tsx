@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Group, Modal, Text, Tooltip } from '@mantine/core';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { AnimatePresence } from 'motion/react';
 import { FileSpreadsheet, FolderOpen, LockKeyhole } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +9,15 @@ import FileUpload from './FileUpload';
 import ReviewPanel from '../../review/ReviewPanel';
 import WorkLoader from '../../../components/WorkLoader';
 import { BlurFade } from '../../../components/ui/blur-fade';
+import { Button } from '../../../components/ui/button';
+import { HeroButton } from '../../../components/HeroButton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip';
+import {
+  ResponsiveModal,
+  ResponsiveModalDescription,
+  ResponsiveModalOverlay,
+  ResponsiveModalTitle,
+} from '../../../components/spectrumui/responsive-modal-dependencies';
 import type { WorkflowState } from '../types';
 
 interface Props {
@@ -52,63 +61,50 @@ export function WorkflowWorkspace({
           <BlurFade key="idle" className="flex h-full flex-col items-center justify-center gap-4 px-8">
             <FileUpload onFile={onFile} />
             {boot.first_run && (
-              <Text size="xs" c="dimmed" ta="center" maw={390}>
+              <p className="mx-auto max-w-[390px] text-center text-xs text-ledger-ink-dim">
                 {t('welcomeBody', { dir: boot.data_dir })}
-              </Text>
+              </p>
             )}
             {state.error && (
-              <Text size="xs" c="red" ta="center" maw={390} role="alert" className="allow-select">
+              <p role="alert" className="allow-select mx-auto max-w-[390px] text-center text-xs text-ledger-danger">
                 {state.error}
-              </Text>
+              </p>
             )}
           </BlurFade>
         )}
 
         {state.view === 'consent' && state.pendingInspection && (
-          <Modal
-            key="consent"
-            opened
-            // No implicit close: ESC/backdrop must not silently start an offline
-            // run behind the user's back — the choice has to be explicit.
-            onClose={() => undefined}
-            closeOnEscape={false}
-            closeOnClickOutside={false}
-            centered
-            radius="lg"
-            padding="xl"
-            size="md"
-            withCloseButton={false}
-          >
-            <LockKeyhole className="h-8 w-8 text-gold-deep dark:text-gold" strokeWidth={1.6} aria-hidden="true" />
-            <Text className="font-serif-display" fw={650} size="lg" mt="md">{t('aiConsentTitle')}</Text>
-            <Text size="sm" c="dimmed" mt={6}>{t('aiConsentBody')}</Text>
-            <div className="mt-4 rounded-xl border border-ledger-line bg-ledger-surface-2 p-3 text-xs leading-5 text-ledger-ink-dim">
-              {t('sharedFieldsSimple', {
-                count: state.pendingInspection.inspection.items.length,
-                provider: consentProvider,
-              })}
-            </div>
-            <Text size="xs" c="dimmed" mt="sm">{t('aiConsentPrivacy')}</Text>
-            <Text size="xs" c="dimmed" mt={4}>{t('autopilotTip')}</Text>
-            <Group mt="lg" justify="flex-end">
-              <Button variant="subtle" color="gray" onClick={() => onConsent(false)}>
-                {t('stayOffline')}
-              </Button>
-              <Button
-                color="gold"
-                onClick={() => onConsent(true)}
-                styles={{
-                  root: {
-                    color: '#1c1408',
-                    fontWeight: 700,
-                    background: 'linear-gradient(180deg, #f3c968, var(--gold))',
-                  },
-                }}
-              >
-                {t('improvePackages')}
-              </Button>
-            </Group>
-          </Modal>
+          <ResponsiveModal key="consent" open onOpenChange={() => undefined}>
+            <ResponsiveModalOverlay />
+            <DialogPrimitive.Content
+              // No implicit close: ESC/backdrop must not silently start an offline
+              // run behind the user's back — the choice has to be explicit.
+              // There is deliberately no close button either.
+              onEscapeKeyDown={(event) => event.preventDefault()}
+              onPointerDownOutside={(event) => event.preventDefault()}
+              className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-ledger-line bg-background p-6 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+            >
+              <LockKeyhole className="h-8 w-8 text-gold-deep dark:text-gold" strokeWidth={1.6} aria-hidden="true" />
+              <ResponsiveModalTitle className="font-serif-display mt-4">{t('aiConsentTitle')}</ResponsiveModalTitle>
+              <ResponsiveModalDescription className="mt-1.5">{t('aiConsentBody')}</ResponsiveModalDescription>
+              <div className="mt-4 rounded-xl border border-ledger-line bg-ledger-surface-2 p-3 text-xs leading-5 text-ledger-ink-dim">
+                {t('sharedFieldsSimple', {
+                  count: state.pendingInspection.inspection.items.length,
+                  provider: consentProvider,
+                })}
+              </div>
+              <p className="mt-3 text-xs text-ledger-ink-dim">{t('aiConsentPrivacy')}</p>
+              <p className="mt-1 text-xs text-ledger-ink-dim">{t('autopilotTip')}</p>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <Button variant="ghost" onClick={() => onConsent(false)}>
+                  {t('stayOffline')}
+                </Button>
+                <HeroButton onClick={() => onConsent(true)}>
+                  {t('improvePackages')}
+                </HeroButton>
+              </div>
+            </DialogPrimitive.Content>
+          </ResponsiveModal>
         )}
 
         {state.view === 'busy' && (
@@ -117,17 +113,18 @@ export function WorkflowWorkspace({
               title={state.busyMessage}
               subtitle={t('busyReassurance')}
               progress={state.busyProgress}
+              orbState="working"
             />
-            <Button
-              mt="md"
-              size="xs"
-              variant="subtle"
-              color="gray"
-              disabled={!state.cancellable}
-              onClick={onCancel}
-            >
-              {t('cancel')}
-            </Button>
+            <div className="mt-4">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!state.cancellable}
+                onClick={onCancel}
+              >
+                {t('cancel')}
+              </Button>
+            </div>
           </BlurFade>
         )}
 
@@ -153,60 +150,58 @@ export function WorkflowWorkspace({
               strokeWidth={1.35}
               aria-hidden="true"
             />
-            <Text className="font-serif-display" fw={650}>{t('doneTitle')}</Text>
-            <Text size="sm" fw={600}>{state.output.projectName} · {state.output.revisionLabel}</Text>
-            <Text
-              size="xs"
-              c="dimmed"
-              ta="center"
-              maw={430}
-              style={{ wordBreak: 'break-all' }}
-              className="allow-select"
-            >
+            <p className="font-serif-display text-sm font-semibold text-ledger-ink">{t('doneTitle')}</p>
+            <p className="text-sm font-semibold text-ledger-ink">{state.output.projectName} · {state.output.revisionLabel}</p>
+            <p className="allow-select mx-auto max-w-[430px] break-all text-center text-xs text-ledger-ink-dim">
               {state.output.masterPath}
-            </Text>
+            </p>
             {state.error && (
-              <Text size="xs" c="red" ta="center" maw={400} role="alert" className="allow-select">
+              <p role="alert" className="allow-select mx-auto max-w-[400px] text-center text-xs text-ledger-danger">
                 {state.error}
-              </Text>
+              </p>
             )}
             {openError && (
-              <Text size="xs" c="red" ta="center" maw={400} role="alert" className="allow-select">
+              <p role="alert" className="allow-select mx-auto max-w-[400px] text-center text-xs text-ledger-danger">
                 {openError}
-              </Text>
+              </p>
             )}
-            <Group gap="xs">
-              <Tooltip label={t('openWorkbookDetail')} openDelay={180}>
-                <Button
-                  size="xs"
-                  leftSection={<FileSpreadsheet size={13} aria-hidden="true" />}
-                  onClick={() => {
-                    setOpenError(null);
-                    void openWorkbook(state.output!.masterPath).catch(() => setOpenError(t('errorGeneric')));
-                  }}
-                  styles={{ root: { background: 'var(--surface-2)', color: 'var(--gold)', fontWeight: 600 } }}
-                >
-                  {t('openWorkbook')}
-                </Button>
+            <div className="flex items-center gap-2.5">
+              <Tooltip delayDuration={180}>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setOpenError(null);
+                      void openWorkbook(state.output!.masterPath).catch(() => setOpenError(t('errorGeneric')));
+                    }}
+                  >
+                    <FileSpreadsheet size={13} aria-hidden="true" />
+                    {t('openWorkbook')}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('openWorkbookDetail')}</TooltipContent>
               </Tooltip>
-              <Tooltip label={t('openPackagesDetail')} openDelay={180}>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  color="gray"
-                  leftSection={<FolderOpen size={13} aria-hidden="true" />}
-                  onClick={() => {
-                    setOpenError(null);
-                    void openGeneratedFolder(state.output!.packageFolder).catch(() => setOpenError(t('errorGeneric')));
-                  }}
-                >
-                  {t('openPackages')}
-                </Button>
+              <Tooltip delayDuration={180}>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setOpenError(null);
+                      void openGeneratedFolder(state.output!.packageFolder).catch(() => setOpenError(t('errorGeneric')));
+                    }}
+                  >
+                    <FolderOpen size={13} aria-hidden="true" />
+                    {t('openPackages')}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('openPackagesDetail')}</TooltipContent>
               </Tooltip>
-              <Button size="xs" variant="subtle" color="gray" onClick={onReset}>
+              <Button size="sm" variant="ghost" onClick={onReset}>
                 {t('newFile')}
               </Button>
-            </Group>
+            </div>
           </BlurFade>
         )}
       </AnimatePresence>

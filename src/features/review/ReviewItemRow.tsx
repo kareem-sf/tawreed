@@ -1,6 +1,6 @@
-import { Select, Text } from '@mantine/core';
 import type { RowComponentProps } from 'react-window';
 import type { BoqItem, Classification } from '../../../shared/types';
+import { ModelSelect } from '../settings/ModelSelect';
 
 interface PackageOption {
   value: string;
@@ -42,21 +42,20 @@ export function ReviewItemRow({
       style={style}
       className="grid grid-cols-[110px_minmax(0,1fr)_261px_90px] items-center gap-2 border-b border-ledger-line px-3"
     >
-      <Text size="xs" className="font-mono-figures" c="var(--ink-faint)">{sourceReference(item)}</Text>
-      <Text size="xs" truncate className="allow-select" c="var(--ink)">{item.description}</Text>
-      <Select
-        aria-label={itemPackageLabel(item.id)}
-        data={packageOptions}
+      <span className="font-mono-figures text-xs text-ledger-ink-faint">{sourceReference(item)}</span>
+      <span className="allow-select truncate text-xs text-ledger-ink">{item.description}</span>
+      <ModelSelect
+        ariaLabel={itemPackageLabel(item.id)}
+        placeholder=""
+        options={packageOptions}
         value={classification?.packageCode ?? 'WP-99'}
-        onChange={(value) => value && onClassificationChange(item.id, value)}
-        size="xs"
-        searchable
-        w={245}
-        comboboxProps={{ withinPortal: true }}
+        onChange={(value) => {
+          if (value) onClassificationChange(item.id, value);
+        }}
       />
-      <Text size="xs" c={needsReview ? 'var(--danger)' : 'dimmed'}>
+      <span className={`text-xs ${needsReview ? 'text-ledger-danger' : 'text-ledger-ink-dim'}`}>
         {needsReview ? needsReviewLabel : checkedLabel}
-      </Text>
+      </span>
     </div>
   );
 }

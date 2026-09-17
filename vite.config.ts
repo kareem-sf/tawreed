@@ -23,7 +23,15 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          mantine: ['@mantine/core'],
+          radix: [
+            '@radix-ui/react-accordion',
+            '@radix-ui/react-dialog',
+            '@radix-ui/react-label',
+            '@radix-ui/react-popover',
+            '@radix-ui/react-slot',
+            '@radix-ui/react-tabs',
+            '@radix-ui/react-tooltip',
+          ],
           motion: ['motion/react'],
           i18n: ['i18next', 'react-i18next'],
         },

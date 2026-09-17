@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Loader, SegmentedControl, Select, Text, useMantineColorScheme } from '@mantine/core';
+import { ChevronDown, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSettings, setSetting } from '../../bridge';
+import { useColorScheme, type ColorSchemeSetting } from '../../app/useColorScheme';
+import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import type { ProcessingMode } from '../workflow/useBoqWorkflow';
+
+const SEGMENT_LIST = 'grid w-full border border-ledger-line p-0.5';
+const SEGMENT_TRIGGER = 'text-xs data-[state=active]:shadow-sm';
 
 export function GeneralPreferences() {
   const { t, i18n } = useTranslation();
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
+  const { setting: themeSetting, applySetting } = useColorScheme();
   const [processingMode, setProcessingMode] = useState<ProcessingMode>('ask');
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -34,77 +39,75 @@ export function GeneralPreferences() {
     }
   };
 
+  const changeTheme = (value: string) => {
+    const scheme = value as ColorSchemeSetting;
+    const previous = themeSetting;
+    applySetting(scheme);
+    setSaveError(null);
+    void setSetting('theme', scheme).catch(() => {
+      applySetting(previous);
+      setSaveError(t('errorGeneric'));
+    });
+  };
+
   return (
     <div className="space-y-5">
       <section>
-        <Text size="xs" fw={650} mb={6}>{t('language')}</Text>
-        <SegmentedControl
-          fullWidth
-          size="xs"
-          value={i18n.language === 'ar' ? 'ar' : 'en'}
-          onChange={(value) => void changeLanguage(value)}
-          data={[
-            { value: 'en', label: 'English' },
-            { value: 'ar', label: 'العربية' },
-          ]}
-        />
+        <p className="mb-1.5 text-xs font-semibold text-ledger-ink">{t('language')}</p>
+        <Tabs value={i18n.language === 'ar' ? 'ar' : 'en'} onValueChange={(value) => void changeLanguage(value)}>
+          <TabsList className={`${SEGMENT_LIST} grid-cols-2`}>
+            <TabsTrigger value="en" className={SEGMENT_TRIGGER}>English</TabsTrigger>
+            <TabsTrigger value="ar" className={SEGMENT_TRIGGER}>العربية</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </section>
 
       <section>
-        <Text size="xs" fw={650} mb={6}>{t('appearance')}</Text>
-        <SegmentedControl
-          fullWidth
-          size="xs"
-          value={colorScheme}
-          onChange={(value) => {
-            const scheme = value as 'auto' | 'light' | 'dark';
-            const previous = colorScheme;
-            setColorScheme(scheme);
-            setSaveError(null);
-            void setSetting('theme', scheme).catch(() => {
-              setColorScheme(previous);
-              setSaveError(t('errorGeneric'));
-            });
-          }}
-          data={[
-            { value: 'auto', label: t('systemTheme') },
-            { value: 'light', label: t('lightTheme') },
-            { value: 'dark', label: t('darkTheme') },
-          ]}
-        />
+        <p className="mb-1.5 text-xs font-semibold text-ledger-ink">{t('appearance')}</p>
+        <Tabs value={themeSetting} onValueChange={changeTheme}>
+          <TabsList className={`${SEGMENT_LIST} grid-cols-3`}>
+            <TabsTrigger value="auto" className={SEGMENT_TRIGGER}>{t('systemTheme')}</TabsTrigger>
+            <TabsTrigger value="light" className={SEGMENT_TRIGGER}>{t('lightTheme')}</TabsTrigger>
+            <TabsTrigger value="dark" className={SEGMENT_TRIGGER}>{t('darkTheme')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </section>
 
       <section>
-        <Text size="xs" fw={650}>{t('processingChoice')}</Text>
-        <Text size="xs" c="dimmed" mt={2} mb={7}>{t('processingChoiceDetail')}</Text>
+        <p className="text-xs font-semibold text-ledger-ink">{t('processingChoice')}</p>
+        <p className="mb-1.5 mt-0.5 text-xs text-ledger-ink-dim">{t('processingChoiceDetail')}</p>
         {loading ? (
-          <Loader size={16} color="gold" />
+          <Loader2 size={16} className="text-gold-deep motion-safe:animate-spin dark:text-gold" aria-hidden="true" />
         ) : (
-          <Select
-            size="xs"
-            value={processingMode}
-            allowDeselect={false}
-            data={[
-              { value: 'ask', label: t('askEveryFile') },
-              { value: 'online', label: t('alwaysImproveOnline') },
-              { value: 'offline', label: t('alwaysOffline') },
-            ]}
-            onChange={(value) => {
-              const next = (value ?? 'ask') as ProcessingMode;
-              const previous = processingMode;
-              setProcessingMode(next);
-              setSaveError(null);
-              void setSetting('processingMode', next).catch(() => {
-                setProcessingMode(previous);
-                setSaveError(t('errorGeneric'));
-              });
-            }}
-          />
+          <div className="relative">
+            <select
+              aria-label={t('processingChoice')}
+              value={processingMode}
+              onChange={(event) => {
+                const next = event.currentTarget.value as ProcessingMode;
+                const previous = processingMode;
+                setProcessingMode(next);
+                setSaveError(null);
+                void setSetting('processingMode', next).catch(() => {
+                  setProcessingMode(previous);
+                  setSaveError(t('errorGeneric'));
+                });
+              }}
+              className="h-9 w-full appearance-none rounded-md border border-input bg-background pe-8 ps-3 text-sm text-ledger-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="ask">{t('askEveryFile')}</option>
+              <option value="online">{t('alwaysImproveOnline')}</option>
+              <option value="offline">{t('alwaysOffline')}</option>
+            </select>
+            <ChevronDown
+              size={14}
+              aria-hidden="true"
+              className="pointer-events-none absolute end-2.5 top-1/2 -translate-y-1/2 text-ledger-ink-faint"
+            />
+          </div>
         )}
         {saveError && (
-          <Text size="xs" c="red" role="alert">
-            {saveError}
-          </Text>
+          <p role="alert" className="mt-1 text-xs text-ledger-danger">{saveError}</p>
         )}
       </section>
     </div>

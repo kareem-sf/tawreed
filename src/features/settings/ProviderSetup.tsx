@@ -1,17 +1,16 @@
-import {
-  Accordion,
-  Alert,
-  Button,
-  Group,
-  PasswordInput,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
-import { CheckCircle2, Circle, Cloud, RefreshCw, Settings2 } from 'lucide-react';
+import { CheckCircle2, Circle, Cloud, Loader2, RefreshCw, Settings2 } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { cn } from '../../lib/utils';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../../components/ui/accordion';
+import { Alert } from '../../components/ui/alert';
+import { Button } from '../../components/ui/button';
+import { ConfirmDialog } from '../../components/ui/confirm-dialog';
+import { Input } from '../../components/ui/input';
+import { Field } from './Field';
+import { ModelSelect } from './ModelSelect';
 import { NamedProviderCard } from './NamedProviderCard';
+import { PasswordField } from './PasswordField';
 import type { Provider } from './provider-types';
 import { useProviderSetup } from './useProviderSetup';
 
@@ -28,6 +27,7 @@ export function ProviderSetup({
 }: Props) {
   const { t } = useTranslation();
   const setup = useProviderSetup({ onConfigured });
+  const [pendingRemove, setPendingRemove] = useState<'anthropic' | 'compatible' | null>(null);
   const connectionCards = [
     {
       value: 'codex' as const,
@@ -66,8 +66,14 @@ export function ProviderSetup({
     },
   ];
 
+  const messageTone = setup.message?.color === 'red'
+    ? undefined
+    : setup.message?.color === 'green'
+      ? 'border-emerald-600/30 text-emerald-700 dark:border-emerald-400/30 dark:text-emerald-300'
+      : 'border-amber-500/40 text-amber-700 dark:border-amber-400/40 dark:text-amber-300';
+
   return (
-    <Stack gap="sm">
+    <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
         {connectionCards.map((item) => {
           const Icon = item.icon;
@@ -100,27 +106,27 @@ export function ProviderSetup({
       </div>
 
       {setup.provider === 'codex' && (
-        <div className="rounded-xl border border-zinc-200 p-4 dark:border-white/10">
+        <div className="rounded-xl border border-ledger-line bg-ledger-surface p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <Text size="sm" fw={600}>
+              <p className="text-sm font-semibold text-ledger-ink">
                 {setup.codex?.authenticated
                   ? t('connectionReady')
                   : setup.codex?.installed
                     ? t('signInRequired')
                     : t('codexNotDetected')}
-              </Text>
+              </p>
               {setup.codex?.source && (
-                <Text size="xs" c="dimmed" mt={2}>
+                <p className="mt-0.5 text-xs text-ledger-ink-dim">
                   {setup.codex.version} · {setup.codex.source}
-                </Text>
+                </p>
               )}
             </div>
-            <Group gap="xs">
+            <div className="flex items-center gap-2.5">
               <Button
-                size="compact-xs"
-                variant="subtle"
-                color="gray"
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
                 aria-label={t('refreshCodex')}
                 onClick={() => void setup.refreshCodex()}
               >
@@ -128,70 +134,77 @@ export function ProviderSetup({
               </Button>
               {!setup.codex?.installed && (
                 <Button
-                  size="xs"
-                  color="gold"
-                  loading={setup.working === 'codex-install'}
+                  size="sm"
+                  variant="default"
+                  disabled={setup.working === 'codex-install'}
                   onClick={() => void setup.installCodex()}
                 >
+                  {setup.working === 'codex-install'
+                    && <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />}
                   {t('codexInstall')}
                 </Button>
               )}
               {setup.codex?.installed && !setup.codex.authenticated && (
                 <Button
-                  size="xs"
-                  color="gold"
-                  loading={setup.working === 'codex-login'}
+                  size="sm"
+                  variant="default"
+                  disabled={setup.working === 'codex-login'}
                   onClick={() => void setup.loginCodex()}
                 >
+                  {setup.working === 'codex-login'
+                    && <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />}
                   {t('codexLogin')}
                 </Button>
               )}
-            </Group>
+            </div>
           </div>
           {setup.codex?.authenticated && (
-            <Select
-              mt="sm"
-              label={t('modelChoice')}
-              placeholder={t('modelPlaceholder')}
-              data={setup.models.map((item) => ({
-                value: item.slug,
-                label: item.display_name || item.slug,
-              }))}
-              value={setup.model}
-              onChange={setup.chooseModel}
-              searchable
-              size="xs"
-            />
+            <div className="mt-3">
+              <ModelSelect
+                label={t('modelChoice')}
+                placeholder={t('modelPlaceholder')}
+                options={setup.models.map((item) => ({
+                  value: item.slug,
+                  label: item.display_name || item.slug,
+                }))}
+                value={setup.model}
+                onChange={setup.chooseModel}
+              />
+            </div>
           )}
         </div>
       )}
 
       {setup.provider === 'anthropic' && (
-        <div className="rounded-xl border border-zinc-200 p-4 dark:border-white/10">
-          <PasswordInput
-            label={t('apiKey')}
-            description={t('secretStoredSecurely')}
-            placeholder="sk-ant-…"
-            value={setup.anthropicKey}
-            onChange={(event) => setup.setAnthropicKey(event.currentTarget.value)}
-            size="xs"
-          />
-          <Group mt="sm">
+        <div className="rounded-xl border border-ledger-line bg-ledger-surface p-4">
+          <Field label={t('apiKey')} description={t('secretStoredSecurely')}>
+            {({ id, descriptionId }) => (
+              <PasswordField
+                id={id}
+                descriptionId={descriptionId}
+                placeholder="sk-ant-…"
+                value={setup.anthropicKey}
+                onChange={setup.setAnthropicKey}
+              />
+            )}
+          </Field>
+          <div className="mt-3 flex items-center gap-2">
             <Button
-              size="xs"
-              color="gold"
-              loading={setup.working === 'anthropic'}
-              disabled={!setup.anthropicKey.trim()}
+              size="sm"
+              variant="default"
+              disabled={setup.working === 'anthropic' || !setup.anthropicKey.trim()}
               onClick={() => void setup.saveAnthropic()}
             >
+              {setup.working === 'anthropic'
+                && <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />}
               {t('saveConnection')}
             </Button>
             {hasKey && (
-              <Button size="xs" variant="subtle" color="red" onClick={() => void setup.removeAnthropic()}>
-                {t('remove')}
+              <Button size="sm" variant="ghost" onClick={() => setPendingRemove('anthropic')}>
+                <span className="text-ledger-danger">{t('remove')}</span>
               </Button>
             )}
-          </Group>
+          </div>
         </div>
       )}
 
@@ -228,69 +241,100 @@ export function ProviderSetup({
       )}
 
       {setup.provider === 'compatible' && (
-        <Accordion variant="contained">
-          <Accordion.Item value="advanced">
-            <Accordion.Control>{t('advancedServiceSetup')}</Accordion.Control>
-            <Accordion.Panel>
-              <Stack gap="xs">
-                <TextInput
-                  label={t('serviceUrl')}
-                  description={t('serviceUrlDetail')}
-                  placeholder="https://service.example"
-                  value={setup.compatible.baseUrl}
-                  onChange={(event) => setup.setCompatible((current) => ({
-                    ...current,
-                    baseUrl: event.currentTarget.value,
-                  }))}
-                  size="xs"
-                />
-                <TextInput
-                  label={t('serviceModel')}
-                  value={setup.compatible.model}
-                  onChange={(event) => setup.setCompatible((current) => ({
-                    ...current,
-                    model: event.currentTarget.value,
-                  }))}
-                  size="xs"
-                />
-                <PasswordInput
-                  label={t('apiKey')}
-                  description={t('secretStoredSecurely')}
-                  value={setup.compatibleKey}
-                  onChange={(event) => setup.setCompatibleKey(event.currentTarget.value)}
-                  size="xs"
-                />
-                <Group mt="xs">
+        <Accordion type="single" collapsible>
+          <AccordionItem value="advanced" className="rounded-xl border border-ledger-line bg-ledger-surface px-4">
+            <AccordionTrigger className="py-3">{t('advancedServiceSetup')}</AccordionTrigger>
+            <AccordionContent>
+              <div className="space-y-2.5">
+                <Field label={t('serviceUrl')} description={t('serviceUrlDetail')}>
+                  {({ id, descriptionId }) => (
+                    <Input
+                      id={id}
+                      aria-describedby={descriptionId}
+                      placeholder="https://service.example"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={setup.compatible.baseUrl}
+                      onChange={(event) => setup.setCompatible((current) => ({
+                        ...current,
+                        baseUrl: event.currentTarget.value,
+                      }))}
+                    />
+                  )}
+                </Field>
+                <Field label={t('serviceModel')}>
+                  {({ id }) => (
+                    <Input
+                      id={id}
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={setup.compatible.model}
+                      onChange={(event) => setup.setCompatible((current) => ({
+                        ...current,
+                        model: event.currentTarget.value,
+                      }))}
+                    />
+                  )}
+                </Field>
+                <Field label={t('apiKey')} description={t('secretStoredSecurely')}>
+                  {({ id, descriptionId }) => (
+                    <PasswordField
+                      id={id}
+                      descriptionId={descriptionId}
+                      value={setup.compatibleKey}
+                      onChange={setup.setCompatibleKey}
+                    />
+                  )}
+                </Field>
+                <div className="flex items-center gap-2 pt-0.5">
                   <Button
-                    size="xs"
-                    color="gold"
-                    loading={setup.working === 'compatible'}
+                    size="sm"
+                    variant="default"
                     disabled={
-                      !setup.compatible.baseUrl.trim()
+                      setup.working === 'compatible'
+                      || !setup.compatible.baseUrl.trim()
                       || !setup.compatible.model.trim()
                       || (!setup.compatibleKey.trim() && !hasCompatibleKey)
                     }
                     onClick={() => void setup.saveCompatible()}
                   >
+                    {setup.working === 'compatible'
+                      && <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />}
                     {t('saveAndTest')}
                   </Button>
                   {hasCompatibleKey && (
-                    <Button size="xs" variant="subtle" color="red" onClick={() => void setup.removeCompatible()}>
-                      {t('remove')}
+                    <Button size="sm" variant="ghost" onClick={() => setPendingRemove('compatible')}>
+                      <span className="text-ledger-danger">{t('remove')}</span>
                     </Button>
                   )}
-                </Group>
-              </Stack>
-            </Accordion.Panel>
-          </Accordion.Item>
+                </div>
+              </div>
+            </AccordionContent>
+          </AccordionItem>
         </Accordion>
       )}
 
       {setup.message && (
-        <Alert color={setup.message.color} p="xs">
-          <Text size="xs">{setup.message.text}</Text>
+        <Alert variant={setup.message.color === 'red' ? 'destructive' : 'default'} className={cn('text-xs', messageTone)}>
+          {setup.message.text}
         </Alert>
       )}
-    </Stack>
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        title={t('confirmRemoveKeyTitle')}
+        description={pendingRemove ? t('confirmRemoveKeyBody', {
+          provider: pendingRemove === 'anthropic' ? t('anthropicConnection') : t('otherService'),
+        }) : undefined}
+        confirmLabel={t('remove')}
+        cancelLabel={t('cancel')}
+        onCancel={() => setPendingRemove(null)}
+        onConfirm={() => {
+          const target = pendingRemove;
+          setPendingRemove(null);
+          if (target === 'anthropic') void setup.removeAnthropic();
+          else if (target === 'compatible') void setup.removeCompatible();
+        }}
+      />
+    </div>
   );
 }
