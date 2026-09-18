@@ -38,10 +38,9 @@ describe('WorkLoader', () => {
     expect(screen.queryByText(/%$/)).toBeNull();
   });
 
-  it('renders the thinking orb instead of the arc when orbState is set', () => {
-    const { container } = render(<WorkLoader title="Working" orbState="working" />);
-    const canvas = container.querySelector('canvas');
-    expect(canvas).not.toBeNull();
-    expect(canvas?.getAttribute('aria-hidden')).toBe('true');
+  it('always renders the quiet arc (no orb variant)', () => {
+    const { container } = render(<WorkLoader title="Working" />);
+    expect(container.querySelector('canvas')).toBeNull();
+    expect(screen.getByRole('status')).not.toBeNull();
   });
 });
