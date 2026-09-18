@@ -50,7 +50,7 @@ export default function App() {
 
   return (
     <div className="app-frame relative">
-      <DotPattern className="text-zinc-400/20 [mask-image:radial-gradient(ellipse_at_center,black_15%,transparent_78%)] dark:text-white/[0.045]" />
+      <DotPattern className="text-muted-foreground/20 [mask-image:radial-gradient(ellipse_at_center,black_15%,transparent_78%)] dark:text-muted-foreground/10" />
       <TitleBar
         onSettings={() => setDialog('settings')}
         onHistory={() => setDialog('history')}

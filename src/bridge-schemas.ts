@@ -36,12 +36,3 @@ export const runRecordSchema = z.object({
   trace: z.array(agentEventSchema).optional(),
   memoryApplied: z.number().optional(),
 });
-
-export const runClassificationSchema = z.object({
-  runId: z.number(),
-  itemId: z.number(),
-  description: z.string(),
-  packageCode: z.string(),
-  source: z.enum(['heuristic', 'llm', 'fallback', 'memory', 'user']),
-  confidence: z.number(),
-});

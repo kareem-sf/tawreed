@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 //
-// Slice-2b guard: the replacement provider-field components preserve the
-// Mantine behaviors they replace — label association, password toggle,
-// searchable model select with the same value/onChange contract.
+// Slice-2b guard: provider-field components preserve label association,
+// password toggle, searchable model select with same value/onChange contract.
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import i18n from '../src/i18n';
-import { Field } from '../src/features/settings/Field';
+import { Field, FieldDescription, FieldLabel } from '../src/components/ui/field';
 import { PasswordField } from '../src/features/settings/PasswordField';
 import { ModelSelect } from '../src/features/settings/ModelSelect';
 import { Input } from '../src/components/ui/input';
@@ -42,10 +41,10 @@ function renderWithI18n(element: React.ReactElement) {
 describe('Field', () => {
   it('associates the label with its input and exposes the description', () => {
     renderWithI18n(
-      <Field label="API key" description="Stored securely">
-        {({ id, descriptionId }) => (
-          <Input id={id} aria-describedby={descriptionId} />
-        )}
+      <Field>
+        <FieldLabel htmlFor="key">API key</FieldLabel>
+        <Input id="key" aria-describedby="key-description" />
+        <FieldDescription id="key-description">Stored securely</FieldDescription>
       </Field>,
     );
     const input = screen.getByLabelText('API key');

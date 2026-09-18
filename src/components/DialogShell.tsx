@@ -17,7 +17,9 @@ interface DialogShellProps {
   /** Translated accessible label for the close button. Omit when the body
    * owns its close control (e.g. About) or must not close implicitly. */
   closeLabel?: string;
-  side?: 'center' | 'left' | 'right';
+  /** Sheet edge: `end` docks to the inline-end side (right in LTR, left in
+   * RTL) so callers never branch on language. */
+  side?: 'center' | 'start' | 'end';
   contentClassName?: string;
   children: ReactNode;
 }
@@ -29,8 +31,8 @@ const SHEET_PANEL =
   'inset-y-0 flex h-full w-[min(560px,92vw)] flex-col data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:duration-300 data-[state=closed]:duration-200';
 
 const SHEET_SIDES = {
-  left: 'left-0 border-r data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left',
-  right: 'right-0 border-l data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right',
+  start: 'start-0 border-e data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left rtl:data-[state=open]:slide-in-from-right rtl:data-[state=closed]:slide-out-to-right',
+  end: 'end-0 border-s data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right rtl:data-[state=open]:slide-in-from-left rtl:data-[state=closed]:slide-out-to-left',
 } as const;
 
 /** Shared dialog frame for app-level overlays: settings/about modals and the

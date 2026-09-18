@@ -1,7 +1,7 @@
 // Bridge to the Rust host. In a plain browser (vite dev), commands degrade gracefully.
 import { invoke } from '@tauri-apps/api/core';
-import type { ClassifySource, RunClassificationRecord, RunRecord } from '../shared/types';
-import { runClassificationSchema, runRecordSchema } from './bridge-schemas';
+import type { RunRecord } from '../shared/types';
+import { runRecordSchema } from './bridge-schemas';
 import { requestToPrompt, type LlmRequest } from '../engine/classify/llm';
 import type { GeneratedArtifact } from '../engine/generate';
 
@@ -177,40 +177,6 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
   await invoke('set_setting', { key, value });
 }
 
-export interface AutopilotGrant {
-  projectKey: string;
-  projectName: string;
-  grantedAt: string;
-}
-
-/**
- * Auto-pilot trust list: per-project grants to publish without human review.
- * Tolerantly parsed — anything malformed reads as untrusted (deny by default).
- */
-export async function getAutopilotTrust(): Promise<AutopilotGrant[]> {
-  const settings = await getSettings();
-  const root = settings.autopilot;
-  if (!root || typeof root !== 'object') return [];
-  const { version, trusted } = root as { version?: unknown; trusted?: unknown };
-  if (version !== 1 || !Array.isArray(trusted)) return [];
-  return trusted.flatMap((entry): AutopilotGrant[] => {
-    if (!entry || typeof entry !== 'object') return [];
-    const { projectKey, projectName, grantedAt } = entry as Record<string, unknown>;
-    if (typeof projectKey !== 'string' || !projectKey
-      || typeof projectName !== 'string' || !projectName
-      || typeof grantedAt !== 'string' || !grantedAt) return [];
-    return [{ projectKey, projectName, grantedAt }];
-  });
-}
-
-export function findAutopilotGrant(grants: AutopilotGrant[], projectKey: string): AutopilotGrant | null {
-  return grants.find((grant) => grant.projectKey === projectKey) ?? null;
-}
-
-export async function setAutopilotTrust(grants: AutopilotGrant[]): Promise<void> {
-  await setSetting('autopilot', { version: 1, trusted: grants });
-}
-
 export async function codexStatus(): Promise<CodexStatus> {
   if (!isDesktop()) {
     return {
@@ -309,31 +275,6 @@ export async function listRuns(): Promise<RunRecord[]> {
       return [];
     }
     return [parsed.data as RunRecord];
-  });
-}
-
-/** Per-item classification provenance. `source: 'user'` is the human corrections. */
-export async function listRunClassifications(
-  filter: { runId?: number; source?: ClassifySource } = {},
-): Promise<RunClassificationRecord[]> {
-  if (!isDesktop()) return [];
-  const rows = await invoke<unknown[]>('list_run_classifications', {
-    runId: filter.runId ?? null,
-    source: filter.source ?? null,
-  });
-  return rows.flatMap((row) => {
-    const parsed = runClassificationSchema.safeParse(row);
-    if (!parsed.success) {
-      void appLog(`history: dropped corrupt classification row (${parsed.error.issues[0]?.message ?? 'schema mismatch'})`);
-      return [];
-    }
-    return [{
-      itemId: parsed.data.itemId,
-      description: parsed.data.description,
-      packageCode: parsed.data.packageCode,
-      source: parsed.data.source,
-      confidence: parsed.data.confidence,
-    }];
   });
 }
 

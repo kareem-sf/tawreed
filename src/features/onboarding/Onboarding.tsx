@@ -120,10 +120,11 @@ export default function Onboarding({
               </Button>
             </div>
           )}
-          <div className="mb-8 flex items-center justify-center gap-2" aria-label={t('setupProgress')}>
+          <ol className="mb-8 flex items-center justify-center gap-2" aria-label={t('setupProgress')}>
             {stepOrder.map((item, itemIndex) => (
-              <span
+              <li
                 key={item}
+                aria-current={itemIndex === index ? 'step' : undefined}
                 className={`h-1.5 rounded-full transition-all ${
                   itemIndex === index
                     ? 'w-9 bg-primary'
@@ -131,20 +132,21 @@ export default function Onboarding({
                       ? 'w-5 bg-muted-foreground'
                       : 'w-5 bg-muted'
                 }`}
-              />
+              >
+                <span className="sr-only">{t('setupStepOf', { current: itemIndex + 1, total: stepOrder.length })}</span>
+              </li>
             ))}
-          </div>
+          </ol>
 
           {step === 'language' && (
             <section className="mx-auto max-w-lg text-center">
               <Globe2 className="mx-auto size-9 text-primary" strokeWidth={1.5} />
-              <h1 className="mt-6 text-2xl font-semibold tracking-[-0.01em]">
-                {t('onboardingLanguageTitle')}
-              </h1>
-              <p className="mt-2 text-sm text-muted-foreground">اختر لغة التطبيق</p>
-              <div className="mt-8 grid grid-cols-2 gap-3">
+                <h1 className="mt-6 text-2xl font-semibold tracking-[-0.01em]">
+                  {t('onboardingLanguageTitle')}
+                </h1>
+                <div className="mt-8 grid grid-cols-2 gap-3">
                 <button
-                  className="group rounded-2xl border border p-6 text-start shadow-sm transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:shadow-md"
+                  className="group rounded-2xl border p-4 text-start transition hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:border-primary"
                   onClick={() => void chooseLanguage('en')}
                 >
                   <div className="text-lg font-semibold transition group-hover:text-primary">
@@ -153,8 +155,9 @@ export default function Onboarding({
                   <div className="mt-1 text-xs text-muted-foreground">Continue in English</div>
                 </button>
                 <button
-                  dir="rtl"
-                  className="group rounded-2xl border border p-6 text-start shadow-sm transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:shadow-md"
+                  dir="auto"
+                  lang="ar"
+                  className="group rounded-2xl border p-4 text-start transition hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:border-primary"
                   onClick={() => void chooseLanguage('ar')}
                 >
                   <div className="text-lg font-semibold transition group-hover:text-primary">

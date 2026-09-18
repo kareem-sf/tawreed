@@ -52,7 +52,7 @@ export default function AboutModal({
           : t('checkForUpdates');
 
   return (
-    <div className="-m-6 bg-background p-6 text-start">
+    <div className="text-start">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <Logo size={30} />
@@ -89,7 +89,7 @@ export default function AboutModal({
           [t('aboutLanguages'), t('aboutLanguagesDetail')],
           [t('aboutDelivery'), t('aboutDeliveryDetail')],
         ].map(([value, label]) => (
-          <div key={value} className="rounded-lg border border p-3">
+          <div key={value}>
             <div className="text-xs font-semibold text-foreground">{value}</div>
             <div className="mt-1 text-[10px] text-muted-foreground">{label}</div>
           </div>
@@ -100,7 +100,7 @@ export default function AboutModal({
         <div className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
           <div className="flex min-w-0 items-center gap-2">
             {update.status === 'checking' && <Loader2 size={13} className="text-primary motion-safe:animate-spin" aria-hidden="true" />}
-            {update.status === 'current' && <CheckCircle2 size={14} className="text-emerald-600" />}
+            {update.status === 'current' && <CheckCircle2 size={14} className="text-success" />}
             {update.status === 'available' && <Download size={14} className="text-primary" />}
             {update.status === 'error' && <AlertCircle size={14} className="text-destructive" />}
             <span>{updateMessage}</span>
@@ -144,31 +144,31 @@ export default function AboutModal({
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
           <button
-            className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-primary hover:underline"
+            className="inline-flex cursor-pointer items-center gap-1 rounded-sm border-0 bg-transparent p-0 text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => void openUrl('https://kareemsafwat.com').catch(() => undefined)}
           >
-            kareemsafwat.com <ArrowUpRight size={12} />
+            kareemsafwat.com <ArrowUpRight size={12} aria-hidden="true" className="rtl:-scale-x-100" />
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
+            className="cursor-pointer rounded-sm border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed').catch(() => undefined)}
           >
             {t('viewRepo')}
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
+            className="cursor-pointer rounded-sm border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed/blob/main/LICENSE').catch(() => undefined)}
           >
             {t('mitLicense')}
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
+            className="cursor-pointer rounded-sm border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => void openLogsFolder().catch(() => undefined)}
           >
             {t('openLogsFolder')}
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
+            className="cursor-pointer rounded-sm border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed/issues/new').catch(() => undefined)}
           >
             {t('reportProblem')}
