@@ -93,23 +93,23 @@ export function ReviewItemsDialog({
     >
       <ResponsiveModalOverlay />
       <DialogPrimitive.Content
-        className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-ledger-line bg-background p-6 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+        className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border bg-background p-6 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
       >
         <div className="mb-1 flex items-start justify-between gap-4">
-          <ResponsiveModalTitle className="font-serif-display">{title}</ResponsiveModalTitle>
+          <ResponsiveModalTitle>{title}</ResponsiveModalTitle>
           <DialogPrimitive.Close
             aria-label={closeLabel}
-            className="rounded-md p-1.5 text-ledger-ink-faint transition hover:bg-ledger-surface-2 hover:text-ledger-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             <X size={15} aria-hidden="true" />
           </DialogPrimitive.Close>
         </div>
         <ResponsiveModalDescription>{detail}</ResponsiveModalDescription>
-        <div className="mt-3 grid grid-cols-[110px_minmax(0,1fr)_261px_90px] gap-2 border-b border-ledger-line px-3 pb-2">
-          <span className="text-xs font-semibold text-ledger-ink-dim">{sourceLabel}</span>
-          <span className="text-xs font-semibold text-ledger-ink-dim">{descriptionLabel}</span>
-          <span className="text-xs font-semibold text-ledger-ink-dim">{packageLabel}</span>
-          <span className="text-xs font-semibold text-ledger-ink-dim">{statusLabel}</span>
+        <div className="mt-3 grid grid-cols-[110px_minmax(0,1fr)_261px_90px] gap-2 border-b border px-3 pb-2">
+          <span className="text-xs font-semibold text-muted-foreground">{sourceLabel}</span>
+          <span className="text-xs font-semibold text-muted-foreground">{descriptionLabel}</span>
+          <span className="text-xs font-semibold text-muted-foreground">{packageLabel}</span>
+          <span className="text-xs font-semibold text-muted-foreground">{statusLabel}</span>
         </div>
         <List
           rowComponent={ReviewItemRow}
@@ -127,7 +127,7 @@ export function ReviewItemsDialog({
           >
             {previousLabel}
           </Button>
-          <span className="text-xs text-ledger-ink">{pageLabel}</span>
+          <span className="text-xs tabular-nums text-foreground">{pageLabel}</span>
           <Button
             size="sm"
             variant="ghost"

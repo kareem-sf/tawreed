@@ -39,10 +39,10 @@ export function PackageSummaryList({
         const share = totalItems ? workPackage.itemCount / totalItems : 0;
         const flagged = flaggedCodes.has(workPackage.code);
         return (
-          <li key={workPackage.code} className="border-b border-ledger-line last:border-b-0">
+          <li key={workPackage.code} className="border-b border last:border-b-0">
             <button
               type="button"
-              className="group w-full bg-transparent px-5 py-3.5 text-start text-inherit transition-colors duration-150 hover:bg-gold/6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-deep/70 aria-[flagged]:bg-[linear-gradient(90deg,rgba(226,116,90,0.08),transparent_60%)]"
+              className="group w-full bg-transparent px-5 py-3.5 text-start text-inherit hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[flagged]:bg-[linear-gradient(90deg,rgba(226,116,90,0.08),transparent_60%)]"
               aria-flagged={flagged ? 'true' : undefined}
               onClick={() => onSelect(workPackage)}
             >
@@ -50,32 +50,32 @@ export function PackageSummaryList({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-[13.5px] font-semibold text-ledger-ink">
+                      <p className="truncate text-[13.5px] font-semibold text-foreground">
                         {packageName(workPackage)}
                       </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ledger-ink-faint">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                         <span className="font-mono-figures">{workPackage.code}</span>
-                        <span className="text-ledger-ink-dim">{itemCountLabel(workPackage.itemCount)}</span>
-                        <span>{percentage.format(share)}</span>
+                        <span className="text-muted-foreground">{itemCountLabel(workPackage.itemCount)}</span>
+                        <span className="tabular-nums">{percentage.format(share)}</span>
                         {flagged && (
-                          <Badge variant="outline" className="border-ledger-danger/30 text-ledger-danger">
+                          <Badge variant="outline" className="border-destructive/30 text-destructive">
                             <AlertTriangle size={10} aria-hidden="true" /> {needsReviewLabel}
                           </Badge>
                         )}
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <span className="font-mono-figures text-end text-[13.5px] font-semibold text-ledger-ink">
+                      <span className="font-mono-figures text-end text-[13.5px] font-semibold text-foreground">
                         {compactNumber.format(workPackage.totalCost)}
                       </span>
                       <ChevronRight
                         aria-hidden="true"
-                        className="size-3 text-ledger-ink-faint transition-transform group-hover:translate-x-0.5 rtl:rotate-180 rtl:group-hover:-translate-x-0.5"
+                        className="size-3 text-muted-foreground rtl:rotate-180"
                       />
                     </div>
                   </div>
                   <div
-                    className="mt-2 h-1 overflow-hidden rounded-full bg-ledger-surface-2"
+                    className="mt-2 h-1 overflow-hidden rounded-full bg-muted"
                     role="progressbar"
                     aria-valuemin={0}
                     aria-valuemax={totalItems}
@@ -83,7 +83,7 @@ export function PackageSummaryList({
                     aria-label={`${packageName(workPackage)}: ${itemCountLabel(workPackage.itemCount)}`}
                   >
                     <div
-                      className={`h-full rounded-full ${workPackage.code === 'WP-99' ? 'bg-ledger-danger' : 'bg-gold'}`}
+                      className={`h-full rounded-full ${workPackage.code === 'WP-99' ? 'bg-destructive' : 'bg-primary'}`}
                       style={{ width: `${Math.max(2, Math.min(100, share * 100))}%` }}
                     />
                   </div>
