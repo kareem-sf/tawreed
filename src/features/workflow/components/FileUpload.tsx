@@ -83,10 +83,10 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
           exit={{ opacity: 0, y: -5 }}
           className="space-y-1.5"
         >
-          <h1 className="font-serif-display text-[20px] font-semibold tracking-[-0.01em] text-ledger-ink">
+          <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-foreground">
             {dragging ? t('releaseWorkbook') : t('selectTitle')}
           </h1>
-          <p className="mx-auto max-w-sm text-[11px] leading-5 text-ledger-ink-faint">
+          <p className="mx-auto max-w-sm text-[11px] leading-5 text-muted-foreground">
             {t('selectHint')}
           </p>
         </motion.div>
@@ -95,10 +95,9 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="mt-5 flex items-center gap-2 rounded-full px-5 py-2.5 text-[12px] font-semibold text-[#1c1408] shadow-lg transition-transform hover:-translate-y-0.5 active:translate-y-0"
+        className="mt-5 flex min-h-11 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-[#1c1408] shadow-lg hover:brightness-105 active:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground"
         style={{
-          background: 'linear-gradient(180deg, #f3c968, var(--gold))',
-          boxShadow: '0 8px 20px -6px rgba(232,181,74,0.5)',
+          background: 'var(--primary)',
         }}
         title={t('browseDetail')}
       >

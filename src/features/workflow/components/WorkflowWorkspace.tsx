@@ -60,12 +60,12 @@ export function WorkflowWorkspace({
           <BlurFade key="idle" className="flex h-full flex-col items-center justify-center gap-4 px-8">
             <FileUpload onFile={onFile} />
             {boot.first_run && (
-              <p className="mx-auto max-w-[390px] text-center text-xs text-ledger-ink-dim">
+              <p className="mx-auto max-w-[390px] text-center text-xs text-muted-foreground">
                 {t('welcomeBody', { dir: boot.data_dir })}
               </p>
             )}
             {state.error && (
-              <p role="alert" className="allow-select mx-auto max-w-[390px] text-center text-xs text-ledger-danger">
+              <p role="alert" className="allow-select mx-auto max-w-[390px] text-center text-xs text-destructive">
                 {state.error}
               </p>
             )}
@@ -81,18 +81,18 @@ export function WorkflowWorkspace({
               // There is deliberately no close button either.
               onEscapeKeyDown={(event) => event.preventDefault()}
               onPointerDownOutside={(event) => event.preventDefault()}
-              className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-ledger-line bg-background p-6 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+              className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border bg-background p-6 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
             >
-              <LockKeyhole className="h-8 w-8 text-gold-deep dark:text-gold" strokeWidth={1.6} aria-hidden="true" />
-              <ResponsiveModalTitle className="font-serif-display mt-4">{t('aiConsentTitle')}</ResponsiveModalTitle>
+              <LockKeyhole className="h-8 w-8 text-primary" strokeWidth={1.6} aria-hidden="true" />
+              <ResponsiveModalTitle className="mt-4">{t('aiConsentTitle')}</ResponsiveModalTitle>
               <ResponsiveModalDescription className="mt-1.5">{t('aiConsentBody')}</ResponsiveModalDescription>
-              <div className="mt-4 rounded-xl border border-ledger-line bg-ledger-surface-2 p-3 text-xs leading-5 text-ledger-ink-dim">
+              <div className="mt-4 rounded-xl border border bg-muted p-3 text-xs leading-5 text-muted-foreground">
                 {t('sharedFieldsSimple', {
                   count: state.pendingInspection.inspection.items.length,
                   provider: consentProvider,
                 })}
               </div>
-              <p className="mt-3 text-xs text-ledger-ink-dim">{t('aiConsentPrivacy')}</p>
+              <p className="mt-3 text-xs text-muted-foreground">{t('aiConsentPrivacy')}</p>
               <div className="mt-5 flex items-center justify-end gap-2">
                 <Button variant="ghost" onClick={() => onConsent(false)}>
                   {t('stayOffline')}
@@ -143,22 +143,22 @@ export function WorkflowWorkspace({
         {state.view === 'done' && state.output && (
           <BlurFade key="done" className="flex h-full flex-col items-center justify-center gap-3 px-8">
             <FileSpreadsheet
-              className="h-12 w-12 text-gold drop-shadow-[0_8px_20px_rgba(232,181,74,0.24)]"
+              className="h-12 w-12 text-primary drop-shadow-[0_8px_20px_rgba(232,181,74,0.24)]"
               strokeWidth={1.35}
               aria-hidden="true"
             />
-            <p className="font-serif-display text-sm font-semibold text-ledger-ink">{t('doneTitle')}</p>
-            <p className="text-sm font-semibold text-ledger-ink">{state.output.projectName} · {state.output.revisionLabel}</p>
-            <p className="allow-select mx-auto max-w-[430px] break-all text-center text-xs text-ledger-ink-dim">
+            <p className="text-sm font-semibold text-foreground">{t('doneTitle')}</p>
+            <p className="text-sm font-semibold text-foreground">{state.output.projectName} · {state.output.revisionLabel}</p>
+            <p className="allow-select mx-auto max-w-[430px] break-all text-center text-xs text-muted-foreground">
               {state.output.masterPath}
             </p>
             {state.error && (
-              <p role="alert" className="allow-select mx-auto max-w-[400px] text-center text-xs text-ledger-danger">
+              <p role="alert" className="allow-select mx-auto max-w-[400px] text-center text-xs text-destructive">
                 {state.error}
               </p>
             )}
             {openError && (
-              <p role="alert" className="allow-select mx-auto max-w-[400px] text-center text-xs text-ledger-danger">
+              <p role="alert" className="allow-select mx-auto max-w-[400px] text-center text-xs text-destructive">
                 {openError}
               </p>
             )}
