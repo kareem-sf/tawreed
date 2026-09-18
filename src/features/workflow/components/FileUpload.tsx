@@ -72,7 +72,7 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
         transition={{ type: 'spring', stiffness: 280, damping: 22 }}
         className="relative mb-5"
       >
-        <Logo size={68} className="relative drop-shadow-[0_10px_28px_rgba(232,181,74,0.24)]" />
+        <Logo size={68} />
       </motion.div>
 
       <AnimatePresence mode="wait">
@@ -95,7 +95,7 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="mt-5 flex min-h-11 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-[#1c1408] shadow-lg hover:brightness-105 active:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground"
+        className="mt-5 flex min-h-11 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:brightness-105 active:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
         style={{
           background: 'var(--primary)',
         }}
@@ -125,7 +125,7 @@ export default function FileUpload({ onFile }: { onFile: (file: File) => void })
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
-            className="absolute bottom-0 text-xs font-medium text-red-500 dark:text-red-400"
+            className="absolute bottom-0 text-xs font-medium text-destructive"
           >
             {error}
           </motion.p>
