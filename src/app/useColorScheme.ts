@@ -4,11 +4,8 @@ export type ColorSchemeSetting = 'auto' | 'light' | 'dark';
 export type ResolvedScheme = 'light' | 'dark';
 
 const OWN_KEY = 'tawreed-color-scheme';
-/** Mantine persisted its own copy under this key — adopt it once so users keep
- * their choice across the component migration, then we own OWN_KEY. */
+/** Previous attribute-based scheme persisted under this key — adopt it once so users keep their choice. */
 const LEGACY_MANTINE_KEY = 'mantine-color-scheme';
-/** Kept name: index.css, the dark: variant and tests key off this attribute. */
-const ATTRIBUTE = 'mantineColorScheme';
 
 function isSetting(raw: string | null): raw is ColorSchemeSetting {
   return raw === 'auto' || raw === 'light' || raw === 'dark';
@@ -45,10 +42,10 @@ function systemPrefersDark(): boolean {
 }
 
 export function applyResolvedScheme(scheme: ResolvedScheme): void {
-  document.documentElement.dataset[ATTRIBUTE] = scheme;
+  document.documentElement.classList.toggle('dark', scheme === 'dark');
 }
 
-/** Owns the color-scheme attribute previously owned by MantineProvider.
+/** Owns the .dark class. Persists locally; callers mirror the choice
  * Persists locally; callers mirror the choice to the Rust settings store
  * themselves so a failed write can roll the UI back. */
 export function useColorScheme() {

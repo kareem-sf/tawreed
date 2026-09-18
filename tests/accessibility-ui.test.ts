@@ -18,8 +18,7 @@ describe('accessible UI contracts', () => {
   it('keeps custom title-bar controls visibly focused', () => {
     const css = readSource('../src/index.css');
     expect(css).toContain('.titlebar-btn:focus-visible,\n.titlebar-nav:focus-visible');
-    expect(css).toMatch(/outline:\s*2px solid var\(--gold-deep\)/);
-    expect(css).toMatch(/--gold-deep:\s*#9a6700/);
+    expect(css).toMatch(/outline:\s*2px solid var\(--ring\)/);
     expect(css).toContain('@media (forced-colors: active)');
   });
 

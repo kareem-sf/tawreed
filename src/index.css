@@ -1,4 +1,5 @@
-/* Tailwind v4 — default theme tokens + utilities, layered; preflight skipped (Mantine owns the reset). */
+/* Tailwind v4 — default theme tokens + utilities, layered; preflight skipped
+   (the app paints its own reset on html/body/#root below). */
 @layer theme, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
@@ -6,8 +7,16 @@
    (dialog, popover, tooltip). See F1 decision in SPEC-ui-redesign.md. */
 @import "tw-animate-css";
 
-/* Sync Tailwind's dark: variant with the app color-scheme attribute. */
-@custom-variant dark (&:where([data-mantine-color-scheme=dark], [data-mantine-color-scheme=dark] *));
+/* shadcn standard: every border resolves to the border token unless
+   explicitly overridden. This is what lets canonical `border` classes
+   theme with the app instead of falling back to currentColor. */
+@layer base {
+  *,
+  ::after,
+  ::before {
+    border-color: var(--color-border);
+  }
+}
 
 html,
 body,
@@ -22,11 +31,7 @@ body {
   background: transparent;
   border-radius: 14px;
   user-select: none;
-  font-family: 'Public Sans', 'Segoe UI', system-ui, sans-serif;
-}
-
-.font-serif-display {
-  font-family: 'Domine', 'Segoe UI', system-ui, serif;
+  font-family: system-ui, sans-serif;
 }
 
 .font-mono-figures {
@@ -72,14 +77,8 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-[data-mantine-color-scheme='dark'] .app-frame {
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  /* Static warm gradient — zero GPU cost, replaces the particle canvas */
-  background: radial-gradient(130% 90% at 50% -10%, #191307 0%, #0a0a10 60%);
-}
-
-[data-mantine-color-scheme='light'] .app-frame {
-  background: #fafafa;
+.app-frame {
+  background: var(--background);
 }
 
 /* Custom titlebar */
@@ -146,7 +145,7 @@ body {
 .titlebar-btn:focus-visible,
 .titlebar-nav:focus-visible {
   opacity: 1;
-  outline: 2px solid var(--gold-deep);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
@@ -230,87 +229,53 @@ body {
 }
 
 :root {
-  --bg: #fafafa;
-  --surface: #ffffff;
-  --surface-2: #f1f1f2;
-  --ink: #18181b;
-  --ink-dim: #52525b;
-  --ink-faint: #a1a1aa;
-  --gold: #a17925;
-  --gold-deep: #9a6700;
-  --line: rgba(0, 0, 0, 0.08);
-  --line-soft: rgba(0, 0, 0, 0.05);
-  --danger: #c2472e;
-
-  /* shadcn/Spectrum token bridge — maps registry class names (bg-background,
-     text-muted-foreground, ring-ring, ...) onto the ledger palette so vendored
-     components theme with the app. No .dark class: dark values key off the
-     same data-mantine-color-scheme attribute the rest of the app uses. */
-  --background: var(--surface);
-  --foreground: var(--ink);
-  --primary: var(--gold-deep);
-  --primary-foreground: #ffffff;
-  --secondary: var(--surface-2);
-  --secondary-foreground: var(--ink);
-  --muted: var(--surface-2);
-  --muted-foreground: var(--ink-dim);
-  --accent: var(--surface-2);
-  --accent-foreground: var(--ink);
-  --destructive: var(--danger);
-  --destructive-foreground: #ffffff;
-  --border: var(--line);
-  --input: var(--line);
-  --ring: var(--gold-deep);
-  --popover: var(--surface);
-  --popover-foreground: var(--ink);
-
-  --legend: oklch(1 0 0);
-  --legend-foreground: oklch(0.141 0.005 285.823);
-  --legend-muted: oklch(0.967 0.001 286.375);
-  --legend-muted-foreground: oklch(0.552 0.016 285.938);
-  --legend-track: oklch(0.92 0.004 286.32);
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #52525b;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --destructive-foreground: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+  /* Default duration for the shimmer/spin keyframes below. */
+  --speed: 2s;
 }
 
-[data-mantine-color-scheme='dark'] {
-  --bg: #0a0a10;
-  --surface: #16161c;
-  --surface-2: #1e1e26;
-  --ink: #fafafa;
-  --ink-dim: #a1a1aa;
-  --ink-faint: #71717a;
-  --gold: #a17925;
-  --gold-deep: #9a6700;
-  --line: rgba(255, 255, 255, 0.09);
-  --line-soft: rgba(255, 255, 255, 0.05);
-  --danger: #e2745a;
-  --primary-foreground: #1c1408;
-  --destructive-foreground: #14100a;
-
-  --legend: oklch(0.21 0.006 285.885);
-  --legend-foreground: oklch(0.985 0 0);
-  --legend-muted: oklch(0.274 0.006 286.033);
-  --legend-muted-foreground: oklch(0.705 0.015 286.067);
-  --legend-track: oklch(0.274 0.006 286.033);
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #09090b;
+  --card-foreground: #fafafa;
+  --popover: #09090b;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #18181b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #f87171;
+  --destructive-foreground: #fafafa;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #71717a;
 }
 
 @theme inline {
-  --color-legend: var(--legend);
-  --color-legend-foreground: var(--legend-foreground);
-  --color-legend-muted: var(--legend-muted);
-  --color-legend-muted-foreground: var(--legend-muted-foreground);
-  --color-legend-track: var(--legend-track);
-
-  --color-gold: var(--gold);
-  --color-gold-deep: var(--gold-deep);
-  --color-ledger-bg: var(--bg);
-  --color-ledger-surface: var(--surface);
-  --color-ledger-surface-2: var(--surface-2);
-  --color-ledger-ink: var(--ink);
-  --color-ledger-ink-dim: var(--ink-dim);
-  --color-ledger-ink-faint: var(--ink-faint);
-  --color-ledger-line: var(--line);
-  --color-ledger-danger: var(--danger);
-
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-primary: var(--primary);
@@ -328,4 +293,6 @@ body {
   --color-ring: var(--ring);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
 }
