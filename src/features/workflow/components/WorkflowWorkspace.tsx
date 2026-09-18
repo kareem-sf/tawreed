@@ -143,7 +143,7 @@ export function WorkflowWorkspace({
         {state.view === 'done' && state.output && (
           <BlurFade key="done" className="flex h-full flex-col items-center justify-center gap-3 px-8">
             <FileSpreadsheet
-              className="h-12 w-12 text-primary drop-shadow-[0_8px_20px_rgba(232,181,74,0.24)]"
+              className="h-12 w-12 text-primary"
               strokeWidth={1.35}
               aria-hidden="true"
             />

@@ -26,7 +26,7 @@ interface ConfirmDialogProps {
 }
 
 /** Shared destructive-confirm dialog for the settings surfaces (remove-key,
- * revoke-grant). One place owns the narrow-panel + serif-title + destructive
+ * revoke-grant). One place owns the narrow-panel + compact-title + destructive
  * action language instead of pasting it per call site. */
 export function ConfirmDialog({
   open,

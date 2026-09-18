@@ -65,7 +65,7 @@ body {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(161, 121, 37, 0.58);
+  background: rgba(113, 113, 122, 0.58);
 }
 
 .app-frame {
@@ -184,25 +184,6 @@ body {
   animation: accordion-up 0.2s ease-out;
 }
 
-/* Magic UI — AnimatedShinyText */
-.shiny-text {
-  background: linear-gradient(
-    120deg,
-    rgba(120, 113, 108, 0.9) 40%,
-    rgba(232, 181, 74, 1) 50%,
-    rgba(120, 113, 108, 0.9) 60%
-  );
-  background-size: var(--shiny-width, 120px) 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shiny-sweep 2.2s linear infinite;
-}
-@keyframes shiny-sweep {
-  from { background-position: 0 0; }
-  to { background-position: calc(-1 * var(--shiny-width, 120px)) 0; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .animate-shimmer-slide,
   .animate-spin-around,
@@ -210,8 +191,7 @@ body {
   .animate-accordion-up,
   .animate-in,
   .animate-out,
-  .animate-pulse,
-  .shiny-text {
+  .animate-pulse {
     animation: none;
   }
 
