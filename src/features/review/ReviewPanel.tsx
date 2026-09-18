@@ -107,10 +107,10 @@ export default function ReviewPanel({
     <div className="flex h-full flex-col gap-3 px-4 pb-3">
       <header className="flex items-start justify-between gap-4 px-1">
         <div className="min-w-0">
-          <p className="font-serif-display truncate text-sm font-semibold text-ledger-ink">
+          <p className="truncate text-sm font-semibold text-foreground">
             {data.inspection.projectName}
           </p>
-          <p className="truncate text-xs text-ledger-ink-dim">
+          <p className="truncate text-xs text-muted-foreground">
             {data.fileName} · {t('summaryLine', {
               items: totalItems,
               packages: data.packages.length,
@@ -118,19 +118,19 @@ export default function ReviewPanel({
           </p>
         </div>
         <div className="shrink-0 text-end">
-          <p className="text-xs uppercase tracking-[0.09em] text-ledger-ink-dim">
+          <p className="text-xs uppercase tracking-[0.09em] text-muted-foreground">
             {t('totalValue')}
           </p>
           <NumberTicker
             value={grandTotal}
             locale={locale}
-            className="font-serif-display text-[24px] font-semibold text-gold-deep dark:text-gold"
+            className="text-[24px] font-semibold text-foreground"
           />
         </div>
       </header>
 
       <section
-        className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-ledger-line bg-ledger-surface shadow-sm"
+        className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border bg-card shadow-sm"
         aria-label={t('workPackage')}
       >
         <PackageSummaryList
@@ -146,7 +146,7 @@ export default function ReviewPanel({
       </section>
 
       {(hasErrors || reviewItemIds.size > 0) && (
-        <div className="flex items-center gap-2 rounded-xl border border-ledger-line bg-gold/8 px-3 py-2.5 text-xs text-gold-deep dark:text-[#f0d8a0]">
+        <div className="flex items-center gap-2 rounded-xl border border bg-primary/5 px-3 py-2.5 text-xs text-primary">
           <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
           <span>{t('itemsNeedReview', { count: reviewItemIds.size })}</span>
         </div>
@@ -155,7 +155,7 @@ export default function ReviewPanel({
       {data.aiSkipped > 0 && (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-xl border border-ledger-line bg-gold/8 px-3 py-2.5 text-xs text-gold-deep dark:text-[#f0d8a0]"
+          className="flex items-center gap-2 rounded-xl border border bg-primary/5 px-3 py-2.5 text-xs text-primary"
         >
           <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
           <span>{t('aiSkippedItems', { count: data.aiSkipped, total: totalItems })}</span>
@@ -163,7 +163,7 @@ export default function ReviewPanel({
       )}
 
       {error && (
-        <p role="alert" className="allow-select text-center text-xs text-ledger-danger">{error}</p>
+        <p role="alert" className="allow-select text-center text-xs text-destructive">{error}</p>
       )}
 
       <footer className="flex items-center justify-between gap-3">

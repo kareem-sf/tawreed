@@ -40,10 +40,10 @@ export function ReviewItemRow({
   return (
     <div
       style={style}
-      className="grid grid-cols-[110px_minmax(0,1fr)_261px_90px] items-center gap-2 border-b border-ledger-line px-3"
+      className="grid grid-cols-[110px_minmax(0,1fr)_261px_90px] items-center gap-2 border-b border px-3"
     >
-      <span className="font-mono-figures text-xs text-ledger-ink-faint">{sourceReference(item)}</span>
-      <span className="allow-select truncate text-xs text-ledger-ink">{item.description}</span>
+      <span className="font-mono-figures text-xs text-muted-foreground">{sourceReference(item)}</span>
+      <span className="allow-select truncate text-xs text-foreground">{item.description}</span>
       <ModelSelect
         ariaLabel={itemPackageLabel(item.id)}
         placeholder=""
@@ -53,7 +53,7 @@ export function ReviewItemRow({
           if (value) onClassificationChange(item.id, value);
         }}
       />
-      <span className={`text-xs ${needsReview ? 'text-ledger-danger' : 'text-ledger-ink-dim'}`}>
+      <span className={`text-xs ${needsReview ? 'text-destructive' : 'text-muted-foreground'}`}>
         {needsReview ? needsReviewLabel : checkedLabel}
       </span>
     </div>

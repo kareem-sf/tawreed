@@ -52,34 +52,34 @@ export default function AboutModal({
           : t('checkForUpdates');
 
   return (
-    <div className="-m-6 bg-ledger-bg p-6 text-start">
+    <div className="-m-6 bg-background p-6 text-start">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <Logo size={30} />
           <div>
             <DialogPrimitive.Title asChild>
-              <h2 className="font-serif-display text-base font-semibold text-ledger-ink">Tawreed</h2>
+              <h2 className="text-base font-semibold text-foreground">Tawreed</h2>
             </DialogPrimitive.Title>
-            <p className="text-xs text-ledger-ink-faint">v{version}</p>
+            <p className="text-xs text-muted-foreground">v{version}</p>
           </div>
         </div>
         <button
           type="button"
           onClick={onClose}
           aria-label={t('close')}
-          className="rounded-md p-1.5 text-ledger-ink-faint transition hover:bg-ledger-surface-2 hover:text-ledger-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           <X size={15} aria-hidden="true" />
         </button>
       </div>
 
-      <p className="mt-6 text-sm font-medium text-ledger-ink">
+      <p className="mt-6 text-sm font-medium text-foreground">
         {t('aboutHeadline')}
       </p>
-      <p className="mt-2 max-w-lg text-xs leading-5 text-ledger-ink-dim">
+      <p className="mt-2 max-w-lg text-xs leading-5 text-muted-foreground">
         {t('aboutBody')}
       </p>
-      <p className="mt-3 rounded-lg border border-ledger-line bg-ledger-surface-2 p-3 text-xs leading-5 text-ledger-ink-dim">
+      <p className="mt-3 rounded-lg border border bg-muted p-3 text-xs leading-5 text-muted-foreground">
         {t('aboutPrinciple')}
       </p>
 
@@ -89,20 +89,20 @@ export default function AboutModal({
           [t('aboutLanguages'), t('aboutLanguagesDetail')],
           [t('aboutDelivery'), t('aboutDeliveryDetail')],
         ].map(([value, label]) => (
-          <div key={value} className="rounded-lg border border-ledger-line p-3">
-            <div className="text-xs font-semibold text-ledger-ink">{value}</div>
-            <div className="mt-1 text-[10px] text-ledger-ink-faint">{label}</div>
+          <div key={value} className="rounded-lg border border p-3">
+            <div className="text-xs font-semibold text-foreground">{value}</div>
+            <div className="mt-1 text-[10px] text-muted-foreground">{label}</div>
           </div>
         ))}
       </div>
 
-      <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border-ledger-line p-3">
-        <div className="flex min-w-0 flex-col gap-1 text-xs text-ledger-ink-dim">
+      <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border p-3">
+        <div className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
           <div className="flex min-w-0 items-center gap-2">
-            {update.status === 'checking' && <Loader2 size={13} className="text-gold-deep motion-safe:animate-spin dark:text-gold" aria-hidden="true" />}
+            {update.status === 'checking' && <Loader2 size={13} className="text-primary motion-safe:animate-spin" aria-hidden="true" />}
             {update.status === 'current' && <CheckCircle2 size={14} className="text-emerald-600" />}
-            {update.status === 'available' && <Download size={14} className="text-gold-deep dark:text-gold" />}
-            {update.status === 'error' && <AlertCircle size={14} className="text-ledger-danger" />}
+            {update.status === 'available' && <Download size={14} className="text-primary" />}
+            {update.status === 'error' && <AlertCircle size={14} className="text-destructive" />}
             <span>{updateMessage}</span>
           </div>
           {update.status === 'available' && update.info.asset_sha256 && (
@@ -134,41 +134,41 @@ export default function AboutModal({
           </Button>
         )}
       </div>
-      {downloadFailed && <p className="mt-1 text-xs text-ledger-danger">{t('updateDownloadFailed')}</p>}
+      {downloadFailed && <p className="mt-1 text-xs text-destructive">{t('updateDownloadFailed')}</p>}
 
       <div className="mt-6">
         <Separator />
         <div className="pt-4">
-        <p className="text-sm font-semibold text-ledger-ink">
+        <p className="text-sm font-semibold text-foreground">
           {t('aboutCreatorLabel')} {t('aboutCreatorCredit')}
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
           <button
-            className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-gold-deep hover:underline dark:text-gold"
+            className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-primary hover:underline"
             onClick={() => void openUrl('https://kareemsafwat.com').catch(() => undefined)}
           >
             kareemsafwat.com <ArrowUpRight size={12} />
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
+            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed').catch(() => undefined)}
           >
             {t('viewRepo')}
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
+            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed/blob/main/LICENSE').catch(() => undefined)}
           >
             {t('mitLicense')}
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
+            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
             onClick={() => void openLogsFolder().catch(() => undefined)}
           >
             {t('openLogsFolder')}
           </button>
           <button
-            className="cursor-pointer border-0 bg-transparent p-0 text-ledger-ink-faint hover:text-ledger-ink hover:underline"
+            className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground hover:underline"
             onClick={() => void openUrl('https://github.com/kareem-sf/tawreed/issues/new').catch(() => undefined)}
           >
             {t('reportProblem')}
