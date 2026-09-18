@@ -67,7 +67,7 @@ export default function TitleBar({ onSettings, onHistory, updateAvailable, modal
     <div className="titlebar" data-tauri-drag-region>
       <div className="flex items-center gap-2" data-tauri-drag-region>
         <Logo size={18} />
-        <span className="font-serif-display text-[13px] font-semibold tracking-[-0.01em] text-ledger-ink">
+        <span className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">
           {t('appTitle')}
         </span>
       </div>
@@ -92,7 +92,7 @@ export default function TitleBar({ onSettings, onHistory, updateAvailable, modal
               {updateAvailable && (
                 <span
                   aria-hidden="true"
-                  className="absolute end-1 top-1 h-1.5 w-1.5 rounded-full bg-gold"
+                  className="absolute end-1 top-1 h-1.5 w-1.5 rounded-full bg-primary"
                 />
               )}
             </button>
@@ -104,7 +104,7 @@ export default function TitleBar({ onSettings, onHistory, updateAvailable, modal
           </TooltipContent>
         </Tooltip>
 
-        <div aria-hidden="true" className="mx-1.5 h-3.5 w-px bg-ledger-line" />
+        <div aria-hidden="true" className="mx-1.5 h-3.5 w-px bg-border" />
 
         <button className="titlebar-btn" onClick={() => runWindowAction('minimize')} aria-label={t('minimize')}>
           <Minus size={14} />

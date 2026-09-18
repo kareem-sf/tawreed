@@ -56,7 +56,7 @@ export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
           <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
           <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
           <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
-          <span className="ml-2 text-[11px] font-medium text-zinc-400">{t('demoFrameTitle')}</span>
+          <span className="ms-2 text-[11px] font-medium text-zinc-400">{t('demoFrameTitle')}</span>
         </div>
         <div className="pointer-events-none flex h-[380px] w-full flex-col overflow-hidden">
           <WorkflowWorkspace
@@ -83,7 +83,7 @@ export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
         </p>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-full border border-ledger-line px-3 py-1 text-xs font-medium text-ledger-ink-dim transition hover:border-gold-deep hover:text-gold-deep dark:hover:text-gold"
+          className="flex items-center gap-1.5 rounded-full border border px-3 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary"
           onClick={() => setRunId((value) => value + 1)}
         >
           <RotateCcw size={12} />

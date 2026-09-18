@@ -23,7 +23,7 @@ interface DialogShellProps {
 }
 
 const CENTER_PANEL =
-  'left-1/2 top-1/2 max-h-[85vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-ledger-line p-6 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95';
+  'left-1/2 top-1/2 max-h-[85vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border p-6 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95';
 
 const SHEET_PANEL =
   'inset-y-0 flex h-full w-[min(560px,92vw)] flex-col data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:duration-300 data-[state=closed]:duration-200';
@@ -69,7 +69,7 @@ export function DialogShell({
             {closeLabel && (
               <DialogPrimitive.Close
                 aria-label={closeLabel}
-                className="shrink-0 rounded-md p-1.5 text-ledger-ink-faint transition hover:bg-ledger-surface-2 hover:text-ledger-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="shrink-0 rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <X size={15} aria-hidden="true" />
               </DialogPrimitive.Close>

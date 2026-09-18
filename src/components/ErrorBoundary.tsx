@@ -39,8 +39,8 @@ export default class ErrorBoundary extends Component<Props, State> {
     return (
       <div className="app-frame relative">
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-          <p className="font-serif-display font-semibold text-ledger-ink">Something went wrong · حدث خطأ غير متوقع</p>
-          <p role="alert" className="allow-select mx-auto max-w-[420px] text-center text-xs text-ledger-danger">
+          <p className="font-semibold text-foreground">Something went wrong · حدث خطأ غير متوقع</p>
+          <p role="alert" className="allow-select mx-auto max-w-[420px] text-center text-xs text-destructive">
             {this.state.message}
           </p>
           <div className="flex items-center gap-2.5">
