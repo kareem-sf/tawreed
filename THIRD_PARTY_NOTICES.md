@@ -25,7 +25,7 @@ The committed models match the cited upstream files byte-for-byte.
 
 ## PDF.js
 
-- Component: `pdfjs-dist` 6.2.108
+- Component: `pdfjs-dist` 6.3.289
 - Source: https://github.com/mozilla/pdf.js
 - License: Apache License 2.0
 - Included files: character maps, standard fonts, ICC/WASM support assets, and

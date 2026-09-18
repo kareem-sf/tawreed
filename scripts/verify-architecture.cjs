@@ -108,8 +108,11 @@ function enforceBoundaries() {
     if (dependency in dependencies) errors.push(`Forbidden duplicate/unused UI dependency: ${dependency}`);
   }
 
+  // Note: components.json is INTENTIONAL here (SPEC-ui-redesign §10/R2): the shadcn
+  // CLI is unusable under strict-allow-scripts, so Spectrum components are vendored
+  // manually and components.json only documents the alias scheme (@/src/components,
+  // @/src/lib/utils). It installs nothing and runs nothing.
   const forbiddenPaths = [
-    'components.json',
     'src/components/charts',
     'src/components/ui/animated-list.tsx',
     'src/components/ui/animated-shiny-text.tsx',
@@ -139,14 +142,11 @@ function enforceBoundaries() {
   const budgets = new Map([
     ['src/App.tsx', 180],
     // +9 over 350 for chunked base64 decode (no 100MB atob blowup on file open).
-    // +34 for auto-pilot trust helpers (typed tolerant read/write, deny by default).
-    ['src/bridge.ts', 393],
+    ['src/bridge.ts', 359],
     // +5 over 500 for run-id concurrency guards and stale-resurrect protection.
     // +11 for hash-before-transfer (no 2× worker memory), fresh mode re-read at
     // drop time, and bilingual WP-99 fallback labels.
-    // +68 for the auto-pilot path (trust branch, grant re-check before publish,
-    // held-reason plumbing, direct-data generate override). Split on next growth.
-    ['src/features/workflow/useBoqWorkflow.ts', 584],
+    ['src/features/workflow/useBoqWorkflow.ts', 385],
     ['src/features/settings/ProviderSetup.tsx', 300],
     // +4 over the original 250 for the per-site react-hooks/set-state-in-effect
     // acknowledgements, +10 more for settings-write rollback (selectProvider /
@@ -178,9 +178,7 @@ function checkRustBudgets() {
     // +29 over 710 for credential-deletion honesty, corrupt-settings backup, and
     // log-line size bounding. Split store.rs if it grows again.
     // +36 for the per-second log flood guard and its policy test.
-    // +75 for auto-pilot trust-list validation and tests. Splitting settings
-    // validation into its own module is now due — next growth must split, not pin.
-    ['src-tauri/src/store.rs', 850],
+    ['src-tauri/src/store.rs', 799],
     // IPC-bounds validation (trace/string caps) on run history.
     ['src-tauri/src/commands/history.rs', 514],
     // Session↔revision binding plus artifact-count/total bundle caps.
