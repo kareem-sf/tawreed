@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { setSetting } from '../../bridge';
 import { currentDesktopWindow } from '../../platform/desktop/window';
 import { Button } from '../../components/ui/button';
-import { HeroButton } from '../../components/HeroButton';
 import Logo from '../../components/Logo';
 import { ProviderSetup } from '../settings/ProviderSetup';
 import LiveDemo from './LiveDemo';
@@ -226,13 +225,13 @@ export default function Onboarding({
                       : <Check size={14} aria-hidden="true" />}
                     {t('useOffline')}
                   </Button>
-                  <HeroButton
+                  <Button
                     disabled={finishing}
                     onClick={() => void finish(false)}
                   >
                     {finishing && <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />}
                     {t('finishSetup')}
-                  </HeroButton>
+                  </Button>
                 </div>
               </div>
             </section>

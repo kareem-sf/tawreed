@@ -7,7 +7,6 @@ import { ReviewItemsDialog } from './ReviewItemsDialog';
 import type { PipelineData } from '../workflow/types';
 import { NumberTicker } from '../../components/ui/number-ticker';
 import { Button } from '../../components/ui/button';
-import { HeroButton } from '../../components/HeroButton';
 
 interface Props {
   data: PipelineData;
@@ -163,23 +162,6 @@ export default function ReviewPanel({
         </div>
       )}
 
-      {data.heldReasons !== null && (
-        <div
-          role="status"
-          className="flex items-start gap-2 rounded-xl border border-ledger-line bg-gold/8 px-3 py-2.5 text-xs text-gold-deep dark:text-[#f0d8a0]"
-        >
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-          <span>
-            {t('autopilotHeld')}
-            <ul className="mt-1 list-disc ps-4">
-              {(ar ? data.heldReasons.ar : data.heldReasons.en).map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </span>
-        </div>
-      )}
-
       {error && (
         <p role="alert" className="allow-select text-center text-xs text-ledger-danger">{error}</p>
       )}
@@ -199,7 +181,7 @@ export default function ReviewPanel({
               ? t('reviewCountItems', { count: reviewItemIds.size })
               : t('reviewItems')}
           </Button>
-          <HeroButton
+          <Button
             size="sm"
             disabled={busy || hasErrors}
             onClick={onGenerate}
@@ -210,7 +192,7 @@ export default function ReviewPanel({
               : retryingPublication
                 ? t('retryPublish')
                 : t('approveGenerate')}
-          </HeroButton>
+          </Button>
         </div>
       </footer>
 

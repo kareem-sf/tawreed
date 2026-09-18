@@ -10,7 +10,6 @@ import ReviewPanel from '../../review/ReviewPanel';
 import WorkLoader from '../../../components/WorkLoader';
 import { BlurFade } from '../../../components/ui/blur-fade';
 import { Button } from '../../../components/ui/button';
-import { HeroButton } from '../../../components/HeroButton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip';
 import {
   ResponsiveModal,
@@ -94,14 +93,13 @@ export function WorkflowWorkspace({
                 })}
               </div>
               <p className="mt-3 text-xs text-ledger-ink-dim">{t('aiConsentPrivacy')}</p>
-              <p className="mt-1 text-xs text-ledger-ink-dim">{t('autopilotTip')}</p>
               <div className="mt-5 flex items-center justify-end gap-2">
                 <Button variant="ghost" onClick={() => onConsent(false)}>
                   {t('stayOffline')}
                 </Button>
-                <HeroButton onClick={() => onConsent(true)}>
+                <Button onClick={() => onConsent(true)}>
                   {t('improvePackages')}
-                </HeroButton>
+                </Button>
               </div>
             </DialogPrimitive.Content>
           </ResponsiveModal>
@@ -113,7 +111,6 @@ export function WorkflowWorkspace({
               title={state.busyMessage}
               subtitle={t('busyReassurance')}
               progress={state.busyProgress}
-              orbState="working"
             />
             <div className="mt-4">
               <Button
@@ -166,7 +163,7 @@ export function WorkflowWorkspace({
               </p>
             )}
             <div className="flex items-center gap-2.5">
-              <Tooltip delayDuration={180}>
+              <Tooltip delayDuration={400}>
                 <TooltipTrigger asChild>
                   <Button
                     size="sm"
@@ -182,7 +179,7 @@ export function WorkflowWorkspace({
                 </TooltipTrigger>
                 <TooltipContent>{t('openWorkbookDetail')}</TooltipContent>
               </Tooltip>
-              <Tooltip delayDuration={180}>
+              <Tooltip delayDuration={400}>
                 <TooltipTrigger asChild>
                   <Button
                     size="sm"
