@@ -16,7 +16,6 @@ interface Props {
 }
 
 const TAB_LIST = 'w-full';
-const TAB_TRIGGER = 'flex-1';
 
 export default function SettingsModal({
   hasKey,
@@ -35,10 +34,10 @@ export default function SettingsModal({
 
       <Tabs defaultValue="general">
         <TabsList className={TAB_LIST}>
-          <TabsTrigger value="general" className={TAB_TRIGGER}>
+          <TabsTrigger value="general">
             {t('settingsTabGeneral')}
           </TabsTrigger>
-          <TabsTrigger value="connection" className={TAB_TRIGGER}>
+          <TabsTrigger value="connection">
             {t('connection')}
           </TabsTrigger>
         </TabsList>

@@ -60,9 +60,9 @@ export function GeneralPreferences() {
       <section className="py-3">
         <p className="mb-2 text-[13px] font-semibold text-foreground">{t('language')}</p>
         <Tabs value={i18n.language === 'ar' ? 'ar' : 'en'} onValueChange={(value) => void changeLanguage(value)}>
-          <TabsList variant="segmented" className="grid-cols-2">
-            <TabsTrigger variant="segmented" value="en">English</TabsTrigger>
-            <TabsTrigger variant="segmented" value="ar">العربية</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="en">English</TabsTrigger>
+            <TabsTrigger value="ar">العربية</TabsTrigger>
           </TabsList>
         </Tabs>
       </section>
@@ -70,10 +70,10 @@ export function GeneralPreferences() {
       <section className="py-3">
         <p className="mb-2 text-[13px] font-semibold text-foreground">{t('appearance')}</p>
         <Tabs value={themeSetting} onValueChange={changeTheme}>
-          <TabsList variant="segmented" className="grid-cols-3">
-            <TabsTrigger variant="segmented" value="auto">{t('systemTheme')}</TabsTrigger>
-            <TabsTrigger variant="segmented" value="light">{t('lightTheme')}</TabsTrigger>
-            <TabsTrigger variant="segmented" value="dark">{t('darkTheme')}</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="auto">{t('systemTheme')}</TabsTrigger>
+            <TabsTrigger value="light">{t('lightTheme')}</TabsTrigger>
+            <TabsTrigger value="dark">{t('darkTheme')}</TabsTrigger>
           </TabsList>
         </Tabs>
       </section>
