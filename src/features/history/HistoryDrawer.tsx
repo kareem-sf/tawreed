@@ -36,7 +36,7 @@ function RowAction({
           ? 'bg-primary text-primary-foreground'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground',
         !filled && tone === 'primary' && 'text-primary hover:text-primary',
-        !filled && tone === 'green' && 'text-emerald-600 hover:text-emerald-600 dark:text-emerald-400 dark:hover:text-emerald-400',
+        !filled && tone === 'green' && 'text-success hover:text-success',
       )}
     >
       {children}
@@ -134,15 +134,10 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
             return (
               <tr key={run.id} className="border-b border hover:bg-muted/60">
                 <TableCell>
-                  <Tooltip delayDuration={400}>
-                    <TooltipTrigger asChild>
-                      <div className="whitespace-nowrap text-[10px] tabular-nums leading-4 text-zinc-500">
-                        <div>{datePart}</div>
-                        <div>{timePart}</div>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>{dateLabel}</TooltipContent>
-                  </Tooltip>
+                  <div className="whitespace-nowrap text-[10px] tabular-nums leading-4 text-muted-foreground" title={dateLabel}>
+                    <div>{datePart}</div>
+                    <div>{timePart}</div>
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Tooltip delayDuration={400}>
@@ -157,20 +152,15 @@ export default function HistoryDrawer({ opened }: { opened: boolean }) {
                   </Tooltip>
                 </TableCell>
                 <TableCell>
-                  <Tooltip delayDuration={400}>
-                    <TooltipTrigger asChild>
-                      <span className="whitespace-nowrap text-[11px] tabular-nums text-zinc-600 dark:text-zinc-300">
-                        {run.itemCount} → {run.packageCount}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{t('historyResultDetail', { items: run.itemCount, packages: run.packageCount })}</TooltipContent>
-                  </Tooltip>
+                  <span className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground" title={t('historyResultDetail', { items: run.itemCount, packages: run.packageCount })}>
+                    {run.itemCount} → {run.packageCount}
+                  </span>
                 </TableCell>
                 <TableCell>
                   {run.llmUsed ? (
                     <Tooltip delayDuration={400}>
                       <TooltipTrigger asChild>
-                        <Badge variant="outline" className="border-violet-500/30 font-bold text-violet-600 dark:text-violet-400">
+                        <Badge variant="outline" className="border-primary/30 font-bold text-primary">
                           <Sparkles className="h-3 w-3" aria-hidden="true" /> AI
                         </Badge>
                       </TooltipTrigger>

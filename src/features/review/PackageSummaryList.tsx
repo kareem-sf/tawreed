@@ -42,7 +42,7 @@ export function PackageSummaryList({
           <li key={workPackage.code} className="border-b border last:border-b-0">
             <button
               type="button"
-              className="group w-full bg-transparent px-5 py-3.5 text-start text-inherit hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[flagged]:bg-[linear-gradient(90deg,rgba(226,116,90,0.08),transparent_60%)]"
+              className="group w-full bg-transparent px-5 py-3.5 text-start text-inherit hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[flagged]:bg-destructive/8"
               aria-flagged={flagged ? 'true' : undefined}
               onClick={() => onSelect(workPackage)}
             >

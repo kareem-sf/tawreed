@@ -7,7 +7,7 @@ function ItemGroup({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-xl border border-ledger-line bg-ledger-surface',
+        'overflow-hidden rounded-xl border bg-card',
         className,
       )}
       {...props}
@@ -19,7 +19,7 @@ function ItemSeparator({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       aria-hidden="true"
-      className={cn('h-px bg-ledger-line', className)}
+      className={cn('h-px bg-border', className)}
       {...props}
     />
   );
@@ -29,7 +29,7 @@ const itemVariants = cva('flex w-full items-center gap-3 px-4 py-3 text-start', 
   variants: {
     variant: {
       default: 'bg-transparent',
-      muted: 'bg-ledger-surface-2/60',
+      muted: 'bg-muted/60',
     },
     size: {
       default: 'min-h-12',
@@ -58,9 +58,9 @@ const itemMediaVariants = cva(
   {
     variants: {
       variant: {
-        default: 'size-8 rounded-lg bg-ledger-surface-2 text-ledger-ink-dim [&_svg]:size-4',
-        icon: 'size-8 rounded-lg bg-ledger-surface-2 text-ledger-ink-dim [&_svg]:size-4',
-        image: 'size-10 rounded-lg [&_img]:size-full [&_img]:object-cover',
+        default: 'size-8 rounded-lg bg-muted text-muted-foreground [&_svg]:size-4',
+        icon: 'size-8 rounded-lg bg-muted text-muted-foreground [&_svg]:size-4',
+        image: 'size-10 rounded-lg outline-1 -outline-offset-1 outline-border [&_img]:size-full [&_img]:object-cover',
       },
     },
     defaultVariants: {
@@ -88,7 +88,7 @@ function ItemContent({ className, ...props }: React.ComponentProps<'div'>) {
 function ItemTitle({ className, ...props }: React.ComponentProps<'p'>) {
   return (
     <p
-      className={cn('truncate text-xs font-medium text-ledger-ink', className)}
+      className={cn('truncate text-xs font-medium text-foreground', className)}
       {...props}
     />
   );
@@ -97,7 +97,7 @@ function ItemTitle({ className, ...props }: React.ComponentProps<'p'>) {
 function ItemDescription({ className, ...props }: React.ComponentProps<'p'>) {
   return (
     <p
-      className={cn('truncate text-[11px] text-ledger-ink-dim', className)}
+      className={cn('truncate text-[11px] text-muted-foreground', className)}
       {...props}
     />
   );
@@ -115,7 +115,7 @@ function ItemActions({ className, ...props }: React.ComponentProps<'div'>) {
 function ItemHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
-      className={cn('px-4 pb-1 pt-3 text-[11px] font-semibold text-ledger-ink-dim', className)}
+      className={cn('px-4 pb-1 pt-3 text-[11px] font-semibold text-muted-foreground', className)}
       {...props}
     />
   );
@@ -124,7 +124,7 @@ function ItemHeader({ className, ...props }: React.ComponentProps<'div'>) {
 function ItemFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
-      className={cn('border-t border-ledger-line px-4 py-2 text-[11px] text-ledger-ink-dim', className)}
+      className={cn('border-t px-4 py-2 text-[11px] text-muted-foreground', className)}
       {...props}
     />
   );

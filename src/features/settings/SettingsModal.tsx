@@ -1,8 +1,7 @@
-import { HardDrive, PlayCircle } from 'lucide-react';
+import { Info, PlayCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/button';
-import { Separator } from '../../components/ui/separator';
-import { AutopilotSetup } from './AutopilotSetup';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { GeneralPreferences } from './GeneralPreferences';
 import { ProviderSetup } from './ProviderSetup';
 
@@ -15,6 +14,9 @@ interface Props {
   onOpenAbout: () => void;
   onRunOnboarding: () => void;
 }
+
+const TAB_LIST = 'w-full';
+const TAB_TRIGGER = 'flex-1';
 
 export default function SettingsModal({
   hasKey,
@@ -29,47 +31,56 @@ export default function SettingsModal({
 
   return (
     <div className="space-y-5">
-      <p className="text-xs text-ledger-ink-dim">{t('settingsSimpleDetail')}</p>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">{t('settingsSimpleDetail')}</p>
 
-      <GeneralPreferences />
+      <Tabs defaultValue="general">
+        <TabsList className={TAB_LIST}>
+          <TabsTrigger value="general" className={TAB_TRIGGER}>
+            {t('settingsTabGeneral')}
+          </TabsTrigger>
+          <TabsTrigger value="connection" className={TAB_TRIGGER}>
+            {t('connection')}
+          </TabsTrigger>
+        </TabsList>
+        {/*
+          forceMount keeps every panel mounted so half-typed keys and
+          in-flight provider status survive tab switches; inactive panels
+          stay hidden via data-state.
+        */}
+        <TabsContent value="general" forceMount className="mt-5 data-[state=inactive]:hidden">
+          <GeneralPreferences />
+        </TabsContent>
+        <TabsContent value="connection" forceMount className="mt-5 data-[state=inactive]:hidden">
+          <p className="mb-3 text-[13px] leading-relaxed text-muted-foreground">{t('connectionDetail')}</p>
+          <ProviderSetup
+            hasKey={hasKey}
+            hasCompatibleKey={hasCompatibleKey}
+            hasGeminiKey={hasGeminiKey}
+            hasGrokKey={hasGrokKey}
+            onConfigured={onProviderChanged}
+          />
+        </TabsContent>
+      </Tabs>
 
-      <section>
-        <p className="text-xs font-semibold text-ledger-ink">{t('autopilotTitle')}</p>
-        <div className="mt-2">
-          <AutopilotSetup />
-        </div>
-      </section>
-
-      <section>
-        <p className="text-xs font-semibold text-ledger-ink">{t('connection')}</p>
-        <p className="mb-2 mt-0.5 text-xs text-ledger-ink-dim">{t('connectionDetail')}</p>
-        <ProviderSetup
-          hasKey={hasKey}
-          hasCompatibleKey={hasCompatibleKey}
-          hasGeminiKey={hasGeminiKey}
-          hasGrokKey={hasGrokKey}
-          onConfigured={onProviderChanged}
-        />
-      </section>
-
-      <div>
-        <Separator />
-        <div className="grid grid-cols-2 gap-2 pt-4">
+      <div className="flex items-center gap-4 pt-1">
         <Button
-          variant="secondary"
+          variant="link"
+          size="sm"
+          className="h-auto p-0"
           onClick={onRunOnboarding}
         >
           <PlayCircle size={14} aria-hidden="true" />
           {t('viewGuide')}
         </Button>
         <Button
-          variant="secondary"
+          variant="link"
+          size="sm"
+          className="h-auto p-0"
           onClick={onOpenAbout}
         >
-          <HardDrive size={14} aria-hidden="true" />
+          <Info size={14} aria-hidden="true" />
           {t('about')}
         </Button>
-        </div>
       </div>
     </div>
   );

@@ -1,5 +1,11 @@
 # SPEC — Tawreed Minimalist UI Redesign (Spectrum UI + motion)
 
+> **RETIRED 2026-09-18** by the shadcn-only design-system overhaul
+> (`docs/superpowers/specs/2026-09-18-design-system-overhaul-design.md`).
+> Mantine, gold/Domine brand, AiOrb/HeroButton, auto-pilot, and the
+> `data-mantine-color-scheme` mechanism below are all excised. Kept as
+> migration history — do not treat as current spec.
+
 ## 1. Goal
 
 Redesign Tawreed's desktop UI to a minimalist visual language, migrating

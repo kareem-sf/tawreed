@@ -210,47 +210,6 @@ pub fn record_run(entry: RunEntry) -> Result<i64, String> {
     Ok(run_id)
 }
 
-/// Per-item classification provenance, optionally narrowed to one run or one source.
-/// `source = "user"` is every item a human re-assigned during review - the labelled
-/// examples the evaluation harness consumes.
-#[tauri::command]
-pub fn list_run_classifications(
-    run_id: Option<i64>,
-    source: Option<String>,
-) -> Result<Vec<Value>, String> {
-    if let Some(source) = source.as_deref() {
-        if !matches!(source, "heuristic" | "llm" | "fallback" | "memory" | "user") {
-            return Err("Invalid classification source".into());
-        }
-    }
-    let conn = store::open_db()?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT run_id, item_id, description, package_code, source, confidence
-             FROM run_classifications
-             WHERE (?1 IS NULL OR run_id = ?1) AND (?2 IS NULL OR source = ?2)
-             ORDER BY run_id DESC, item_id ASC LIMIT 50000",
-        )
-        .map_err(|e| format!("prepare: {e}"))?;
-    let rows = stmt
-        .query_map(rusqlite::params![run_id, source], |r| {
-            Ok(json!({
-                "runId": r.get::<_, i64>(0)?,
-                "itemId": r.get::<_, i64>(1)?,
-                "description": r.get::<_, String>(2)?,
-                "packageCode": r.get::<_, String>(3)?,
-                "source": r.get::<_, String>(4)?,
-                "confidence": r.get::<_, f64>(5)?,
-            }))
-        })
-        .map_err(|e| format!("query run classifications: {e}"))?;
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| format!("row: {e}"))?);
-    }
-    Ok(out)
-}
-
 #[tauri::command]
 pub fn list_runs() -> Result<Vec<Value>, String> {
     let conn = store::open_db()?;

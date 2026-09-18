@@ -118,7 +118,7 @@ export default function ReviewPanel({
           </p>
         </div>
         <div className="shrink-0 text-end">
-          <p className="text-xs uppercase tracking-[0.09em] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground">
             {t('totalValue')}
           </p>
           <NumberTicker
@@ -130,7 +130,7 @@ export default function ReviewPanel({
       </header>
 
       <section
-        className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border bg-card shadow-sm"
+        className="min-h-0 flex-1 overflow-y-auto rounded-2xl border bg-card"
         aria-label={t('workPackage')}
       >
         <PackageSummaryList
@@ -145,20 +145,20 @@ export default function ReviewPanel({
           />
       </section>
 
-      {(hasErrors || reviewItemIds.size > 0) && (
-        <div className="flex items-center gap-2 rounded-xl border border bg-primary/5 px-3 py-2.5 text-xs text-primary">
-          <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
-          <span>{t('itemsNeedReview', { count: reviewItemIds.size })}</span>
-        </div>
-      )}
-
-      {data.aiSkipped > 0 && (
+      {(hasErrors || reviewItemIds.size > 0 || data.aiSkipped > 0) && (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-xl border border bg-primary/5 px-3 py-2.5 text-xs text-primary"
+          className="flex items-center gap-2 rounded-xl border bg-primary/5 px-3 py-2.5 text-xs text-primary"
         >
           <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
-          <span>{t('aiSkippedItems', { count: data.aiSkipped, total: totalItems })}</span>
+          <span className="space-y-0.5">
+            {(hasErrors || reviewItemIds.size > 0) && (
+              <span className="block">{t('itemsNeedReview', { count: reviewItemIds.size })}</span>
+            )}
+            {data.aiSkipped > 0 && (
+              <span className="block">{t('aiSkippedItems', { count: data.aiSkipped, total: totalItems })}</span>
+            )}
+          </span>
         </div>
       )}
 

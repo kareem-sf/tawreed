@@ -74,7 +74,7 @@ body {
   flex-direction: column;
   border-radius: 14px;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--color-border);
 }
 
 .app-frame {
@@ -112,7 +112,7 @@ body {
 
 .titlebar-btn:hover {
   opacity: 1;
-  background: rgba(128, 128, 128, 0.15);
+  background: color-mix(in srgb, var(--muted-foreground) 15%, transparent);
 }
 
 .titlebar-btn.close:hover {
@@ -139,7 +139,7 @@ body {
 
 .titlebar-nav:hover {
   opacity: 1;
-  background: rgba(128, 128, 128, 0.12);
+  background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
 }
 
 .titlebar-btn:focus-visible,
@@ -226,6 +226,7 @@ body {
   --accent-foreground: #18181b;
   --destructive: #dc2626;
   --destructive-foreground: #fafafa;
+  --success: #059669;
   --border: #e4e4e7;
   --input: #e4e4e7;
   --ring: #a1a1aa;
@@ -250,6 +251,7 @@ body {
   --accent-foreground: #fafafa;
   --destructive: #f87171;
   --destructive-foreground: #fafafa;
+  --success: #34d399;
   --border: #27272a;
   --input: #27272a;
   --ring: #71717a;
@@ -268,6 +270,7 @@ body {
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

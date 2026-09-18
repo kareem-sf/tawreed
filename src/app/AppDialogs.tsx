@@ -27,7 +27,7 @@ export function AppDialogs({
   onRunOnboarding,
   onCheckUpdate,
 }: Props) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
 
   return (
     <>
@@ -74,7 +74,7 @@ export function AppDialogs({
         onClose={() => onChange(null)}
         title={t('history')}
         closeLabel={t('close')}
-        side={i18n.language === 'ar' ? 'left' : 'right'}
+        side="end"
       >
         <HistoryDrawer opened={active === 'history'} />
       </DialogShell>

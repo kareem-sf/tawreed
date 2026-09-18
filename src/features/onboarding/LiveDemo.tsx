@@ -51,12 +51,12 @@ export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
 
   return (
     <div className="mt-5">
-      <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-white/10 dark:bg-zinc-950">
-        <div className="flex h-8 items-center gap-1.5 border-b border-zinc-100 px-3 dark:border-white/10">
-          <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
-          <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
-          <span className="size-2.5 rounded-full bg-zinc-200 dark:bg-white/10" />
-          <span className="ms-2 text-[11px] font-medium text-zinc-400">{t('demoFrameTitle')}</span>
+      <div className="relative overflow-hidden rounded-2xl border bg-card">
+        <div className="flex h-8 items-center gap-1.5 border-b px-3">
+          <span className="size-2.5 rounded-full bg-muted" />
+          <span className="size-2.5 rounded-full bg-muted" />
+          <span className="size-2.5 rounded-full bg-muted" />
+          <span className="ms-2 text-[11px] font-medium text-muted-foreground">{t('demoFrameTitle')}</span>
         </div>
         <div className="pointer-events-none flex h-[380px] w-full flex-col overflow-hidden">
           <WorkflowWorkspace
@@ -71,19 +71,19 @@ export default function LiveDemo({ lang }: { lang: 'en' | 'ar' }) {
           />
         </div>
         {caption && (
-          <div className="absolute inset-x-3 bottom-3 text-center text-xs font-medium text-zinc-700 dark:text-zinc-200">
+          <div className="absolute inset-x-3 bottom-3 text-center text-xs font-medium text-muted-foreground">
             {caption}
           </div>
         )}
       </div>
 
       <div className="mt-3 flex items-center justify-between">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted-foreground">
           {t('demoCaption')}
         </p>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-full border border px-3 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary"
+          className="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           onClick={() => setRunId((value) => value + 1)}
         >
           <RotateCcw size={12} />
