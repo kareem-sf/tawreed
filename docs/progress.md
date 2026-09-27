@@ -203,3 +203,8 @@ machine.
   release executable was run from the build folder on a scratch data folder: it started its service, the page
   listed the scratch project through the proxy, Arabic rendered in Thmanyah Sans right to left, and closing or
   killing the app stopped the service. The installer itself was built but not installed on this machine.
+
+## 27 September 2026: Grok subscription dropped
+
+- At the engineer's request, the Grok subscription is out of scope; the ChatGPT subscription through Codex stays.
+  xAI API keys are unaffected.
