@@ -18,7 +18,7 @@ service/   Python 3.12, FastAPI, SQLAlchemy 2 + Alembic (SQLite), Pydantic AI
     ledger/      the immutable item ledger and the extractor that applies an agent-proposed layout
     packages/    package plans, packages, assignments, checked operations, rule memory
     decisions/   gates: overlap, plan, uncertain assignment, publish, consent, questions to the engineer
-    agent/       the agent runtime, its tools and instructions, the MCP bridge for subscription clients
+    agent/       the agent runtime, its tools and instructions, the MCP endpoint the Codex client uses
     publish/     workbook builders, coverage and totals checks, atomic revisions with a manifest
     api/         HTTP routes per module
   tests/
@@ -67,9 +67,13 @@ Each domain module owns its models, its service functions and the agent tools th
 ### Providers
 
 - API keys: Pydantic AI runs the tool loop against the chosen model.
-- Subscription: Tawreed runs the official Codex client non-interactively in an empty working folder,
-  with its own shell, file and web tools turned off and Tawreed's MCP bridge as the only tool server. The same tool
-  definitions serve both paths.
+- ChatGPT subscription: Tawreed runs the official Codex client (`codex exec`) for each turn, in an empty folder with
+  a read-only sandbox, without the engineer's Codex settings, rules or MCP servers, and with its own shell, command,
+  file, image, sub-agent, app, plugin, browser and web tools off. The service serves the same tool functions over
+  MCP at `/mcp`; each run gets a one-time token, passed to Codex in an environment variable, and the endpoint
+  answers nothing else. The endpoint is marked required (Codex waits for it, so its tools are searchable from the
+  start) and its tools approved (so they run without a prompt no one would answer). The prompt goes in on
+  standard input. A model check runs the same way against `/mcp-check`.
 
 ## The installed app
 
