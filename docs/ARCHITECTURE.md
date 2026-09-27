@@ -66,7 +66,7 @@ window and drag/drop behavior is exposed through the desktop adapter.
 
 The engine is UI-independent. `shared/types.ts` is the contract used by the
 engine, workers, UI, and Rust serialization boundary. Engine code must not
-import React, Mantine, Tauri, or feature modules.
+import React, Tauri, UI primitives, or feature modules.
 
 ## Workflow and state
 

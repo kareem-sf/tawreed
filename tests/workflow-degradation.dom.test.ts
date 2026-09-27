@@ -50,8 +50,6 @@ const classifyPlan = vi.fn();
 
 vi.mock('../src/bridge', () => ({
   appLog: vi.fn(), discardRevision: vi.fn().mockResolvedValue(undefined), getSettings: vi.fn().mockResolvedValue({}),
-  getAutopilotTrust: vi.fn().mockResolvedValue([]),
-  findAutopilotGrant: () => null,
   listClassificationMemory: vi.fn().mockResolvedValue([]),
   makeCodexTransport: () => vi.fn(), makeCompatibleTransport: () => vi.fn(),
   makeGeminiTransport: () => vi.fn(), makeGrokTransport: () => vi.fn(),

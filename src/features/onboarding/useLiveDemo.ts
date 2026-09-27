@@ -92,8 +92,6 @@ export function useLiveDemo(active: boolean, runId: number) {
         fileName: 'demo-boq.csv',
         fileHash: 'live-demo',
         startedAt,
-        autoPilot: null,
-        heldReasons: null,
       };
       dispatch({ type: 'showReview', data });
       await delay(1000, signal);

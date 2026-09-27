@@ -20,9 +20,33 @@ updates:
     ignore:
       - dependency-name: "@e965/xlsx"
         update-types: [version-update:semver-major]
-      - dependency-name: "@eslint/js"
+      - dependency-name: "@radix-ui/react-accordion"
         update-types: [version-update:semver-major]
-      - dependency-name: "@mantine/core"
+      - dependency-name: "@radix-ui/react-alert-dialog"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-dialog"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-label"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-popover"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-progress"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-radio-group"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-select"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-separator"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-slot"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-tabs"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@radix-ui/react-tooltip"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@eslint/js"
         update-types: [version-update:semver-major]
       - dependency-name: "@playwright/test"
         update-types: [version-update:semver-major]
@@ -44,7 +68,11 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: "@vitest/coverage-v8"
         update-types: [version-update:semver-major]
+      - dependency-name: "class-variance-authority"
+        update-types: [version-update:semver-major]
       - dependency-name: "clsx"
+        update-types: [version-update:semver-major]
+      - dependency-name: "cmdk"
         update-types: [version-update:semver-major]
       - dependency-name: "edge-tts-universal"
         update-types: [version-update:semver-major]
@@ -60,7 +88,11 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: "jsdom"
         update-types: [version-update:semver-major]
+      - dependency-name: "liquid-gooey"
+        update-types: [version-update:semver-major]
       - dependency-name: "lucide-react"
+        update-types: [version-update:semver-major]
+      - dependency-name: "metal-fx"
         update-types: [version-update:semver-major]
       - dependency-name: "motion"
         update-types: [version-update:semver-major]
@@ -77,6 +109,10 @@ updates:
       - dependency-name: "tailwind-merge"
         update-types: [version-update:semver-major]
       - dependency-name: "tailwindcss"
+        update-types: [version-update:semver-major]
+      - dependency-name: "thinking-orbs"
+        update-types: [version-update:semver-major]
+      - dependency-name: "tw-animate-css"
         update-types: [version-update:semver-major]
       - dependency-name: "typescript"
         update-types: [version-update:semver-major]

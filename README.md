@@ -12,22 +12,12 @@ requiring a fixed client template.
 2. Uses deterministic document intelligence and optional, explicitly approved
    AI assistance to propose work-package assignments.
 3. Presents every assignment for human review while preserving source
-   quantities and traceability — unless the project is trusted for auto-pilot
-   (see below), in which case machine-clean runs publish unattended.
+   quantities and traceability.
 4. Publishes one master workbook plus standalone package workbooks into an
    atomic project revision.
 
 AI is never treated as a source of commercial facts. Item identifiers,
 quantities, units, source references, and grounded comments remain authoritative.
-Package assignments on auto-pilot runs come from the AI providers above, not from
-deterministic rules alone — that is exactly what the per-project grant approves.
-
-## Auto-pilot (optional, per project, off by default)
-
-A project explicitly trusted in Settings (or from a history row) skips consent
-and human review: machine-clean runs publish on their own, anything else is held
-for review with reasons. Machine checks still apply absolutely — corrupt output
-never publishes under any setting. See [SPEC-autonomous-pipeline](SPEC-autonomous-pipeline.md).
 
 ## Download
 
@@ -45,8 +35,7 @@ screens are therefore expected. See [Installation](docs/INSTALL.md).
 
 - Workbook/PDF parsing, OCR, deterministic classification, validation,
   generation, history, and project memory run locally.
-- BOQ content leaves the device only after an explicit provider-consent step —
-  per file, or durably per trusted auto-pilot project (revocable in Settings).
+- BOQ content leaves the device only after an explicit provider-consent step.
 - Rust owns privileged filesystem, process, credential, HTTPS, and update
   operations behind a typed Tauri boundary.
 - Runtime data is stored under `~/.tawreed`; generated workbooks remain local.

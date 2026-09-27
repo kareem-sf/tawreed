@@ -1,0 +1,14 @@
+{
+  "name": "mep-mixed",
+  "items": [
+    { "id": 1, "code": "H1", "description": "VRF indoor fan coil units with controllers", "unit": "nr", "qty": 24, "rate": 9500, "total": 228000, "row": 2 },
+    { "id": 2, "code": "H2", "description": "Chiller plant with primary pumps", "unit": "ls", "qty": 1, "rate": 1400000, "total": 1400000, "row": 3 },
+    { "id": 3, "code": "H3", "description": "Exhaust fan with duct connection to facade", "unit": "nr", "qty": 10, "rate": 4200, "total": 42000, "row": 4 },
+    { "id": 4, "code": "E1", "description": "LV cable power distribution with switchgear", "unit": "m", "qty": 1200, "rate": 240, "total": 288000, "row": 5 },
+    { "id": 5, "code": "E2", "description": "Distribution board with earthing busbar", "unit": "nr", "qty": 8, "rate": 18000, "total": 144000, "row": 6 },
+    { "id": 6, "code": "E3", "description": "Generator standby set with transformer", "unit": "nr", "qty": 1, "rate": 680000, "total": 680000, "row": 7 },
+    { "id": 7, "code": "P1", "description": "UPVC pipe sewage networks under slab", "unit": "m", "qty": 450, "rate": 160, "total": 72000, "row": 8 },
+    { "id": 8, "code": "P2", "description": "Sanitary fixture installation with booster pump", "unit": "nr", "qty": 40, "rate": 3200, "total": 128000, "row": 9 }
+  ],
+  "labels": { "1": "HVAC", "2": "HVAC", "3": "HVAC", "4": "ELEC", "5": "ELEC", "6": "ELEC", "7": "PLUMB", "8": "PLUMB" }
+}

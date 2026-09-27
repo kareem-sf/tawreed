@@ -74,25 +74,6 @@ describe('desktop guards', () => {
     expect(bridge.base64ToBytes(btoa('abc'))).toEqual(new Uint8Array([97, 98, 99]));
   });
 
-  it('reads the auto-pilot trust list tolerantly (deny by default)', async () => {
-    const bridge = await loadBridge();
-    invoke.mockResolvedValue({ autopilot: { version: 1, trusted: [
-      { projectKey: 'tower c', projectName: 'Tower C', grantedAt: '2026-09-17T10:00:00.000Z' },
-      { projectKey: '', projectName: 'Bad', grantedAt: 'x' },
-      'garbage',
-    ] } });
-    expect(await bridge.getAutopilotTrust()).toEqual([
-      { projectKey: 'tower c', projectName: 'Tower C', grantedAt: '2026-09-17T10:00:00.000Z' },
-    ]);
-    invoke.mockResolvedValue({});
-    expect(await bridge.getAutopilotTrust()).toEqual([]);
-    invoke.mockResolvedValue({ autopilot: { version: 2, trusted: [] } });
-    expect(await bridge.getAutopilotTrust()).toEqual([]);
-    expect(bridge.findAutopilotGrant(
-      [{ projectKey: 'tower c', projectName: 'Tower C', grantedAt: 'g' }], 'tower c'))
-      .toMatchObject({ projectName: 'Tower C' });
-    expect(bridge.findAutopilotGrant([], 'tower c')).toBeNull();
-  });
 });
 
 describe('provider command names', () => {

@@ -22,18 +22,15 @@ export default defineConfig({
     target: 'es2022',
     rollupOptions: {
       output: {
-        manualChunks: {
-          radix: [
-            '@radix-ui/react-accordion',
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-label',
-            '@radix-ui/react-popover',
-            '@radix-ui/react-slot',
-            '@radix-ui/react-tabs',
-            '@radix-ui/react-tooltip',
-          ],
-          motion: ['motion/react'],
-          i18n: ['i18next', 'react-i18next'],
+        // Function form: Vite 8 (Rolldown) no longer accepts the object form.
+        // Same three chunks as before (radix now covers every @radix-ui
+        // package, including ones added after the original list).
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@radix-ui')) return 'radix';
+          if (id.includes('node_modules/motion') || id.includes('node_modules\\motion')) return 'motion';
+          if (id.includes('i18next') || id.includes('react-i18next')) return 'i18n';
+          return undefined;
         },
       },
     },

@@ -148,7 +148,7 @@ export function WorkflowWorkspace({
               aria-hidden="true"
             />
             <p className="text-sm font-semibold text-foreground">{t('doneTitle')}</p>
-            <p className="text-sm font-semibold text-foreground">{state.output.projectName} · {state.output.revisionLabel}</p>
+            <p className="text-xs text-muted-foreground">{state.output.projectName} · {state.output.revisionLabel}</p>
             <p className="allow-select mx-auto max-w-[430px] break-all text-center text-xs text-muted-foreground">
               {state.output.masterPath}
             </p>

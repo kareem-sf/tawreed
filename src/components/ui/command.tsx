@@ -1,7 +1,7 @@
 // shadcn base command primitives. CommandDialog is intentionally omitted:
 // no screen needs a command palette; dialogs compose Radix directly.
-// The input divider also carries border-ledger-line: bare `border` renders
-// currentColor in Tailwind v4, which is too strong for a hairline.
+// Dividers use bare `border`, resolved by the base-layer border-color rule
+// in index.css (shadcn standard).
 import * as React from 'react';
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';
@@ -27,8 +27,8 @@ const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
 >(({ className, ...props }, ref) => (
-  <div className="flex items-center border-b border-ledger-line px-3" cmdk-input-wrapper="">
-    <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+  <div className="flex items-center border-b px-3" cmdk-input-wrapper="">
+    <Search className="me-2 h-4 w-4 shrink-0 opacity-50" />
     <CommandPrimitive.Input
       ref={ref}
       className={cn(
@@ -119,7 +119,7 @@ const CommandShortcut = ({
   return (
     <span
       className={cn(
-        'ml-auto text-xs tracking-widest text-muted-foreground',
+        'ms-auto text-xs tracking-widest text-muted-foreground',
         className,
       )}
       {...props}

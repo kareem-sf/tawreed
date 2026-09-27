@@ -113,6 +113,18 @@ describe('agent workflow guardrails', () => {
     expect(again.applied).toBe(0);
   });
 
+  it('prefers the newest correction when the store returns newest-first', () => {
+    // Mirrors the Rust store contract (UPSERT on conflict, ORDER BY updated_at DESC):
+    // the first entry in the array is the latest human decision and must win.
+    const key = 'reinforced concrete walls';
+    const newestFirst = [
+      { descriptionKey: key, packageCode: 'WP-NEW', packageNameEn: 'New', packageNameAr: 'جديد' },
+      { descriptionKey: key, packageCode: 'WP-OLD', packageNameEn: 'Old', packageNameAr: 'قديم' },
+    ];
+    const res = applyClassificationMemory(items, classifications, newestFirst);
+    expect(res.classifications[0]).toMatchObject({ packageCode: 'WP-NEW', source: 'memory' });
+  });
+
   it('never overwrites an explicit human decision with memory', () => {
     const reviewed = reviseClassification(classifications, 1, concrete);
     const res = applyClassificationMemory(items, reviewed, [{

@@ -25,17 +25,17 @@ const Progress = React.forwardRef<
       aria-valuenow={bounded}
       value={bounded}
       className={cn(
-        'relative h-1 w-full overflow-hidden rounded-full bg-ledger-surface-2',
+        'relative h-1 w-full overflow-hidden rounded-full bg-muted',
         className,
       )}
       {...props}
     >
       <ProgressPrimitive.Indicator
         className={cn(
-          'h-full w-full flex-1 rounded-full bg-gold transition-transform duration-300 ease-out motion-reduce:transition-none',
+          'h-full w-full flex-1 rounded-full bg-primary transition-transform duration-300 ease-out motion-reduce:transition-none [transform:translateX(calc(var(--progress-fill)-100%))] rtl:[transform:translateX(calc(100%-var(--progress-fill)))]',
           indicatorClassName,
         )}
-        style={{ transform: `translateX(-${100 - bounded}%)` }}
+        style={{ '--progress-fill': `${bounded}%` } as React.CSSProperties}
       />
     </ProgressPrimitive.Root>
   );

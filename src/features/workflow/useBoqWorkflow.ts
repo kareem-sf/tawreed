@@ -3,8 +3,6 @@ import { useTranslation } from 'react-i18next';
 import {
   appLog,
   discardRevision,
-  findAutopilotGrant,
-  getAutopilotTrust,
   getSettings,
   listClassificationMemory,
   makeCodexTransport,
@@ -12,31 +10,22 @@ import {
   makeGeminiTransport,
   makeGrokTransport,
   makeLlmTransport,
-  openWorkbook,
-  recordRun,
-  reserveRevision,
-  saveClassificationMemory,
   sha256Hex,
-  writeRevisionBundle,
-  type AutopilotGrant,
   type BootstrapInfo,
-  type RevisionOutput,
 } from '../../bridge';
 import { DEFAULT_MODEL } from '../../../engine/classify/llm';
 import {
   applyClassificationMemory,
-  memoryFromApprovedReview,
-  memoryKey,
   reviseClassification,
   workflowEvent,
 } from '../../../engine/agent-workflow';
-import { autopilotVerdict } from '../../../engine/autopilot';
 import { buildPackages, validate } from '../../../engine/validate';
 import type { AiProvider, WorkPackage } from '../../../shared/types';
-import { generateInWorker, inspectInWorker } from '../../boq-worker';
+import { inspectInWorker } from '../../boq-worker';
 import { errorMessage, friendlyErrorMessage, isCancellation } from './errors';
 import { workflowReducer } from './reducer';
 import { initialWorkflowState, type PendingInspection, type PipelineData } from './types';
+import { useGenerateRevision } from './useGenerateRevision';
 
 export type ProcessingMode = 'ask' | 'online' | 'offline';
 
@@ -104,7 +93,6 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
   const analyze = useCallback(async (
     pending: PendingInspection,
     allowAi: boolean,
-    auto: AutopilotGrant | null = null,
   ): Promise<PipelineData | null> => {
     const runId = runIdRef.current;
     dispatch({ type: 'startBusy' });
@@ -119,11 +107,9 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
     const trace = [...pending.trace, workflowEvent(
       'consent',
       'completed',
-      auto !== null
-        ? `Auto-pilot grant ${auto.grantedAt} covered this run for ${pending.inspection.projectName} — no human review`
-        : provider === 'offline'
-          ? 'Local-only processing selected'
-          : `User approved ${provider} for this document`,
+      provider === 'offline'
+        ? 'Local-only processing selected'
+        : `User approved ${provider} for this document`,
     )];
 
     try {
@@ -171,6 +157,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
 
       dispatch({ type: 'setBusy', message: t('classifying'), progress: null });
       let classificationPlan;
+      let classifyFallbackReason: string | null = null;
       try {
         classificationPlan = await classifyPlan(inspection.items, {
           useLlm: provider !== 'offline',
@@ -184,7 +171,8 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
       } catch (reason) {
         if (isCancellation(reason)) throw reason;
         llmFailed = provider !== 'offline';
-        void appLog(`classification fallback: ${errorMessage(reason)}`);
+        classifyFallbackReason = errorMessage(reason);
+        void appLog(`classification fallback: ${classifyFallbackReason}`);
         classificationPlan = await classifyPlan(inspection.items, { useLlm: false });
       }
 
@@ -201,7 +189,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         'classify',
         llmFailed || aiSkipped > 0 ? 'fallback' : 'completed',
         llmFailed
-          ? 'Provider unavailable; deterministic classification completed'
+          ? (classifyFallbackReason ?? 'Provider unavailable; deterministic classification completed')
           : `${classifications.length - aiSkipped} of ${classifications.length} items classified by AI`,
       ));
 
@@ -238,9 +226,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         'completed',
         `${issues.length} validation findings; source quantities remain authoritative`,
       ));
-      if (auto === null) {
-        trace.push(workflowEvent('human-review', 'started', 'Waiting for item-level approval'));
-      }
+      trace.push(workflowEvent('human-review', 'started', 'Waiting for item-level approval'));
 
       if (runId !== runIdRef.current) return null;
       const data: PipelineData = {
@@ -259,24 +245,8 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         fileName: pending.fileName,
         fileHash: pending.fileHash,
         startedAt: pending.startedAt,
-        autoPilot: auto !== null ? { grantedAt: auto.grantedAt } : null,
-        heldReasons: null,
       };
-      if (auto === null) {
-        dispatch({ type: 'showReview', data });
-        return data;
-      }
-      // Unattended path: machine-clean verdict decides publish vs human hold.
-      // The caller proceeds to generate() on a returned data object.
-      const verdict = autopilotVerdict(issues, classifications);
-      if (!verdict.clean) {
-        trace.push(workflowEvent('human-review', 'started', 'Auto-pilot held this run for human review'));
-        dispatch({
-          type: 'showReview',
-          data: { ...data, trace, heldReasons: { en: verdict.reasonsEn, ar: verdict.reasonsAr } },
-        });
-        return null;
-      }
+      dispatch({ type: 'showReview', data });
       return data;
     } catch (reason) {
       if (isCancellation(reason)) {
@@ -292,175 +262,15 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
     }
   }, [boot, clearCancellation, modelSlug, reset, t]);
 
-  const generate = useCallback(async (overrideData?: PipelineData) => {
-    const current = stateRef.current;
-    // Auto-pilot runs pass their data directly: no review screen was ever shown,
-    // so there is no staged state to read — and no pending publication to reuse.
-    const data = overrideData ?? current.data;
-    if (generatingRef.current || !data) return;
-    generatingRef.current = true;
-    dispatch({ type: 'setGenerating', value: true });
-    dispatch({ type: 'startBusy' });
-    let reservation = overrideData === undefined ? current.pendingPublication?.reservation ?? null : null;
-    let artifacts = overrideData === undefined ? current.pendingPublication?.artifacts ?? null : null;
-    const trace = [...data.trace];
-    if (data.autoPilot === null && !trace.some((event) => event.stage === 'human-review' && event.status === 'completed')) {
-      trace.push(workflowEvent('human-review', 'completed', 'User approved item classifications'));
-    }
-
-    try {
-      const approvedMemory = memoryFromApprovedReview(
-        data.inspection.items,
-        data.classifications,
-        data.packages,
-      ).map((entry) => ({ ...entry, updatedAt: new Date().toISOString() }));
-      try {
-        await saveClassificationMemory(data.inspection.projectName, approvedMemory);
-      } catch (reason) {
-        void appLog(`classification memory save failed (non-fatal): ${errorMessage(reason)}`);
-      }
-
-      if (!reservation || !artifacts) {
-        reservation = await reserveRevision(data.inspection.projectName);
-        const outputArabic = data.inspection.language === 'ar'
-          || (data.inspection.language === 'mixed' && /[\u0600-\u06ff]/.test(data.inspection.projectName));
-        dispatch({
-          type: 'setBusy',
-          message: t('generatingBundle', { revision: reservation.revisionLabel }),
-          progress: null,
-        });
-        trace.push(workflowEvent('generate', 'started', `Building ${reservation.revisionLabel}`));
-        const generateJob = generateInWorker({
-          packages: data.packages,
-          items: data.inspection.items,
-          projectName: reservation.projectName,
-          revision: reservation.revision,
-          locale: outputArabic ? 'ar' : 'en',
-          documentLanguage: data.inspection.language,
-        });
-        cancelJobRef.current = generateJob.cancel;
-        dispatch({ type: 'setCancellable', value: true });
-        artifacts = await generateJob.promise;
-        clearCancellation();
-        trace.push(workflowEvent('generate', 'completed', `${artifacts.length} workbook artifacts built`));
-      } else {
-        dispatch({
-          type: 'setBusy',
-          message: t('retryingPublish', { revision: reservation.revisionLabel }),
-          progress: null,
-        });
-      }
-
-      // Auto-pilot grants can be revoked mid-flight: re-check immediately before
-      // the irreversible publish. A revoked grant holds the run for human review.
-      if (data.autoPilot !== null) {
-        const fresh = await getAutopilotTrust().catch((): AutopilotGrant[] => []);
-        if (findAutopilotGrant(fresh, memoryKey(data.inspection.projectName)) === null) {
-          trace.push(workflowEvent('publish', 'failed', 'Auto-pilot grant revoked before publish'));
-          if (reservation) await discardRevision(reservation).catch(() => undefined);
-          dispatch({
-            type: 'showReview',
-            data: {
-              ...data,
-              trace,
-              heldReasons: {
-                en: ['The auto-pilot grant was revoked before publishing.'],
-                ar: ['تم إلغاء تفويض التشغيل التلقائي قبل النشر.'],
-              },
-            },
-          });
-          return;
-        }
-      }
-
-      dispatch({
-        type: 'setBusy',
-        message: t('publishingRevision', { revision: reservation.revisionLabel }),
-        progress: null,
-      });
-      trace.push(workflowEvent('publish', 'started', `Publishing ${reservation.revisionLabel}`));
-      let published: RevisionOutput;
-      try {
-        published = await writeRevisionBundle(reservation, artifacts);
-      } catch (reason) {
-        const message = errorMessage(reason);
-        if (/preserved at/i.test(message)) {
-          trace.push(workflowEvent('publish', 'failed', 'Generated artifacts preserved for a safe retry'));
-          dispatch({ type: 'setPendingPublication', pending: { reservation, artifacts } });
-          dispatch({ type: 'showReview', data: { ...data, trace } });
-          dispatch({ type: 'setError', error: message });
-          return;
-        }
-        await discardRevision(reservation).catch(() => undefined);
-        reservation = null;
-        throw reason;
-      }
-      trace.push(workflowEvent(
-        'publish',
-        'completed',
-        data.autoPilot !== null
-          ? `${published.revisionLabel} published by auto-pilot without human review`
-          : `${published.revisionLabel} published`,
-      ));
-      const completedData: PipelineData = { ...data, trace };
-      const itemsById = new Map(data.inspection.items.map((item) => [item.id, item]));
-
-      try {
-        await recordRun({
-          startedAt: new Date(data.startedAt).toISOString(),
-          fileName: data.fileName,
-          fileHash: data.fileHash,
-          itemCount: data.inspection.items.length,
-          packageCount: data.packages.length,
-          errorCount: data.issues.filter((issue) => issue.severity === 'error').length,
-          warningCount: data.issues.filter((issue) => issue.severity === 'warning').length,
-          outputFile: published.masterPath,
-          durationMs: Date.now() - data.startedAt,
-          llmUsed: data.llmUsed,
-          projectName: published.projectName,
-          revision: published.revision,
-          packageFolder: published.packageFolder,
-          sourceKind: data.inspection.sourceKind,
-          ocrUsed: data.inspection.ocrPages > 0,
-          provider: data.provider,
-          model: data.model,
-          trace,
-          memoryApplied: data.memoryApplied,
-          // Approved classifications, item by item: what the AI proposed and what the
-          // human changed. Aggregated `llmUsed` cannot answer either question later.
-          classifications: data.classifications.map((classification) => ({
-            itemId: classification.itemId,
-            description: itemsById.get(classification.itemId)?.description ?? '',
-            packageCode: classification.packageCode,
-            source: classification.source,
-            confidence: classification.confidence,
-          })),
-        });
-      } catch (reason) {
-        void appLog(`recordRun failed (non-fatal): ${errorMessage(reason)}`);
-      }
-      dispatch({ type: 'showDone', output: published, data: completedData });
-      void openWorkbook(published.masterPath).catch((reason) => {
-        void appLog(`open workbook failed: ${errorMessage(reason)}`);
-        dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
-      });
-    } catch (reason) {
-      if (reservation) await discardRevision(reservation).catch(() => undefined);
-      if (isCancellation(reason)) {
-        trace.push(workflowEvent('generate', 'cancelled', 'Generation cancelled by user'));
-      } else {
-        void appLog(`generate error: ${errorMessage(reason)}`);
-        dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
-      }
-      // A reset during generation means the user abandoned this run — do not resurrect stale review.
-      if (stateRef.current.view === 'idle') return;
-      dispatch({ type: 'showReview', data: { ...data, trace } });
-    } finally {
-      clearCancellation();
-      generatingRef.current = false;
-      dispatch({ type: 'setGenerating', value: false });
-    }
-  }, [clearCancellation, t]);
+  // Revision generation + publication lives in useGenerateRevision (extracted to
+  // keep this module within its size budget); behavior is unchanged.
+  const generate = useGenerateRevision({
+    stateRef,
+    generatingRef,
+    cancelJobRef,
+    clearCancellation,
+    dispatch,
+  });
 
   const handleFile = useCallback(async (file: File) => {
     // A second drop supersedes the first: cancel the prior worker so its late
@@ -521,15 +331,6 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
         `inspection: file=${file.name} source=${inspection.sourceKind} project=${inspection.projectName} items=${inspection.items.length} confidence=${inspection.mapping.confidence.toFixed(2)}`,
       );
       const pending = { inspection, fileName: file.name, fileHash, startedAt, trace };
-      // Auto-pilot: a per-project grant skips consent and, on a machine-clean
-      // verdict, publishes without review. Anything else follows the manual flow.
-      const trust = await getAutopilotTrust().catch((): AutopilotGrant[] => []);
-      const grant = findAutopilotGrant(trust, memoryKey(inspection.projectName));
-      if (grant !== null) {
-        const autoData = await analyze(pending, mode !== 'offline', grant);
-        if (autoData !== null) await generate(autoData);
-        return;
-      }
       if (boot?.provider && boot.provider !== 'none' && mode === 'online') {
         await analyze(pending, true);
       } else if (boot?.provider && boot.provider !== 'none' && mode === 'ask') {
@@ -547,7 +348,7 @@ export function useBoqWorkflow({ boot, modelSlug, processingMode }: UseBoqWorkfl
       void appLog(`workflow error: ${errorMessage(reason)}`);
       dispatch({ type: 'setError', error: friendlyErrorMessage(reason, t) });
     }
-  }, [analyze, boot, clearCancellation, generate, processingMode, reset, t]);
+  }, [analyze, boot, clearCancellation, processingMode, reset, t]);
 
   const analyzePending = useCallback((allowAi: boolean) => {
     const pending = stateRef.current.pendingInspection;

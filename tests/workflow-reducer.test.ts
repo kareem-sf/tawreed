@@ -58,8 +58,6 @@ function data(): PipelineData {
     fileName: 'sample.xlsx',
     fileHash: 'test-hash',
     startedAt: 1,
-    autoPilot: null,
-    heldReasons: null,
   };
 }
 

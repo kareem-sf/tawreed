@@ -25,12 +25,12 @@ function EmptyHeader({ className, ...props }: React.ComponentProps<'div'>) {
 }
 
 const emptyMediaVariants = cva(
-  'flex items-center justify-center text-ledger-ink-faint',
+  'flex items-center justify-center text-muted-foreground',
   {
     variants: {
       variant: {
-        default: 'size-10 rounded-xl border border-ledger-line bg-ledger-surface [&_svg]:size-5',
-        icon: 'size-8 rounded-lg bg-ledger-surface-2 [&_svg]:size-4',
+        default: 'size-10 rounded-xl border bg-card [&_svg]:size-5',
+        icon: 'size-8 rounded-lg bg-muted [&_svg]:size-4',
       },
     },
     defaultVariants: {
@@ -56,7 +56,7 @@ function EmptyMedia({
 function EmptyTitle({ className, ...props }: React.ComponentProps<'p'>) {
   return (
     <p
-      className={cn('text-sm font-medium text-ledger-ink', className)}
+      className={cn('text-sm font-medium text-foreground', className)}
       {...props}
     />
   );
@@ -65,7 +65,7 @@ function EmptyTitle({ className, ...props }: React.ComponentProps<'p'>) {
 function EmptyDescription({ className, ...props }: React.ComponentProps<'p'>) {
   return (
     <p
-      className={cn('max-w-sm text-xs leading-5 text-ledger-ink-dim', className)}
+      className={cn('max-w-sm text-xs leading-5 text-muted-foreground', className)}
       {...props}
     />
   );

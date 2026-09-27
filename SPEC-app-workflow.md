@@ -4,7 +4,7 @@
 Review and fix React workflow: state integrity, cancellation/retry, consent, review, settings, history, accessibility, and worker/host integration. Users are English/Arabic (RTL) reviewers who must give valid AI consent, never lose edits, and always get feedback on clicks. Success is no illegal state resurrection, no worker leaks, no privacy mislabeling, and no silent failures.
 
 ## Tech Stack
-- React 19, Mantine 7, Tailwind 4, `react-window`, `i18next` (en/ar parity), Web Worker (`src/boq-worker.ts` + `src/workers/boq.worker.ts`)
+- React 19, shadcn/Radix + Tailwind 4, `react-window`, `i18next` (en/ar parity), Web Worker (`src/boq-worker.ts` + `src/workers/boq.worker.ts`)
 
 ## Commands
 ```sh
@@ -69,7 +69,7 @@ Conventions: `workflowReducer` is the only state writer; every `invoke` awaited 
 5. Number formatting `en-EG` vs `ar-EG` digits: Latin or Arabic-Indic digits expected?
 
 ## Assumptions
-1. Mantine `Modal` focus-trap is trusted; fixes add missing live-regions, not replace modals.
+1. Radix dialog focus-trap is trusted; fixes add missing live-regions, not replace modals.
 2. `aiSkipped = source!=='llm'` accounting and offline `0/false` forcing are intentional.
 3. `react-window` 44px virtualization stays; focus-restore added, not list rewrite.
 

@@ -37,6 +37,10 @@ export function applyClassificationMemory(
     if (!entry.descriptionKey || !entry.packageCode) continue;
     const existing = memoryByDescription.get(entry.descriptionKey);
     // Conflicting duplicates: keep first for determinism, ignore later divergent entries.
+    // Order contract: the Rust store returns newest-first (ORDER BY updated_at DESC, with
+    // an UPSERT on conflict), so "first" is the latest human correction — a newer
+    // explicit correction overwrites an older one at the DB layer, not here. If that
+    // query ordering ever changes, this keep-first rule silently becomes keep-oldest.
     if (existing && existing.packageCode !== entry.packageCode) continue;
     if (!existing) memoryByDescription.set(entry.descriptionKey, entry);
   }

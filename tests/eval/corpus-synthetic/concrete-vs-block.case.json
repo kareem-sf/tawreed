@@ -1,0 +1,12 @@
+{
+  "name": "concrete-vs-block",
+  "items": [
+    { "id": 1, "code": "C1", "description": "Reinforced concrete C30 to ground beams", "unit": "m3", "qty": 150, "rate": 3600, "total": 540000, "row": 2 },
+    { "id": 2, "code": "C2", "description": "Precast concrete cladding panels to stair cores", "unit": "m2", "qty": 300, "rate": 1500, "total": 450000, "row": 3 },
+    { "id": 3, "code": "B1", "description": "Concrete block walls 200mm with cement mortar", "unit": "m2", "qty": 900, "rate": 180, "total": 162000, "row": 4 },
+    { "id": 4, "code": "B2", "description": "Hollow block for infill partitions", "unit": "m2", "qty": 700, "rate": 150, "total": 105000, "row": 5 },
+    { "id": 5, "code": "B3", "description": "AAC block to toilet partitions", "unit": "m2", "qty": 200, "rate": 210, "total": 42000, "row": 6 },
+    { "id": 6, "code": "C3", "description": "Post tension slabs to podium level", "unit": "m2", "qty": 1200, "rate": 950, "total": 1140000, "row": 7 }
+  ],
+  "labels": { "1": "CONC", "2": "CONC", "6": "CONC", "3": "BLOCK", "4": "BLOCK", "5": "BLOCK" }
+}

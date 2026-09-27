@@ -19,7 +19,7 @@ function InputGroupInput({ className, ...props }: React.ComponentProps<'input'>)
     <input
       data-slot="input-group-control"
       className={cn(
-        'min-w-0 flex-1 bg-transparent py-1 text-sm text-ledger-ink outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed',
+        'min-w-0 flex-1 bg-transparent py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed',
         className,
       )}
       {...props}
@@ -32,7 +32,7 @@ function InputGroupTextarea({ className, ...props }: React.ComponentProps<'texta
     <textarea
       data-slot="input-group-control"
       className={cn(
-        'min-w-0 flex-1 resize-none bg-transparent py-2 text-sm text-ledger-ink outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed',
+        'min-w-0 flex-1 resize-none bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed',
         className,
       )}
       {...props}
@@ -51,7 +51,7 @@ function InputGroupAddon({
     <div
       data-align={align}
       className={cn(
-        'flex shrink-0 items-center gap-1 text-ledger-ink-faint',
+        'flex shrink-0 items-center gap-1 text-muted-foreground',
         align === 'inline-start' && 'order-first pe-1',
         align === 'inline-end' && 'order-last ps-1',
         align === 'block-start' && 'w-full pb-1',
@@ -72,7 +72,7 @@ function InputGroupButton({
     <button
       type={type}
       className={cn(
-        'rounded-md p-1.5 text-ledger-ink-faint transition hover:bg-ledger-surface-2 hover:text-ledger-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
+        'rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
         className,
       )}
       {...props}
@@ -83,7 +83,7 @@ function InputGroupButton({
 function InputGroupText({ className, ...props }: React.ComponentProps<'span'>) {
   return (
     <span
-      className={cn('whitespace-nowrap text-xs text-ledger-ink-dim', className)}
+      className={cn('whitespace-nowrap text-xs text-muted-foreground', className)}
       {...props}
     />
   );

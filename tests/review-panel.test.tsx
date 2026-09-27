@@ -13,7 +13,7 @@ import type { PipelineData } from '../src/features/workflow/types';
 import type { BoqItem, Classification, WorkPackage } from '../shared/types';
 
 beforeAll(() => {
-  // Mantine and motion probe APIs jsdom does not implement.
+  // Browser APIs jsdom does not implement (probed/guarded by components).
   window.matchMedia ??= ((query: string) => ({
     matches: false,
     media: query,
@@ -79,8 +79,6 @@ function pipelineData(aiSkipped: number): PipelineData {
     fileName: 'boq.xlsx',
     fileHash: 'test-hash',
     startedAt: Date.now(),
-    autoPilot: null,
-    heldReasons: null,
   };
 }
 

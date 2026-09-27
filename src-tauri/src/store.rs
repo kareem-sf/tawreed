@@ -313,15 +313,28 @@ pub fn api_key() -> Option<String> {
 }
 
 /// Read settings.json (tolerant of absence/corruption).
+/// Drops the retired per-project trust-list key on sight: the feature is
+/// gone, so its publish grants must not linger in user data. The key is
+/// stripped and the file rewritten the first time it is seen.
 pub fn get_settings() -> serde_json::Value {
     let path = match data_dir() {
         Ok(d) => d.join("settings.json"),
         Err(_) => return serde_json::json!({}),
     };
-    std::fs::read_to_string(path)
+    let mut settings = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}))
+        .unwrap_or_else(|| serde_json::json!({}));
+    if settings
+        .as_object()
+        .is_some_and(|map| map.contains_key("autopilot"))
+    {
+        if let Some(map) = settings.as_object_mut() {
+            map.remove("autopilot");
+        }
+        let _ = write_settings(&path, &settings);
+    }
+    settings
 }
 
 /// Keys the frontend is allowed to persist. Anything else is rejected so a compromised
@@ -336,11 +349,7 @@ const ALLOWED_SETTINGS: &[&str] = &[
     "compatible",
     "gemini",
     "grok",
-    "autopilot",
 ];
-
-const MAX_TRUSTED_PROJECTS: usize = 200;
-const MAX_PROJECT_KEY_CHARS: usize = 1000;
 
 /// Pure validation, split out from `set_setting` so it's testable without touching disk.
 fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(), String> {
@@ -392,32 +401,6 @@ fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(), String> 
             let model = value.get("model").and_then(serde_json::Value::as_str);
             if model.is_none_or(|text| text.len() > 160) {
                 return Err(format!("invalid {key} settings"));
-            }
-        }
-        "autopilot" => {
-            // Per-project auto-pilot grants. Deny by default: missing or malformed
-            // means untrusted, never the reverse.
-            if value.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
-                return Err("invalid autopilot state".into());
-            }
-            let trusted = value
-                .get("trusted")
-                .and_then(serde_json::Value::as_array)
-                .ok_or("invalid autopilot state")?;
-            if trusted.len() > MAX_TRUSTED_PROJECTS {
-                return Err("autopilot trust list is too long".into());
-            }
-            for entry in trusted {
-                let key = entry.get("projectKey").and_then(serde_json::Value::as_str);
-                let name = entry.get("projectName").and_then(serde_json::Value::as_str);
-                let granted = entry.get("grantedAt").and_then(serde_json::Value::as_str);
-                if key.is_none_or(str::is_empty)
-                    || key.is_some_and(|text| text.chars().count() > MAX_PROJECT_KEY_CHARS)
-                    || name.is_none_or(str::is_empty)
-                    || granted.is_none_or(str::is_empty)
-                {
-                    return Err("invalid autopilot trust entry".into());
-                }
             }
         }
         _ => {}
@@ -722,46 +705,12 @@ mod tests {
     }
 
     #[test]
-    fn autopilot_trust_list_is_accepted_and_validated() {
-        let grant = serde_json::json!({
-            "version": 1,
-            "trusted": [{
-                "projectKey": "tower c",
-                "projectName": "Tower C",
-                "grantedAt": "2026-09-17T10:00:00.000Z",
-            }],
-        });
-        assert!(validate_setting("autopilot", &grant).is_ok());
+    fn retired_trust_key_is_rejected_on_write() {
+        // The unattended-publish feature is gone: nothing may recreate its
+        // trust list. Legacy values on disk are stripped on read (see get_settings).
         assert!(validate_setting(
             "autopilot",
             &serde_json::json!({"version": 1, "trusted": []})
-        )
-        .is_ok());
-        // Wrong version, empty key, overlong key, malformed entry, oversize list.
-        assert!(validate_setting(
-            "autopilot",
-            &serde_json::json!({"version": 2, "trusted": []})
-        )
-        .is_err());
-        assert!(validate_setting("autopilot", &serde_json::json!({"version": 1})).is_err());
-        let mut bad = grant.clone();
-        bad["trusted"][0]["projectKey"] = serde_json::json!("");
-        assert!(validate_setting("autopilot", &bad).is_err());
-        let mut long = grant.clone();
-        long["trusted"][0]["projectKey"] = serde_json::json!("x".repeat(1001));
-        assert!(validate_setting("autopilot", &long).is_err());
-        let mut missing = grant.clone();
-        missing["trusted"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("grantedAt");
-        assert!(validate_setting("autopilot", &missing).is_err());
-        let many: Vec<_> = (0..201)
-            .map(|i| serde_json::json!({"projectKey": format!("p{i}"), "projectName": "P", "grantedAt": "2026-09-17T10:00:00.000Z"}))
-            .collect();
-        assert!(validate_setting(
-            "autopilot",
-            &serde_json::json!({"version": 1, "trusted": many})
         )
         .is_err());
     }

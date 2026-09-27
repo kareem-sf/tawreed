@@ -1,0 +1,14 @@
+{
+  "name": "ar-only-finishes",
+  "items": [
+    { "id": 1, "code": "ب1", "description": "دهان بلاستيك مط للحوائط الداخلية ثلاث أوجه", "unit": "m2", "qty": 900, "rate": 45, "total": 40500, "row": 2 },
+    { "id": 2, "code": "ب2", "description": "دهان دوكو للأبواب الخشبية", "unit": "m2", "qty": 120, "rate": 180, "total": 21600, "row": 3 },
+    { "id": 3, "code": "س1", "description": "سيراميك أرضيات 60x60 مع مونة لصق وترويبة", "unit": "m2", "qty": 400, "rate": 320, "total": 128000, "row": 4 },
+    { "id": 4, "code": "س2", "description": "بورسلين حوائط الحمامات مع ترويبة مقاومة للمياه", "unit": "m2", "qty": 250, "rate": 350, "total": 87500, "row": 5 },
+    { "id": 5, "code": "م1", "description": "محارة أسمنتية للحوائط الداخلية", "unit": "m2", "qty": 1000, "rate": 95, "total": 95000, "row": 6 },
+    { "id": 6, "code": "م2", "description": "ضهارة مصيص للأسقف", "unit": "m2", "qty": 600, "rate": 70, "total": 42000, "row": 7 },
+    { "id": 7, "code": "خ1", "description": "خرسانة مسلحة للقواعد المسلحة", "unit": "m3", "qty": 200, "rate": 3700, "total": 740000, "row": 8 },
+    { "id": 8, "code": "خ2", "description": "حديد تسليح للبلاطات الخرسانية", "unit": "ton", "qty": 30, "rate": 6200, "total": 186000, "row": 9 }
+  ],
+  "labels": { "1": "PAINT", "2": "PAINT", "3": "TILE", "4": "TILE", "5": "PLASTER", "6": "PLASTER", "7": "CONC", "8": "CONC" }
+}

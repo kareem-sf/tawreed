@@ -266,4 +266,15 @@ describe('LLM batching (BATCH_SIZE = 100)', () => {
     const all = await classifyAll(items, { useLlm: true, transport });
     expect(all.find((c) => c.itemId === items[0]!.id)!.packageCode).toBe('WP-MISC');
   });
+
+  it('fails fast with zero provider calls once distinct descriptions exceed the ceiling', async () => {
+    const items = gibberishItems(2100);
+    let calls = 0;
+    const transport = async (): Promise<string> => {
+      calls += 1;
+      return proposal(STRUCTURE);
+    };
+    await expect(classifyAll(items, { useLlm: true, transport })).rejects.toThrow(/exceeds.*2000-group limit/);
+    expect(calls).toBe(0);
+  });
 });

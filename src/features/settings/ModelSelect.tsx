@@ -56,7 +56,7 @@ export function ModelSelect({ label, ariaLabel, placeholder, options, value, onC
           <ChevronsUpDown size={14} className="shrink-0 opacity-50" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] border-ledger-line p-0">
+        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
         <Command>
           <CommandInput placeholder={placeholder} />
           <CommandList>

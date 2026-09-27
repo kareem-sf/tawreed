@@ -24,6 +24,25 @@ export const UNCLASSIFIED_CODE = 'WP-99';
 const BATCH_SIZE = 100;
 const MAX_PACKAGES = 40;
 const MAX_DISTINCT_FOR_PROPOSAL = 400;
+/** Fail-fast ceiling: groups above this never reach the provider (0 LLM spend).
+ *  2000 groups ≈ 20 batches ≈ $1.50/run at Sonnet rates — anything larger holds
+ *  for human review via the heuristic fallback instead of burning unattended. */
+export const MAX_CLASSIFICATION_GROUPS = 2000;
+export const MAX_CLASSIFICATION_BATCHES = 20;
+export class ClassificationTooLargeError extends Error {
+  readonly groups: number;
+  readonly batches: number;
+  constructor(groups: number) {
+    super(
+      `Classification request exceeds the ${MAX_CLASSIFICATION_GROUPS}-group limit ` +
+      `(${groups} distinct descriptions, ~${Math.ceil(groups / BATCH_SIZE)} batches) — ` +
+      'split the BOQ and retry',
+    );
+    this.name = 'ClassificationTooLargeError';
+    this.groups = groups;
+    this.batches = Math.ceil(groups / BATCH_SIZE);
+  }
+}
 export const DEFAULT_MODEL = 'claude-sonnet-5';
 
 // Dynamic package codes look like WP-<SLUG>; WP-99 is reserved for unclassified.
@@ -321,6 +340,10 @@ export async function llmClassify(
 ): Promise<Classification[]> {
   // One decision per distinct description; the answer then fans out to every item sharing it.
   const groups = groupByDescription(items);
+  // Fail fast before any provider spend: oversized runs degrade to the offline
+  // heuristic in the caller, which trips UNCLASSIFIED/LOW_CONFIDENCE and holds
+  // the run for review instead of publishing a partial result.
+  if (groups.length > MAX_CLASSIFICATION_GROUPS) throw new ClassificationTooLargeError(groups.length);
   let structure: ProposedPackage[];
   try {
     structure = await proposeStructure(groups, transport, model);

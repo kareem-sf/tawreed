@@ -5,6 +5,8 @@ declare module 'node:fs/promises' {
   export function readFile(path: URL | string, encoding: 'utf8'): Promise<string>;
   export function readFile(path: URL | string): Promise<Uint8Array>;
   export function readdir(path: URL | string): Promise<string[]>;
+  export function mkdir(path: URL | string, options?: { recursive?: boolean }): Promise<string | undefined>;
+  export function writeFile(path: URL | string, data: string | Uint8Array): Promise<void>;
 }
 
 declare module 'node:path' {

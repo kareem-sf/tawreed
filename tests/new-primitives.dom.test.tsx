@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // New-primitives guard: kbd/badge/empty/progress/item/input-group render
-// with their accessible contracts, and ConfirmDialog reports explicit
+// with their accessible contracts, and AlertDialog reports explicit
 // choice (confirm vs cancel) instead of closing implicitly.
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
@@ -13,7 +13,17 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '..
 import { Progress } from '../src/components/ui/progress';
 import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from '../src/components/ui/item';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../src/components/ui/input-group';
-import { ConfirmDialog } from '../src/components/ui/confirm-dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../src/components/ui/alert-dialog';
+import { buttonVariants } from '../src/components/ui/button';
 import { TooltipProvider } from '../src/components/ui/tooltip';
 
 beforeAll(() => {
@@ -110,35 +120,52 @@ describe('new primitives', () => {
     expect(screen.getByLabelText('Show API key').getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('ConfirmDialog reports confirm and cancel separately', () => {
+  it('AlertDialog reports confirm and cancel separately', () => {
     let result: string | null = null;
     renderWithI18n(
-      <ConfirmDialog
-        open
-        title="Revoke auto-pilot?"
-        description="Stop unattended publishing."
-        confirmLabel="Revoke"
-        cancelLabel="Cancel"
-        onCancel={() => { result = 'cancel'; }}
-        onConfirm={() => { result = 'confirm'; }}
-      />,
+      <AlertDialog open>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this project?</AlertDialogTitle>
+            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { result = 'cancel'; }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
+              onClick={() => { result = 'confirm'; }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>,
     );
-    expect(screen.getByText('Revoke auto-pilot?')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    expect(screen.getByText('Delete this project?')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(result).toBe('confirm');
   });
 
-  it('ConfirmDialog cancel reports cancel', () => {
+  it('AlertDialog cancel reports cancel', () => {
     let result: string | null = null;
     renderWithI18n(
-      <ConfirmDialog
-        open
-        title="Remove connection?"
-        confirmLabel="Remove"
-        cancelLabel="Cancel"
-        onCancel={() => { result = 'cancel'; }}
-        onConfirm={() => { result = 'confirm'; }}
-      />,
+      <AlertDialog open>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove connection?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { result = 'cancel'; }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => { result = 'confirm'; }}>
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(result).toBe('cancel');

@@ -70,8 +70,6 @@ const data: PipelineData = {
   fileName: 'boq.xlsx',
   fileHash: 'test-hash',
   startedAt: Date.now(),
-  autoPilot: null,
-  heldReasons: null,
 };
 
 function renderPanel() {

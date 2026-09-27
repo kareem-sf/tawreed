@@ -10,11 +10,10 @@ import i18n from '../src/i18n';
 import HistoryDrawer from '../src/features/history/HistoryDrawer';
 import type { RunRecord } from '../shared/types';
 
-const historyBridge = vi.hoisted(() => ({ listRuns: vi.fn(), getAutopilotTrust: vi.fn() }));
+const historyBridge = vi.hoisted(() => ({ listRuns: vi.fn() }));
 vi.mock('../src/bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/bridge')>()),
   listRuns: (...a: unknown[]) => historyBridge.listRuns(...a),
-  getAutopilotTrust: (...a: unknown[]) => historyBridge.getAutopilotTrust(...a),
 }));
 
 beforeAll(() => {
@@ -40,8 +39,6 @@ beforeAll(() => {
 
 beforeEach(() => {
   historyBridge.listRuns.mockReset();
-  historyBridge.getAutopilotTrust.mockReset();
-  historyBridge.getAutopilotTrust.mockResolvedValue([]);
 });
 
 afterEach(cleanup);

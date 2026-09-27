@@ -5,6 +5,8 @@
 // tests/eval/corpus/ (gitignored — real client BOQs must not enter a public repo).
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { classifyPlan } from '../../engine/classify';
 import { loadCorpus, type EvalCase } from './corpus';
 import { aggregate, formatReport, scoreCase } from './score';
@@ -42,7 +44,39 @@ describe.runIf(LIVE)(`classification accuracy (live: ${PROVIDER})`, () => {
     console.info(`\nprovider=${PROVIDER}${MODEL ? ` model=${MODEL}` : ''}\n${formatReport(scores, total)}\n`);
 
     // No floor here: this run is a measurement against a non-deterministic provider and
-    // must not fail a build. Compare the printed numbers across runs instead.
+    // must not fail a build. Persist the numbers so the next run can compare instead of
+    // eyeballing CI logs — a >5pt pairF1 drop prints a warning, never a failure.
+    const runRecord = {
+      at: new Date().toISOString(),
+      provider: PROVIDER,
+      model: MODEL ?? null,
+      cases: total.cases,
+      items: total.items,
+      pairF1: +total.pairF1.toFixed(4),
+      purity: +total.purity.toFixed(4),
+      unclassifiedRate: +total.unclassifiedRate.toFixed(4),
+    };
+    const here = fileURLToPath(new URL('.', import.meta.url));
+    const outDir = join(here, '..', '..', '..', 'test-results');
+    await mkdir(outDir, { recursive: true }).catch(() => undefined);
+    await writeFile(join(outDir, 'live-eval.json'), `${JSON.stringify(runRecord, null, 2)}\n`).catch((error: unknown) => {
+      console.info(`live baseline: could not persist run record (${error instanceof Error ? error.message : String(error)})`);
+    });
+    const baselineRaw = await readFile(join(here, '..', '..', '..', 'scripts', 'live-baseline.json'), 'utf8').catch(() => null);
+    if (baselineRaw) {
+      try {
+        const baseline = JSON.parse(baselineRaw) as { provider?: string; model?: string | null; pairF1?: number };
+        const sameConfig = (baseline.provider ?? 'anthropic') === PROVIDER && (baseline.model ?? null) === (MODEL ?? null);
+        if (sameConfig && typeof baseline.pairF1 === 'number' && baseline.pairF1 - total.pairF1 > 0.05) {
+          console.info(
+            `live baseline WARNING: pairF1 ${total.pairF1.toFixed(3)} is >5pts below baseline ${baseline.pairF1.toFixed(3)} `
+            + `for ${PROVIDER}${MODEL ? `/${MODEL}` : ''} — investigate before shipping prompt/model changes.`,
+          );
+        }
+      } catch {
+        // A corrupt baseline must never fail the measurement run.
+      }
+    }
     expect(total.items).toBeGreaterThan(0);
   });
 });

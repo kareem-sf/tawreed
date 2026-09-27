@@ -1,0 +1,14 @@
+{
+  "name": "duplicate-descriptions",
+  "items": [
+    { "id": 1, "code": "F1-A", "description": "Porcelain floor tile 60x60 with tile adhesive and grout", "unit": "m2", "qty": 200, "rate": 320, "total": 64000, "row": 2 },
+    { "id": 2, "code": "F1-B", "description": "Porcelain floor tile 60x60 with tile adhesive and grout", "unit": "m2", "qty": 200, "rate": 320, "total": 64000, "row": 3 },
+    { "id": 3, "code": "F1-C", "description": "Porcelain floor tile 60x60 with tile adhesive and grout", "unit": "m2", "qty": 150, "rate": 320, "total": 48000, "row": 4 },
+    { "id": 4, "code": "P1-A", "description": "Emulsion paint finish to internal walls three coats", "unit": "m2", "qty": 800, "rate": 45, "total": 36000, "row": 5 },
+    { "id": 5, "code": "P1-B", "description": "Emulsion paint finish to internal walls three coats", "unit": "m2", "qty": 800, "rate": 45, "total": 36000, "row": 6 },
+    { "id": 6, "code": "P2", "description": "Epoxy paint to plant room floors", "unit": "m2", "qty": 120, "rate": 140, "total": 16800, "row": 7 },
+    { "id": 7, "code": "F2", "description": "Ceramic wall tile to wet areas with waterproof grout", "unit": "m2", "qty": 300, "rate": 280, "total": 84000, "row": 8 },
+    { "id": 8, "code": "F2-B", "description": "Ceramic wall tile to wet areas with waterproof grout", "unit": "m2", "qty": 300, "rate": 280, "total": 84000, "row": 9 }
+  ],
+  "labels": { "1": "TILE", "2": "TILE", "3": "TILE", "7": "TILE", "8": "TILE", "4": "PAINT", "5": "PAINT", "6": "PAINT" }
+}

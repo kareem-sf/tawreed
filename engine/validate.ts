@@ -13,14 +13,16 @@ const OUTLIER_Z = 2.5;
 export function buildPackages(items: BoqItem[], classifications: Classification[]): WorkPackage[] {
   const byItem = new Map(items.map((i) => [i.id, i]));
   const groups = new Map<string, number[]>();
+  const firstByCode = new Map<string, Classification>();
   for (const c of classifications) {
     const arr = groups.get(c.packageCode) ?? [];
     arr.push(c.itemId);
     groups.set(c.packageCode, arr);
+    if (!firstByCode.has(c.packageCode)) firstByCode.set(c.packageCode, c);
   }
   const packages: WorkPackage[] = [];
   for (const [code, itemIds] of groups) {
-    const dynamic = classifications.find((c) => c.packageCode === code);
+    const dynamic = firstByCode.get(code);
     const def = TAXONOMY.find((p) => p.code === code) ?? {
       code,
       nameEn: dynamic?.packageNameEn || (code === 'WP-99' ? UNCLASSIFIED.nameEn : code),
