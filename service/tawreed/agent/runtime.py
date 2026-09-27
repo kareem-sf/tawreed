@@ -27,8 +27,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tawreed import decisions, packages, settings
 from tawreed.agent import instructions, records, tools
+from tawreed.agent.mcp_endpoint import Runs
 from tawreed.agent.records import Message, TurnRecord
-from tawreed.ai import connections, providers
+from tawreed.ai import codex, connections, providers
 from tawreed.core.db import now
 from tawreed.projects import Project
 from tawreed.sources import Source
@@ -57,9 +58,13 @@ class Worker:
         sessions: sessionmaker[Session],
         model: Callable[[], Model | None] | None = None,
         sees_images: Callable[[], bool] | None = None,
+        runs: Runs | None = None,
+        mcp_url: str | None = None,
     ):
         self.home = home
         self.sessions = sessions
+        self.runs = runs or Runs()
+        self.mcp_url = mcp_url  # where Codex reaches Tawreed's tools; unknown when the service's port isn't
         self.model = model or self._chosen_model
         self.sees_images = sees_images or self._chosen_sees_images
         self._wake = threading.Event()
@@ -172,10 +177,47 @@ class Worker:
                 records.notice(session, project_id, "long_run")
                 session.commit()
                 return False
+        if connection["provider"] == "codex":
+            return await self._codex_turn(found[1], project_id)
         model = self.model()
         if model is None:
             return False
         return await self._turn(model, project_id)
+
+    async def _codex_turn(self, model: str | None, project_id: str) -> bool:
+        """A turn through the Codex client: the same tools, over Tawreed's MCP endpoint with this turn's token."""
+        if not self.mcp_url:
+            return False
+        with self.sessions() as session:
+            project = session.get(Project, project_id)
+            last = records.last_turn(session, project_id)
+            unfinished = bool(last and last.ended in records.UNFINISHED)
+            prompt = instructions.situation(session, project, last.started_at if last else None, unfinished)
+            record = TurnRecord(project_id=project_id, model=f"codex {model or ''}".strip()[:200])
+            session.add(record)
+            session.commit()
+            record_id = record.id
+        rules = instructions.instructions(settings.load(self.home)["language"])
+        turn = tools.Turn(self.home, self.sessions, project_id, self._stop(project_id), self.sees_images())
+        token = self.runs.open(turn)
+        outcome = codex.Outcome(ended="failed", problem="codex_failed")
+        try:
+            outcome = await codex.run(model, rules + "\n\n" + prompt, self.mcp_url, token, turn.stop)
+        except Exception:
+            log.exception("Codex couldn't run a turn on %s", project_id)
+        finally:
+            self.runs.close(token)
+            ended = {"done": "done", "stopped": "stopped", "out_of_time": "out_of_steps"}.get(outcome.ended)
+            with self.sessions() as session:
+                record = session.get(TurnRecord, record_id)
+                record.ended, record.note, record.calls = ended or "ai_failed", outcome.problem, outcome.calls
+                record.ended_at = now()
+                record.input_tokens, record.output_tokens = outcome.input_tokens, outcome.output_tokens
+                session.commit()
+        if outcome.ended == "failed":
+            self._pause(project_id, "ai_failed", problem=outcome.problem or "codex_failed")
+            return False
+        return outcome.ended != "stopped"
 
     async def _turn(self, model: Model, project_id: str) -> bool:
         with self.sessions() as session:

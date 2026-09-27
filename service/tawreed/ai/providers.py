@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic_ai.models import Model
 
-Provider = Literal["anthropic", "openai", "google", "xai", "openai_compatible"]
+# "codex" is the ChatGPT subscription through the Codex client (tawreed.ai.codex): no key, no Pydantic AI model.
+Provider = Literal["anthropic", "openai", "google", "xai", "openai_compatible", "codex"]
 
 LABELS: dict[str, str] = {
     "anthropic": "Anthropic",
@@ -12,6 +13,7 @@ LABELS: dict[str, str] = {
     "google": "Google",
     "xai": "xAI",
     "openai_compatible": "OpenAI-compatible service",
+    "codex": "ChatGPT (Codex)",
 }
 
 
