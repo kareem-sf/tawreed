@@ -5,7 +5,7 @@ import { vi } from "vitest";
 import { App } from "./app/App";
 import { SettingsProvider } from "./app/settings";
 
-export type Call = { method: string; path: string; body: unknown };
+export type Call = { method: string; path: string; body: unknown; query?: Record<string, string> };
 type Handler = (call: Call) => unknown;
 
 export function json(body: unknown, status = 200): Response {
@@ -31,6 +31,8 @@ export function fakeService(routes: Record<string, Handler>): Call[] {
       } else {
         call = { method: init?.method ?? "GET", path: new URL(String(input)).pathname, body: init?.body };
       }
+      const search = new URL(input instanceof Request ? input.url : String(input)).searchParams;
+      if (search.size) call.query = Object.fromEntries(search);
       call.path = call.path.replace(/^\/api/, "");
       calls.push(call);
       const handler = all[`${call.method} ${call.path}`];
@@ -59,7 +61,25 @@ export const project = {
   created_at: "2026-09-27T08:00:00Z",
   updated_at: "2026-09-27T08:00:00Z",
   sources: [
-    { id: "s1", filename: "Architectural.xlsx", size: 1_468_006, kind: "spreadsheet", added_at: "2026-09-27T08:00:00Z" },
-    { id: "s2", filename: "MEP.pdf", size: 52_000, kind: "pdf", added_at: "2026-09-27T08:00:00Z" },
+    {
+      id: "s1",
+      filename: "Architectural.xlsx",
+      size: 1_468_006,
+      kind: "spreadsheet",
+      added_at: "2026-09-27T08:00:00Z",
+      status: "read",
+      problem: null,
+      page_count: 3,
+    },
+    {
+      id: "s2",
+      filename: "MEP.pdf",
+      size: 52_000,
+      kind: "pdf",
+      added_at: "2026-09-27T08:00:00Z",
+      status: "read",
+      problem: null,
+      page_count: 2,
+    },
   ],
 };

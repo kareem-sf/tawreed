@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
-import { explain, type Project } from "../api/client";
+import { explain, type Project, type Source } from "../api/client";
 import { ago, size } from "../app/format";
 import { useSettings } from "../app/settings";
-import type { Key } from "../i18n";
+import type { Key, Translate } from "../i18n";
 import { DropRegion, PickFiles } from "./files";
-import { useAddFiles, useProject, useRename } from "./queries";
+import { isReading, useAddFiles, useProject, useRename } from "./queries";
+import { SourcePreview } from "./SourcePreview";
 
 const STEPS = ["read", "plan", "place", "check", "publish"] as const;
 
@@ -20,6 +21,7 @@ export function ProjectView({
   const { t, locale, ai } = useSettings();
   const project = useProject(projectId);
   const add = useAddFiles(projectId);
+  const [open, setOpen] = useState<string | null>(null); // the file being previewed
 
   if (project.isError) {
     return (
@@ -30,6 +32,7 @@ export function ProjectView({
   }
   if (!project.data) return null;
   const { data } = project;
+  const current = isReading(data) ? "read" : null; // the agent reports the later steps
 
   return (
     <DropRegion onFiles={(files) => add.mutate(files)} className="min-h-full">
@@ -62,9 +65,9 @@ export function ProjectView({
 
           <ol aria-label={t("steps.label")} className="flex flex-wrap items-center gap-2.5 text-sm text-ink-2">
             {STEPS.map((step, index) => (
-              <li key={step} className="flex items-center gap-2.5">
-                <span className="flex items-center gap-1.5">
-                  <span className="size-[7px] rounded-full bg-idle" aria-hidden="true" />
+              <li key={step} aria-current={step === current ? "step" : undefined} className="group flex items-center gap-2.5">
+                <span className="flex items-center gap-1.5 group-aria-[current]:text-ink">
+                  <span className="size-[7px] rounded-full bg-idle group-aria-[current]:bg-ink group-aria-[current]:animate-pulse" aria-hidden="true" />
                   {t(`step.${step}` as Key)}
                 </span>
                 {index < STEPS.length - 1 && <span className="h-px w-6 bg-line" aria-hidden="true" />}
@@ -88,21 +91,60 @@ export function ProjectView({
           )}
 
           <ul className="flex flex-col">
-            {data.sources.map((source) => (
-              <li key={source.id} className="flex items-center gap-4 border-t border-line-soft py-2.5">
-                <span className="min-w-0 flex-1 truncate [unicode-bidi:plaintext] rtl:text-right">
-                  {source.filename}
-                </span>
-                <span className="text-sm text-ink-2">{t(`kind.${source.kind}` as Key)}</span>
-                <span className="w-20 text-end text-sm text-ink-2">{size(source.size, locale)}</span>
-                <span className="w-28 text-end text-sm text-ink-2">{ago(source.added_at, locale)}</span>
-              </li>
-            ))}
+            {data.sources.map((source) => {
+              const opened = open === source.id && source.status === "read";
+              return (
+                <li key={source.id} className="flex flex-col gap-3 border-t border-line-soft py-2.5">
+                  <div className="flex items-center gap-4">
+                    {source.status === "read" ? (
+                      <button
+                        type="button"
+                        aria-expanded={opened}
+                        onClick={() => setOpen(opened ? null : source.id)}
+                        className="min-w-0 flex-1 truncate text-start [unicode-bidi:plaintext] hover:underline rtl:text-right"
+                      >
+                        {source.filename}
+                      </button>
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate [unicode-bidi:plaintext] rtl:text-right">
+                        {source.filename}
+                      </span>
+                    )}
+                    <span className="text-sm text-ink-2">{t(`kind.${source.kind}` as Key)}</span>
+                    <SourceStatus source={source} />
+                    <span className="w-20 text-end text-sm text-ink-2">{size(source.size, locale)}</span>
+                    <span className="w-28 text-end text-sm text-ink-2">{ago(source.added_at, locale)}</span>
+                  </div>
+                  {source.status === "failed" && <p className="text-sm text-danger">{problem(source, t)}</p>}
+                  {opened && <SourcePreview projectId={projectId} sourceId={source.id} />}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
     </DropRegion>
   );
+}
+
+/** Where reading a file has got to: waiting or reading, how many sheets or pages, or that it failed. */
+function SourceStatus({ source }: { source: Source }) {
+  const { t } = useSettings();
+  const text =
+    source.status === "failed"
+      ? t("source.failed")
+      : source.status === "read"
+        ? t(source.kind === "spreadsheet" || source.kind === "csv" ? "source.sheets" : "source.pages", {
+            count: source.page_count,
+          })
+        : t("source.reading");
+  return <span className={`w-24 text-end text-sm ${source.status === "failed" ? "text-danger" : "text-ink-2"}`}>{text}</span>;
+}
+
+/** Why a file couldn't be read, in a sentence that says what to do about it. */
+function problem(source: Source, t: Translate): string {
+  const key = `problem.${source.problem}` as Key;
+  return t(key) !== key ? t(key) : t("problem.unreadable_file");
 }
 
 /** The project's name as an editable heading. Enter or leaving the field saves; Escape undoes. */
