@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e "./service[dev]"
+      - run: ruff check service && ruff format --check service
+      - run: pytest service
+
+  interface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: python -m venv service/.venv && service/.venv/bin/pip install -e ./service
+      - run: npm ci
+      - name: API types match the service
+        run: npm run bindings && git diff --exit-code ui/src/api
+      - run: npm run typecheck
+      - run: npm run test:ui
+      # Thmanyah is not in the repository (licence); the build falls back to the system Arabic font.
+      - run: npx vite build
+
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --manifest-path desktop/Cargo.toml -- -D warnings

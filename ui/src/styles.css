@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/* The approved minimal look: white (near-black in dark mode), hairlines, black buttons,
+   and one amber accent that means "needs you". Figtree for Latin, Thmanyah Sans for Arabic. */
+@theme inline {
+  --font-sans: "Figtree Variable", "Thmanyah Sans", "Segoe UI", system-ui, sans-serif;
+  --color-page: var(--page);
+  --color-soft: var(--soft);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-dash: var(--dash);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-idle: var(--idle);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-amber-line: var(--amber-line);
+  --color-button: var(--button);
+  --color-button-ink: var(--button-ink);
+  --color-danger: var(--danger);
+}
+
+:root {
+  color-scheme: light;
+  --page: #ffffff;
+  --soft: #fafaf9;
+  --subtle: #f6f6f5;
+  --line: #e7e7e5;
+  --line-soft: #f0f0ee;
+  --dash: #c9c9c6;
+  --ink: #161616;
+  --ink-2: #5e5e5b;
+  --idle: #c9c9c6;
+  --amber: #9a4d00;
+  --amber-soft: #fff4e5;
+  --amber-line: #efc98f;
+  --button: #161616;
+  --button-ink: #ffffff;
+  --danger: #b42318;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121212;
+  --soft: #171717;
+  --subtle: #1b1b1b;
+  --line: #2a2a2a;
+  --line-soft: #222222;
+  --dash: #4a4a48;
+  --ink: #ededec;
+  --ink-2: #a1a19d;
+  --idle: #4a4a48;
+  --amber: #f2b25c;
+  --amber-soft: #2e2211;
+  --amber-line: #6b4c1f;
+  --button: #ededec;
+  --button-ink: #121212;
+  --danger: #f97066;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    color-scheme: dark;
+    --page: #121212;
+    --soft: #171717;
+    --subtle: #1b1b1b;
+    --line: #2a2a2a;
+    --line-soft: #222222;
+    --dash: #4a4a48;
+    --ink: #ededec;
+    --ink-2: #a1a19d;
+    --idle: #4a4a48;
+    --amber: #f2b25c;
+    --amber-soft: #2e2211;
+    --amber-line: #6b4c1f;
+    --button: #ededec;
+    --button-ink: #121212;
+    --danger: #f97066;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-page font-sans text-[15px] leading-normal text-ink antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  button {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+}
