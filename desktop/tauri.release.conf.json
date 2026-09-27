@@ -1,0 +1,25 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Tawreed",
+    "copyright": "MIT licence",
+    "category": "Productivity",
+    "shortDescription": "From bills of quantities to procurement packages",
+    "resources": {
+      "../service/dist/tawreed-service/": "service/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English",
+          "Arabic"
+        ],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

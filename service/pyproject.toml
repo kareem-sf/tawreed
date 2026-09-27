@@ -24,6 +24,7 @@ dev = [
     "ruff>=0.16",
     "fpdf2>=2.8",  # writes the synthetic PDF fixtures
     "uharfbuzz>=0.56",  # Arabic text shaping for those fixtures
+    "pyinstaller>=6.16",  # freezes the service for the desktop installer
 ]
 
 [build-system]
