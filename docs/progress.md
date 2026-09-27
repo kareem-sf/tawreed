@@ -136,3 +136,27 @@
   real service with the scripted model went through consent, plan, an uncertain item and the publish request, in
   English and Arabic. Not yet run against a real AI service: that sends data out, so it waits for the engineer.
 - **Next:** publishing the revision (M6).
+
+## 27 September 2026: publishing a revision
+
+- **What is written:** the master workbook (cover, package index with item counts and amounts, one sheet per
+  package), one workbook per package, the decision log (the engineer's decisions, every placement with who made it
+  and why, the rules, how each page was read) and the coverage check (items in use against items placed, the files'
+  amounts against the packages', each total a file states beside its items' own sum, and every item with its
+  package). Items appear under their headings, each with its source ("Tower BOQ.xlsx › Div.03 › row 10").
+- **Values as the source states them:** a value the source wrote as a number goes out as that number, shown grouped
+  with its own decimals, so nothing is rounded; anything else goes out as its text. A package's total is left out
+  when none of its items has an amount, so unpriced work never reads as priced at nothing. A project whose items are
+  mostly Arabic gets Arabic labels and right-to-left sheets. Sheets print landscape, one page wide, with the column
+  headings repeated and page numbers.
+- **All or nothing:** the workbooks are written into a staging folder, the master is read back and each package's
+  items compared with the ledger, a manifest records every file's SHA-256, and only then does the folder become
+  `Rev NN`. A failure leaves nothing behind and the publish request still waiting. A revision is never overwritten.
+- **Interface:** approving publishing writes the revision; the project then shows it (its files, Open folder,
+  Export… as a zip download) and every step as done; earlier revisions are listed, and History shows each project's
+  latest.
+- **Found and fixed:** after publishing, the agent was told to "check the work and ask to publish" again and did so
+  at once; it now knows when the latest revision holds the current work, and its publish request is refused then.
+- **Checks:** 105 service tests, 41 interface tests, typecheck, Ruff, Clippy. Workbooks were exported to PDF through
+  Excel and looked at in English and Arabic; in the browser, a scripted project was published and shown.
+- **Next:** ChatGPT/Codex and Grok subscriptions through their official clients (M7).

@@ -200,7 +200,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Answer */
+        /**
+         * Answer
+         * @description Carry out the engineer's answer. Approving publishing writes the revision before the answer is kept.
+         */
         post: operations["answer_projects__project_id__decisions__decision_id__post"];
         delete?: never;
         options?: never;
@@ -338,6 +341,63 @@ export interface paths {
         post?: never;
         /** Forget Rule */
         delete: operations["forget_rule_rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Revisions */
+        get: operations["list_revisions_projects__project_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/revisions/{number}/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Revision
+         * @description Show the revision's folder in the file manager.
+         */
+        post: operations["open_revision_projects__project_id__revisions__number__open_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/revisions/{number}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Revision
+         * @description The revision's files in one zip, to save wherever the engineer chooses.
+         */
+        get: operations["export_revision_projects__project_id__revisions__number__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -845,6 +905,33 @@ export interface components {
             updated_at: string;
             /** Files */
             files: number;
+            /** Revision */
+            revision: string | null;
+        };
+        /** RevisionFile */
+        RevisionFile: {
+            /** Path */
+            path: string;
+            /** Bytes */
+            bytes: number;
+        };
+        /** RevisionOut */
+        RevisionOut: {
+            /** Number */
+            number: number;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Items */
+            items: number;
+            /** Packages */
+            packages: number;
+            /** Files */
+            files: components["schemas"]["RevisionFile"][];
         };
         /** RuleOut */
         RuleOut: {
@@ -998,7 +1085,7 @@ export interface components {
              * Stage
              * @enum {string}
              */
-            stage: "read" | "plan" | "place" | "check" | "publish";
+            stage: "read" | "plan" | "place" | "check" | "publish" | "published";
             /**
              * Agent
              * @enum {string}
@@ -1013,6 +1100,7 @@ export interface components {
             coverage: components["schemas"]["CoverageOut"];
             /** Packages */
             packages: components["schemas"]["PackageOut"][];
+            published: components["schemas"]["RevisionOut"] | null;
         };
     };
     responses: never;
@@ -1722,6 +1810,103 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_revisions_projects__project_id__revisions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_revision_projects__project_id__revisions__number__open_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_revision_projects__project_id__revisions__number__export_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

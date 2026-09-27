@@ -188,6 +188,11 @@ def test_the_agent_works_a_project_through_every_gate(client, agent):
     assert all(ended == "done" for ended, _ in placed_by)
     assert "Write every message, question, plan and reason for the engineer in English." in brain.instructions[0]
 
+    answer(client, project_id, work, "publish", approve=True)
+    work = settle(client, project_id, lambda w: w["stage"] == "published" and "Published: Rev 00" in brain.prompts[-1])
+    assert work["decisions"] == []  # the agent doesn't ask to publish what is already published
+    assert "Next: nothing: the published revision holds the current work." in brain.prompts[-1]
+
 
 def test_the_agent_writes_to_the_engineer_in_their_language(tmp_path):
     assert "in Arabic." in instructions.instructions("ar")

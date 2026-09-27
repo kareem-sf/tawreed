@@ -14,7 +14,7 @@ from pydantic_ai import BinaryContent, ModelRetry, RunContext, ToolReturn
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from tawreed import decisions, ledger, packages
+from tawreed import decisions, ledger, packages, publish
 from tawreed.agent import records
 from tawreed.ledger import Item, Layout
 from tawreed.ledger.extract import PdfLayout, SheetLayout, TranscribedRow
@@ -574,6 +574,9 @@ def request_publish(ctx: RunContext[Turn], summary: str) -> str:
             raise ValueError("Not every item is placed yet: check_work shows what is left.")
         if decisions.waiting(session, project_id):
             raise ValueError("Something is still waiting for the engineer; ask to publish once it is settled.")
+        published = publish.current(session, _project(session, ctx))
+        if published:
+            raise ValueError(f"{published.name} already holds the current work: nothing has changed since.")
         decisions.raise_decision(session, project_id, "publish", {"summary": summary[:2000]}, "agent")
         return "The engineer has been asked to publish. Wait for their answer."
 

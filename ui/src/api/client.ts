@@ -20,6 +20,7 @@ export type PackageSummary = components["schemas"]["PackageOut"];
 export type PackageRef = components["schemas"]["PackageRef"];
 export type Item = components["schemas"]["ItemOut"];
 export type Answer = components["schemas"]["Answer"];
+export type Revision = components["schemas"]["RevisionOut"];
 
 const base = `${window.location.origin}/api`;
 
@@ -80,6 +81,13 @@ export async function upload(path: string, files: File[]): Promise<Project> {
 export async function pageImage(projectId: string, sourceId: string, page: number): Promise<Blob> {
   const path = `${base}/projects/${projectId}/sources/${sourceId}/pages/${page}/image`;
   const response = await globalThis.fetch(path).catch(offline);
+  if (!response.ok) throw await failure(response);
+  return response.blob();
+}
+
+/** A revision's files as one zip, fetched like every other request. */
+export async function revisionZip(projectId: string, number: number): Promise<Blob> {
+  const response = await globalThis.fetch(`${base}/projects/${projectId}/revisions/${number}/export`).catch(offline);
   if (!response.ok) throw await failure(response);
   return response.blob();
 }

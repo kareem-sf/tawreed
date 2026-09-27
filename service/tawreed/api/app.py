@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 from tawreed import __version__, decisions
 from tawreed.agent.runtime import Worker
-from tawreed.api import ai, projects, settings, sources, work
+from tawreed.api import ai, projects, revisions, settings, sources, work
 from tawreed.core.db import open_database
 from tawreed.sources.reader import Reader
 
@@ -42,6 +42,15 @@ def create_app(home: Path, token: str) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    for router in (projects.router, sources.router, work.router, work.rules_router, settings.router, ai.router):
+    routers = (
+        projects.router,
+        sources.router,
+        work.router,
+        work.rules_router,
+        revisions.router,
+        settings.router,
+        ai.router,
+    )
+    for router in routers:
         app.include_router(router, dependencies=[Depends(require_token)])
     return app

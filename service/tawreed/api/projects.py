@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from tawreed import projects as service
-from tawreed import sources
+from tawreed import publish, sources
 from tawreed.api.common import DB, Home, problem
 from tawreed.projects import NAME_LIMIT
 
@@ -42,6 +42,7 @@ class ProjectSummary(BaseModel):
     name: str
     updated_at: datetime
     files: int
+    revision: str | None  # the latest published, "Rev 02"
 
 
 class ProjectChange(BaseModel):
@@ -67,10 +68,15 @@ def _checked(files: list[UploadFile]) -> list[sources.Incoming]:
 
 @router.get("")
 def list_projects(session: DB) -> list[ProjectSummary]:
-    return [
-        ProjectSummary(id=p.id, name=p.name, updated_at=p.updated_at, files=len(p.sources))
-        for p in service.list_projects(session)
-    ]
+    summaries = []
+    for p in service.list_projects(session):
+        latest = publish.latest(session, p.id)
+        summaries.append(
+            ProjectSummary(
+                id=p.id, name=p.name, updated_at=p.updated_at, files=len(p.sources), revision=latest and latest.name
+            )
+        )
+    return summaries
 
 
 @router.post("", status_code=201)

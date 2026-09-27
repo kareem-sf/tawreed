@@ -26,6 +26,7 @@ export function History({ onOpen }: { onOpen: (id: string) => void }) {
           <span className="min-w-0 flex-1 truncate font-semibold [unicode-bidi:plaintext] rtl:text-right">
             {project.name}
           </span>
+          {project.revision && <span className="text-ink-2">{project.revision}</span>}
           <span className="text-ink-2">{t("project.files", { count: project.files })}</span>
           <span className="w-28 text-end text-ink-2">{ago(project.updated_at, locale)}</span>
         </button>
