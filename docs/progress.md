@@ -160,3 +160,27 @@
 - **Checks:** 105 service tests, 41 interface tests, typecheck, Ruff, Clippy. Workbooks were exported to PDF through
   Excel and looked at in English and Arabic; in the browser, a scripted project was published and shown.
 - **Next:** ChatGPT/Codex and Grok subscriptions through their official clients (M7).
+
+## 27 September 2026: subscriptions (stopped for the engineer's decision)
+
+The plan runs ChatGPT/Codex and Grok through their official clients with the client's own shell, file and web tools
+off and Tawreed's MCP bridge as the only tool server, and stops to report if a client can't be restricted that way.
+Each client was run against a fake model endpoint on this machine that recorded exactly which tools it offered the
+model, with the client's home folder in a scratch location: no subscription was used and no project data left the
+machine.
+
+- **The bridge works.** An MCP server serving Tawreed's 16 agent tools over stdio, for one project, with the same
+  checks; refusals come back as tool errors. It is kept on the local branch `wip/m7-subscription-bridge`, not on
+  main, because nothing uses it yet. It takes about 6 s to start (imports).
+- **Codex 0.153.4:** `--ignore-user-config`, a read-only sandbox, an empty working folder and `--disable` for its
+  shell, exec, image, multi-agent, apps, plugins, browser and computer-use features (plus web search off) leave only
+  `request_user_input`, and `apply_patch` (file editing) for real model names. Two problems remain: the user's
+  `~/.agents/skills` list is put into every prompt, and Tawreed's MCP tools never reached the model's tool list in
+  these runs (Codex defers MCP tools behind a tool search this setup doesn't show). Not shown to be restricted.
+- **Grok 1.0.30:** headless `-p` with an explicit allowlist `--tools "search_tool,use_tool"` offers only those two
+  meta-tools; an *empty* allowlist offers all 25 built-in tools, terminal and file tools included. MCP servers from
+  the user's own Grok config load alongside Tawreed's (reachable through `use_tool`) and would need denying by name
+  (`--deny "MCPTool(name__*)"`); Claude and Cursor compatibility is on by default and would bring in the user's
+  Claude MCP servers, hooks and personal instruction files unless switched off by environment variables. It can be
+  restricted, but only by a long list of settings whose defaults can change between versions.
+- **Not tested:** a real signed-in run, which uses the engineer's subscription.
