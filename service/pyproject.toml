@@ -12,6 +12,9 @@ dependencies = [
     "python-multipart>=0.0.32",
     "pydantic-ai-slim[anthropic,google,openai,xai]>=2.51",
     "pillow>=12.3",
+    "openpyxl>=3.1.5",
+    "python-calamine>=0.8",
+    "pypdfium2>=5.13",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +22,8 @@ dev = [
     "pytest>=9.1",
     "httpx2>=2.13",
     "ruff>=0.16",
+    "fpdf2>=2.8",  # writes the synthetic PDF fixtures
+    "uharfbuzz>=0.56",  # Arabic text shaping for those fixtures
 ]
 
 [build-system]

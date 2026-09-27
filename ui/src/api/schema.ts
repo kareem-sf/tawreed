@@ -80,6 +80,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Source */
+        get: operations["get_source_projects__project_id__sources__source_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/sources/{source_id}/pages/{number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Page
+         * @description A page's content. Sheets come a window of rows at a time, from row `start`.
+         */
+        get: operations["get_page_projects__project_id__sources__source_id__pages__number__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/sources/{source_id}/pages/{number}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Page Image
+         * @description A PNG of a PDF page or an image; drawn once, then kept beside the page's content.
+         */
+        get: operations["page_image_projects__project_id__sources__source_id__pages__number__image_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -260,6 +317,18 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImageView */
+        ImageView: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "image";
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+        };
         /** ModelCheck */
         ModelCheck: {
             /** Ok */
@@ -270,6 +339,30 @@ export interface components {
             sees_images: boolean;
             /** Checked At */
             checked_at: string;
+        };
+        /** PageOut */
+        PageOut: {
+            /** Number */
+            number: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sheet" | "page" | "image";
+            /** Name */
+            name: string;
+            /** Has Text */
+            has_text: boolean;
+            /** Hidden */
+            hidden: boolean;
+            /** Rows */
+            rows: number | null;
+            /** Cols */
+            cols: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
         };
         /** ProjectChange */
         ProjectChange: {
@@ -331,6 +424,54 @@ export interface components {
             theme: "system" | "light" | "dark";
             ai: components["schemas"]["AIChoice"] | null;
         };
+        /** SheetView */
+        SheetView: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "sheet";
+            /** Name */
+            name: string;
+            /** First Row */
+            first_row: number;
+            /** Rows */
+            rows: (string | number | boolean | null)[][];
+            /** Total Rows */
+            total_rows: number;
+            /** Merged */
+            merged: number[][];
+        };
+        /** SourceDetail */
+        SourceDetail: {
+            /** Id */
+            id: string;
+            /** Filename */
+            filename: string;
+            /** Size */
+            size: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "spreadsheet" | "csv" | "pdf" | "image";
+            /**
+             * Added At
+             * Format: date-time
+             */
+            added_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "added" | "reading" | "read" | "failed";
+            /** Problem */
+            problem: string | null;
+            /** Page Count */
+            page_count: number;
+            /** Pages */
+            pages: components["schemas"]["PageOut"][];
+        };
         /** SourceOut */
         SourceOut: {
             /** Id */
@@ -349,6 +490,38 @@ export interface components {
              * Format: date-time
              */
             added_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "added" | "reading" | "read" | "failed";
+            /** Problem */
+            problem: string | null;
+            /** Page Count */
+            page_count: number;
+        };
+        /** TextLine */
+        TextLine: {
+            /** Top */
+            top: number;
+            /** Bottom */
+            bottom: number;
+            /** Text */
+            text: string;
+        };
+        /** TextView */
+        TextView: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "page";
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Lines */
+            lines: components["schemas"]["TextLine"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -555,6 +728,111 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProjectOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_source_projects__project_id__sources__source_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_page_projects__project_id__sources__source_id__pages__number__get: {
+        parameters: {
+            query?: {
+                start?: number;
+                count?: number;
+            };
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                source_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SheetView"] | components["schemas"]["TextView"] | components["schemas"]["ImageView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    page_image_projects__project_id__sources__source_id__pages__number__image_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                source_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
