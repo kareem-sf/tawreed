@@ -37,7 +37,7 @@ def main() -> None:
         exit_with_stdin()
     logging.basicConfig(format="%(asctime)s %(name)s %(message)s", datefmt="%H:%M:%S")
     logging.getLogger("tawreed").setLevel(logging.INFO)
-    uvicorn.run(create_app(data_home(), token), host="127.0.0.1", port=args.port, log_level="warning")
+    uvicorn.run(create_app(data_home(), token, args.port), host="127.0.0.1", port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

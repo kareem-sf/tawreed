@@ -48,16 +48,21 @@ async def _uses_tools(model: Model) -> str | None:
     return None if code in received else "no_tool_use"
 
 
-async def _reads_images(model: Model) -> bool:
-    number = str(secrets.randbelow(900) + 100)
+def number_image(number: str) -> bytes:
+    """A PNG with a number written large on it, for checking that a model reads images."""
     image = Image.new("RGB", (420, 180), "white")
     ImageDraw.Draw(image).text((60, 30), number, fill="black", font=ImageFont.load_default(size=110))
     png = io.BytesIO()
     image.save(png, format="PNG")
+    return png.getvalue()
+
+
+async def _reads_images(model: Model) -> bool:
+    number = str(secrets.randbelow(900) + 100)
     agent = Agent(model, instructions="Read images exactly.", model_settings=ModelSettings(timeout=120.0))
     question = "What number is written in this image? Reply with the digits only."
     try:
-        result = await agent.run([question, BinaryContent(png.getvalue(), media_type="image/png")])
+        result = await agent.run([question, BinaryContent(number_image(number), media_type="image/png")])
     except Exception:  # noqa: BLE001  (a model that refuses images simply can't read them)
         return False
     return number in str(result.output)
