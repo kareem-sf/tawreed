@@ -198,7 +198,7 @@ machine.
 - **Release:** `npm run release` writes `SHA256SUMS.txt` beside the installer, says whether Thmanyah is embedded,
   and prints the `gh release create --draft` command. Release builds are made on the engineer's machine for the
   font licence; nothing has been published.
-- **Checks:** 107 service tests (including the service stopping when its input closes), 41 interface tests,
+- **Checks:** 106 service tests (including the service stopping when its input closes), 41 interface tests,
   typecheck, Ruff and Clippy. The frozen service was run on its own and read a workbook, a PDF and a scan. The
   release executable was run from the build folder on a scratch data folder: it started its service, the page
   listed the scratch project through the proxy, Arabic rendered in Thmanyah Sans right to left, and closing or
