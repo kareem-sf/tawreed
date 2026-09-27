@@ -1,0 +1,12 @@
+[package]
+name = "tawreed-desktop"
+version = "0.1.0"
+description = "Tawreed desktop window"
+edition = "2024"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

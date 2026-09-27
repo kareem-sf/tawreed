@@ -1,0 +1,31 @@
+# Dependencies and build output
+node_modules/
+dist/
+desktop/target/
+desktop/gen/
+service/.venv/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+coverage/
+*.tsbuildinfo
+
+# Local data, keys and customer documents — never commit
+.env
+.env.*
+*.sqlite
+*.db
+auth.json
+private/
+
+# Thmanyah font files: licence forbids committing or hosting them
+ui/src/fonts/thmanyah/
+*.otf
+*.woff2
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
