@@ -208,3 +208,15 @@ machine.
 
 - At the engineer's request, the Grok subscription is out of scope; the ChatGPT subscription through Codex stays.
   xAI API keys are unaffected.
+
+## 27 September 2026: Codex drives Tawreed's tools
+
+- A real run on the engineer's ChatGPT subscription, on a synthetic project, passed: Codex found Tawreed's tools,
+  called `list_files` and `read_sheet` successfully, answered correctly, and used no other tool.
+- What it takes, beyond the lockdown recorded above: `mcp_servers.tawreed.required=true`, so the session waits for
+  the bridge and its tools are searchable from the start (Codex hides MCP tools behind `tool_search`, which only
+  covers servers ready when the session starts); `mcp_servers.tawreed.default_tools_approval_mode="approve"`, so
+  Tawreed's own tools, and only they, run without an approval prompt nobody is there to answer; and an empty
+  standard input, or `codex exec` waits for more input. Left in place: `request_user_input`, the MCP resource
+  helpers, and `apply_patch`, which the read-only sandbox stops from writing.
+- **Next:** Codex as a connection in Settings and as a way to run the agent's turns.
