@@ -10,6 +10,9 @@ export type About = components["schemas"]["AboutOut"];
 export type Connection = components["schemas"]["ConnectionOut"];
 export type Provider = Connection["provider"];
 export type ModelCheck = components["schemas"]["ModelCheck"];
+export type SourceDetail = components["schemas"]["SourceDetail"];
+export type SourcePage = components["schemas"]["PageOut"];
+export type SheetView = components["schemas"]["SheetView"];
 
 const base = `${window.location.origin}/api`;
 
@@ -58,6 +61,14 @@ export async function upload(path: string, files: File[]): Promise<Project> {
   const response = await globalThis.fetch(`${base}${path}`, { method: "POST", body: form }).catch(offline);
   if (!response.ok) throw await failure(response);
   return (await response.json()) as Project;
+}
+
+/** A page image as a blob: fetched like every other request, so it carries the same access as they do. */
+export async function pageImage(projectId: string, sourceId: string, page: number): Promise<Blob> {
+  const path = `${base}/projects/${projectId}/sources/${sourceId}/pages/${page}/image`;
+  const response = await globalThis.fetch(path).catch(offline);
+  if (!response.ok) throw await failure(response);
+  return response.blob();
 }
 
 /** A plain sentence for the engineer, in their language. */

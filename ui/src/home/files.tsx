@@ -3,6 +3,12 @@ import { useRef, useState, type DragEvent, type ReactNode } from "react";
 // What the file picker offers; the service decides what it accepts.
 export const ACCEPT = ".xlsx,.xlsm,.xls,.ods,.csv,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.webp";
 
+// Dragging a picture inside Tawreed (a page preview, say) makes the browser offer it as a file too.
+// Only drags that come from outside the window are files the engineer is adding.
+let dragFromPage = false;
+window.addEventListener("dragstart", () => (dragFromPage = true));
+for (const done of ["dragend", "drop"]) window.addEventListener(done, () => (dragFromPage = false)); // drop: in case the dragged element is gone
+
 /** A region that takes dropped files. `over` is true while files are dragged above it. */
 export function DropRegion({
   onFiles,
@@ -14,7 +20,7 @@ export function DropRegion({
   children: (over: boolean) => ReactNode;
 }) {
   const [depth, setDepth] = useState(0); // dragenter/leave fire for every child, so count them
-  const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
+  const carriesFiles = (event: DragEvent) => !dragFromPage && Array.from(event.dataTransfer.types).includes("Files");
 
   return (
     <div
@@ -33,6 +39,7 @@ export function DropRegion({
       onDrop={(event) => {
         event.preventDefault();
         setDepth(0);
+        if (!carriesFiles(event)) return;
         const files = Array.from(event.dataTransfer.files);
         if (files.length) onFiles(files);
       }}
