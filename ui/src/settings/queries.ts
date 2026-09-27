@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, must, succeed, type Provider } from "../api/client";
 
-export const PROVIDERS: Provider[] = ["anthropic", "openai", "google", "xai", "openai_compatible"];
+export const PROVIDERS: Provider[] = ["anthropic", "openai", "google", "xai", "openai_compatible", "codex"];
 
 export function useConnections() {
   return useQuery({ queryKey: ["connections"], queryFn: () => must(api.GET("/ai/connections")) });
@@ -67,4 +67,18 @@ export function useForgetRule() {
     mutationFn: (ruleId: string) => succeed(api.DELETE("/rules/{rule_id}", { params: { path: { rule_id: ruleId } } })),
     onSuccess: refresh,
   });
+}
+
+/** Whether the Codex client is installed and signed in; asked again every few seconds while it isn't signed in. */
+export function useCodex(enabled: boolean) {
+  return useQuery({
+    queryKey: ["codex"],
+    queryFn: () => must(api.GET("/ai/codex")),
+    enabled,
+    refetchInterval: (query) => (query.state.data?.signed_in ? false : 3000),
+  });
+}
+
+export function useCodexSignIn() {
+  return useMutation({ mutationFn: () => succeed(api.POST("/ai/codex/sign-in")) });
 }

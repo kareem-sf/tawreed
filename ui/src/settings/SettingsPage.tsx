@@ -6,6 +6,8 @@ import {
   PROVIDERS,
   useAddConnection,
   useCheckModel,
+  useCodex,
+  useCodexSignIn,
   useConnections,
   useForgetRule,
   useModels,
@@ -196,7 +198,9 @@ function ConnectionRow({ connection }: { connection: Connection }) {
     <section aria-label={name} className="flex flex-col gap-2 border-b border-line-soft py-3">
       <div className="flex items-center gap-4">
         <span className="w-40 shrink-0 font-semibold">{name}</span>
-        <span className="flex-1 text-sm text-ink-2">{t("connection.key", { hint: connection.key_hint })}</span>
+        <span className="flex-1 text-sm text-ink-2">
+          {connection.provider === "codex" ? t("connection.codex") : t("connection.key", { hint: connection.key_hint })}
+        </span>
         <button type="button" onClick={() => remove.mutate(connection.id)} disabled={remove.isPending} className={quiet}>
           {t("connection.remove")}
         </button>
@@ -253,6 +257,8 @@ function AddConnection() {
   const [showKey, setShowKey] = useState(false);
   const [address, setAddress] = useState("");
   const needsAddress = provider === "openai_compatible";
+  const isCodex = provider === "codex";
+  const codex = useCodex(isCodex);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -290,32 +296,35 @@ function AddConnection() {
           </label>
         ))}
       </fieldset>
+      {isCodex && <CodexState state={codex.data} />}
       {/* Keys read left to right in either language, so the field and its eye button do too. */}
-      <div className="relative flex" dir="ltr">
-        <input
-          aria-label={t("add.key")}
-          type={showKey ? "text" : "password"}
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          placeholder={t("add.key")}
-          autoComplete="off"
-          spellCheck={false}
-          className={`${field} min-w-0 flex-1 pe-10`}
-        />
-        <button
-          type="button"
-          aria-label={showKey ? t("add.hide") : t("add.show")}
-          aria-pressed={showKey}
-          onClick={() => setShowKey(!showKey)}
-          className="absolute inset-y-0 end-0 flex w-10 items-center justify-center text-ink-2 hover:text-ink"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-            <circle cx="12" cy="12" r="3" />
-            {showKey && <path d="M4 4l16 16" />}
-          </svg>
-        </button>
-      </div>
+      {!isCodex && (
+        <div className="relative flex" dir="ltr">
+          <input
+            aria-label={t("add.key")}
+            type={showKey ? "text" : "password"}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder={t("add.key")}
+            autoComplete="off"
+            spellCheck={false}
+            className={`${field} min-w-0 flex-1 pe-10`}
+          />
+          <button
+            type="button"
+            aria-label={showKey ? t("add.hide") : t("add.show")}
+            aria-pressed={showKey}
+            onClick={() => setShowKey(!showKey)}
+            className="absolute inset-y-0 end-0 flex w-10 items-center justify-center text-ink-2 hover:text-ink"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+              <circle cx="12" cy="12" r="3" />
+              {showKey && <path d="M4 4l16 16" />}
+            </svg>
+          </button>
+        </div>
+      )}
       {needsAddress && (
         <input
           aria-label={t("add.address")}
@@ -333,11 +342,44 @@ function AddConnection() {
       )}
       <button
         type="submit"
-        disabled={!key.trim() || (needsAddress && !address.trim()) || add.isPending}
+        disabled={(isCodex ? !codex.data?.signed_in : !key.trim()) || (needsAddress && !address.trim()) || add.isPending}
         className={`${primary} self-start`}
       >
         {add.isPending ? t("add.checking") : t("add.submit")}
       </button>
     </form>
+  );
+}
+
+/** Where Codex stands on this computer, and its own sign-in when it isn't signed in. */
+function CodexState({ state }: { state: { installed: boolean; version: string | null; signed_in: boolean } | undefined }) {
+  const { t } = useSettings();
+  const signIn = useCodexSignIn();
+  if (!state) return <p className="text-sm text-ink-2">{t("codex.looking")}</p>;
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      {!state.installed && <p className="text-amber">{t("codex.missing")}</p>}
+      {state.installed && state.signed_in && <p>{t("codex.signedIn", { version: state.version ?? "" })}</p>}
+      {state.installed && !state.signed_in && (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-amber">{t("codex.signedOut", { version: state.version ?? "" })}</p>
+          <button
+            type="button"
+            disabled={signIn.isPending}
+            onClick={() => signIn.mutate()}
+            className="rounded-lg border border-line px-3 py-1 hover:border-ink disabled:opacity-50"
+          >
+            {t("codex.signIn")}
+          </button>
+        </div>
+      )}
+      {state.installed && !state.signed_in && <p className="text-ink-2">{t("codex.signInNote")}</p>}
+      <p className="text-ink-2">{t("codex.lockdown")}</p>
+      {signIn.isError && (
+        <p role="alert" className="text-danger">
+          {explain(signIn.error, t)}
+        </p>
+      )}
+    </div>
   );
 }
