@@ -121,6 +121,12 @@ export const en = {
   "answered.publish": "You approved publishing.",
   "answered.publishNo": "You held publishing back",
 
+  "revision.label": "Published revision",
+  "revision.published": "{name} is published",
+  "revision.holds": "Packages: {packages} · Items: {count}",
+  "revision.open": "Open folder",
+  "revision.export": "Export…",
+  "revision.list": "Revisions",
   "packages.title": "Packages",
   "packages.view": "View and edit",
   "packages.back": "Back",
@@ -234,6 +240,8 @@ export const en = {
   "error.decided_by_engineer": "You placed this item yourself.",
   "error.item_not_found": "This item is no longer in the project.",
   "error.rule_not_found": "This rule no longer exists.",
+  "error.revision_not_found": "This revision no longer exists.",
+  "error.not_ready_to_publish": "Not every item is placed yet, so the revision can’t be published. Tawreed will finish first.",
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof en;

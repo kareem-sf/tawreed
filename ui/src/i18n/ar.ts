@@ -152,6 +152,12 @@ export const ar: Record<Key, Entry> = {
   "answered.publish": "وافقت على الإصدار.",
   "answered.publishNo": "أجّلت الإصدار",
 
+  "revision.label": "الإصدار المنشور",
+  "revision.published": "صدر {name}",
+  "revision.holds": "الحزم: {packages} · البنود: {count}",
+  "revision.open": "فتح المجلد",
+  "revision.export": "تصدير…",
+  "revision.list": "الإصدارات",
   "packages.title": "الحزم",
   "packages.view": "عرض وتعديل",
   "packages.back": "رجوع",
@@ -272,4 +278,6 @@ export const ar: Record<Key, Entry> = {
   "error.decided_by_engineer": "أنت من وضع هذا البند.",
   "error.item_not_found": "هذا البند لم يعد ضمن المشروع.",
   "error.rule_not_found": "هذه القاعدة لم تعد موجودة.",
+  "error.revision_not_found": "هذا الإصدار لم يعد موجوداً.",
+  "error.not_ready_to_publish": "لم تُوزع كل البنود بعد، فلا يمكن الإصدار. سينهي توريد العمل أولاً.",
 };

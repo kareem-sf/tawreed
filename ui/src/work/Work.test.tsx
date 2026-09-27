@@ -248,3 +248,56 @@ test("the engineer moves, renames, merges and removes packages directly", async 
   await user.click(screen.getByRole("button", { name: "Back" }));
   expect(await screen.findByRole("region", { name: "Conversation" })).toBeInTheDocument();
 });
+
+test("a published revision shows what was written, and opens or exports its folder", async () => {
+  Object.assign(URL, { createObjectURL: () => "blob:zip", revokeObjectURL: () => {} }); // jsdom has neither
+  const revision = {
+    number: 0,
+    name: "Rev 00",
+    created_at: new Date().toISOString(),
+    items: 5,
+    packages: 3,
+    files: [
+      { path: "Al Noor Tower - Master - Rev 00.xlsx", bytes: 20_480 },
+      { path: "Packages/01 Concrete works - Rev 00.xlsx", bytes: 9_216 },
+      { path: "manifest.json", bytes: 900 },
+    ],
+  };
+  const publishAsked = decision("publish", { summary: "Three packages; every item placed." });
+  let published = false;
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () =>
+      published
+        ? work({ stage: "published", published: revision, packages })
+        : work({ stage: "publish", decisions: [publishAsked], packages }),
+    "POST /projects/p1/decisions/d-publish": () => {
+      published = true;
+      return ok();
+    },
+    "GET /projects/p1/revisions": () => [revision],
+    "POST /projects/p1/revisions/0/open": ok,
+    "GET /projects/p1/revisions/0/export": () => new Response(new Uint8Array([80, 75]), { headers: { "Content-Type": "application/zip" } }),
+  });
+
+  const card = await screen.findByRole("region", { name: "Waiting for you" });
+  expect(card).toHaveTextContent("Ready to publish");
+  await user.click(within(card).getByRole("button", { name: "Publish" }));
+
+  const done = await screen.findByRole("region", { name: "Published revision" });
+  expect(done).toHaveTextContent("Rev 00 is published");
+  expect(done).toHaveTextContent("Packages: 3 · Items: 5");
+  expect(within(done).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+    "Al Noor Tower - Master - Rev 00.xlsx20 kB",
+    "01 Concrete works - Rev 00.xlsx9 kB",
+  ]);
+  const steps = screen.getByRole("list", { name: "Progress" });
+  expect(steps.querySelectorAll("[data-done]")).toHaveLength(5);
+
+  await user.click(within(done).getByRole("button", { name: "Open folder" }));
+  await user.click(within(done).getByRole("button", { name: "Export…" }));
+  await waitFor(() =>
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(
+      expect.arrayContaining(["POST /projects/p1/revisions/0/open", "GET /projects/p1/revisions/0/export"]),
+    ),
+  );
+});

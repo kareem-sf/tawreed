@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, must, succeed, type Answer } from "../api/client";
+import { api, must, revisionZip, succeed, type Answer } from "../api/client";
 
 /** How often an open project's work is asked for: often while the agent works, calmly otherwise. */
 export const WORKING_POLL = 1000;
@@ -105,4 +105,38 @@ export function useEdits(projectId: string) {
       onSuccess,
     }),
   };
+}
+
+export function useRevisions(projectId: string, published: string | undefined) {
+  return useQuery({
+    queryKey: ["revisions", projectId, published], // asked again when a new revision is published
+    queryFn: () =>
+      must(api.GET("/projects/{project_id}/revisions", { params: { path: { project_id: projectId } } })),
+    enabled: Boolean(published),
+  });
+}
+
+export function useOpenRevision(projectId: string) {
+  return useMutation({
+    mutationFn: (number: number) =>
+      succeed(
+        api.POST("/projects/{project_id}/revisions/{number}/open", {
+          params: { path: { project_id: projectId, number } },
+        }),
+      ),
+  });
+}
+
+/** Save a revision's files as a zip, wherever the engineer's browser or Tawreed's window saves downloads. */
+export function useExportRevision(projectId: string) {
+  return useMutation({
+    mutationFn: async ({ number, filename }: { number: number; filename: string }) => {
+      const url = URL.createObjectURL(await revisionZip(projectId, number));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+  });
 }

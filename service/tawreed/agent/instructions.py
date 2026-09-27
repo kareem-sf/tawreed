@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tawreed import decisions, packages
+from tawreed import decisions, packages, publish
 from tawreed.agent import records
 from tawreed.agent.tools import files_overview
 from tawreed.ledger import Item
@@ -92,11 +92,18 @@ def situation(session: Session, project: Project, since: datetime | None, unfini
         parts.append("New since your last turn (deal with this first):\n" + "\n".join(fresh))
     if unfinished:
         parts.append("Your last turn ended before you finished. Carry on from what the records above show.")
-    parts.append("Next: " + _next(coverage, package_list, waiting))
+    published = publish.latest(session, project_id)
+    if published:
+        holds = publish.current(session, project) is not None
+        parts.append(
+            f"Published: {published.name}, "
+            + ("which holds the current work." if holds else "but the work has changed since.")
+        )
+    parts.append("Next: " + _next(coverage, package_list, waiting, publish.current(session, project) is not None))
     return "\n\n".join(parts)
 
 
-def _next(coverage: packages.Coverage, package_list: list, waiting: list) -> str:
+def _next(coverage: packages.Coverage, package_list: list, waiting: list, published: bool) -> str:
     kinds = {d.kind for d in waiting}
     if coverage.pages_left:
         return "handle the pages not handled yet (list_files shows them)."
@@ -112,6 +119,8 @@ def _next(coverage: packages.Coverage, package_list: list, waiting: list) -> str
         return "wait for the engineer's answers on the uncertain items."
     if "publish" in kinds:
         return "wait for the engineer to publish."
+    if published:
+        return "nothing: the published revision holds the current work. Answer the engineer if they wrote."
     return "check the work and ask to publish."
 
 

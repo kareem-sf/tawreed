@@ -9,11 +9,12 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tawreed import decisions, packages
+from tawreed import decisions, packages, publish
 from tawreed import projects as project_records
 from tawreed.agent import records
 from tawreed.agent.runtime import chosen
 from tawreed.api.common import DB, Home, problem
+from tawreed.api.revisions import RevisionOut, revision_out
 from tawreed.ledger import Item
 from tawreed.projects import Project
 from tawreed.sources import Source
@@ -21,7 +22,7 @@ from tawreed.sources import Source
 router = APIRouter(prefix="/projects/{project_id}", tags=["work"])
 rules_router = APIRouter(prefix="/rules", tags=["work"])
 
-Stage = Literal["read", "plan", "place", "check", "publish"]
+Stage = Literal["read", "plan", "place", "check", "publish", "published"]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=packages.NAME_LIMIT)]
 
@@ -120,6 +121,7 @@ class WorkOut(BaseModel):
     messages: list[MessageOut]
     coverage: CoverageOut
     packages: list[PackageOut]
+    published: RevisionOut | None  # the latest revision
 
 
 class MessageIn(BaseModel):
@@ -237,8 +239,13 @@ def _decision(session: Session, decision: decisions.Decision) -> DecisionOut:
     return out
 
 
-def stage(session: Session, project: Project, waiting: list[decisions.Decision], coverage: packages.Coverage) -> str:
-    """Where the project is on the five-step line."""
+def stage(
+    session: Session,
+    project: Project,
+    waiting: list[decisions.Decision],
+    coverage: packages.Coverage,
+) -> str:
+    """Where the project is on the five-step line: published once its latest revision holds its current work."""
     reading = session.scalars(
         select(Source.id).where(Source.project_id == project.id, Source.status.in_(("added", "reading")))
     ).first()
@@ -250,6 +257,8 @@ def stage(session: Session, project: Project, waiting: list[decisions.Decision],
         return "place"
     if any(d.kind == "publish" for d in waiting):
         return "publish"
+    if publish.current(session, project):
+        return "published"
     return "check"
 
 
@@ -262,8 +271,10 @@ def get_work(project_id: str, request: Request, session: DB, home: Home) -> Work
     waiting = decisions.waiting(session, project_id)
     coverage = packages.coverage(session, project_id, decisions.waiting_items(session, project_id))
     agent = request.app.state.worker.status(project_id) if chosen(home) else "no_ai"
+    latest = publish.latest(session, project_id)
     return WorkOut(
         stage=stage(session, project, waiting, coverage),
+        published=revision_out(latest) if latest else None,
         agent=agent,
         decisions=[_decision(session, d) for d in waiting],
         answered=[_decision(session, d) for d in decisions.answered(session, project_id)[-30:]],
@@ -311,16 +322,27 @@ def stop(project_id: str, request: Request, session: DB) -> Response:
 
 
 @router.post("/decisions/{decision_id}", status_code=204)
-def answer(project_id: str, decision_id: str, body: decisions.Answer, request: Request, session: DB) -> Response:
+def answer(
+    project_id: str, decision_id: str, body: decisions.Answer, request: Request, session: DB, home: Home
+) -> Response:
+    """Carry out the engineer's answer. Approving publishing writes the revision before the answer is kept."""
     project = _project(session, project_id)
     decision = decisions.get(session, project_id, decision_id)
     if decision is None:
         raise problem(404, "decision_not_found")
+    revision = None
     try:
+        if decision.kind == "publish" and body.approve and decision.status == "waiting":
+            revision = publish.publish(session, home, project)
         decisions.answer(session, project, decision, body)
     except decisions.Unanswerable as error:
         session.rollback()
         raise problem(409, error.code) from error
+    except publish.NotReady as error:
+        session.rollback()
+        raise problem(409, error.code) from error
+    if revision:
+        decision.answer = {**decision.answer, "revision": revision.name}
     session.commit()
     request.app.state.worker.resume(project_id)
     return Response(status_code=204)

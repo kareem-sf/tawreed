@@ -6,6 +6,7 @@ import type { Key, Translate } from "../i18n";
 import { Conversation } from "../work/Conversation";
 import { DecisionCard } from "../work/DecisionCard";
 import { Packages } from "../work/Packages";
+import { Published, Revisions } from "../work/Revisions";
 import { useWork } from "../work/queries";
 import { DropRegion, PickFiles } from "./files";
 import { isReading, useAddFiles, useProject, useRename } from "./queries";
@@ -96,9 +97,19 @@ export function ProjectView({
           ) : (
             <>
               {decision && <DecisionCard key={decision.id} projectId={projectId} decision={decision} more={more.length} />}
+              {stage === "published" && work.data?.published && (
+                <Published projectId={projectId} projectName={data.name} revision={work.data.published} />
+              )}
               {work.data && <Conversation projectId={projectId} work={work.data} canWrite={Boolean(ai)} />}
               {work.data && work.data.packages.length > 0 && (
                 <PackageSummary work={work.data} onOpen={() => setView("packages")} />
+              )}
+              {work.data?.published && (
+                <Revisions
+                  projectId={projectId}
+                  projectName={data.name}
+                  latest={stage === "published" ? work.data.published.name : ""}
+                />
               )}
               <Files projectId={projectId} project={data} />
             </>
@@ -112,7 +123,7 @@ export function ProjectView({
 /** Read · Plan · Place · Check · Publish: done, where the work is now, and still to come. */
 function Steps({ stage, working }: { stage: string | null; working: boolean }) {
   const { t } = useSettings();
-  const now = STEPS.findIndex((step) => step === stage);
+  const now = stage === "published" ? STEPS.length : STEPS.findIndex((step) => step === stage);
   return (
     <ol aria-label={t("steps.label")} className="flex flex-wrap items-center gap-2.5 text-sm text-ink-2">
       {STEPS.map((step, index) => (
