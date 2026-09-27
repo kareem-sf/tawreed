@@ -19,6 +19,7 @@ export function fakeService(routes: Record<string, Handler>): Call[] {
     "GET /settings": () => ({ language: "en", theme: "system", ai: null }),
     "GET /projects": () => [],
     "GET /ai/connections": () => [],
+    "GET /rules": () => [],
     ...routes,
   };
   vi.stubGlobal(
@@ -35,13 +36,27 @@ export function fakeService(routes: Record<string, Handler>): Call[] {
       if (search.size) call.query = Object.fromEntries(search);
       call.path = call.path.replace(/^\/api/, "");
       calls.push(call);
-      const handler = all[`${call.method} ${call.path}`];
+      const handler = all[`${call.method} ${call.path}`] ?? (/^\/projects\/\w+\/work$/.test(call.path) ? () => work() : undefined);
       if (!handler) return json({ detail: { code: "not_in_test" } }, 404);
       const result = await handler(call);
       return result instanceof Response ? result : json(result);
     }),
   );
   return calls;
+}
+
+/** An open project's work: nothing waiting, nothing said, no packages yet. Tests override what they need. */
+export function work(changes: Record<string, unknown> = {}) {
+  return {
+    stage: "read",
+    agent: "idle",
+    decisions: [],
+    answered: [],
+    messages: [],
+    coverage: { items: 0, placed: 0, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0 },
+    packages: [],
+    ...changes,
+  };
 }
 
 export function renderApp() {

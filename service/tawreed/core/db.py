@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import DateTime, Engine, TypeDecorator, create_engine, event
+from sqlalchemy import DateTime, TypeDecorator, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 MIGRATIONS = Path(__file__).resolve().parent.parent / "migrations"
@@ -34,9 +34,10 @@ def now() -> datetime:
 def open_database(home: Path) -> sessionmaker[Session]:
     """Open the database under the data home, bring its schema up to date and return a session factory."""
     home.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite:///{home / 'tawreed.sqlite'}")
+    url = f"sqlite:///{home / 'tawreed.sqlite'}"
+    _upgrade(url)
+    engine = create_engine(url)
     event.listen(engine, "connect", _sqlite_pragmas)
-    _upgrade(engine)
     return sessionmaker(engine, expire_on_commit=False)
 
 
@@ -45,12 +46,22 @@ def sessions(factory: sessionmaker[Session]) -> Iterator[Session]:
         yield session
 
 
-def _upgrade(engine: Engine) -> None:
+def _upgrade(url: str) -> None:
+    """Migrate on a connection with foreign keys off (SQLite's default): SQLite changes a table by rebuilding it,
+    and dropping the old table would otherwise delete every row that refers to it. The references are checked
+    before the migration is kept."""
+    engine = create_engine(url)
     config = Config()
     config.set_main_option("script_location", str(MIGRATIONS))
-    with engine.begin() as connection:
-        config.attributes["connection"] = connection
-        command.upgrade(config, "head")
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "head")
+            broken = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise RuntimeError(f"The database upgrade left broken references: {broken[:5]}")
+    finally:
+        engine.dispose()
 
 
 def _sqlite_pragmas(connection, _record) -> None:

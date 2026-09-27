@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text, delete, select
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text, UniqueConstraint, delete, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from tawreed.core.db import Base, UTCDateTime, now
@@ -27,9 +27,11 @@ from tawreed.sources import Source, page_content
 
 class Item(Base):
     __tablename__ = "items"
+    __table_args__ = (UniqueConstraint("project_id", "ref"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    ref: Mapped[int] = mapped_column(Integer)  # a short number within the project, never reused while it exists
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), index=True)
     page: Mapped[int] = mapped_column(Integer)
     position: Mapped[int] = mapped_column(Integer)  # order within the page
@@ -74,13 +76,13 @@ class NotReadable(Exception):
 def lay_out_sheet(
     session: Session, home: Path, source: Source, page: int, layout: SheetLayout, by: str
 ) -> dict[str, Any]:
-    content = _content(home, source, page, "sheet")
+    content = content_of(home, source, page, "sheet")
     drafts, report = extract_sheet(content, page, layout)
     return _replace(session, source, [page], drafts, layout.model_dump(), report, by)
 
 
 def lay_out_pdf(session: Session, home: Path, source: Source, layout: PdfLayout, by: str) -> dict[str, Any]:
-    contents = {page: _content(home, source, page, "page") for page in layout.pages}
+    contents = {page: content_of(home, source, page, "page") for page in layout.pages}
     drafts, report = extract_pdf(contents, layout)
     return _replace(session, source, layout.pages, drafts, layout.model_dump(), report, by)
 
@@ -88,10 +90,24 @@ def lay_out_pdf(session: Session, home: Path, source: Source, layout: PdfLayout,
 def record_transcription(
     session: Session, home: Path, source: Source, page: int, rows: list[TranscribedRow], by: str
 ) -> dict[str, Any]:
-    _page(source, page)
+    page_of(source, page)
     drafts, report = transcribed(page, rows)
     spec = {"transcribed": [r.model_dump() for r in rows]}
     return _replace(session, source, [page], drafts, spec, report, by)
+
+
+def skip_pages(session: Session, source: Source, pages: list[int], reason: str, by: str) -> None:
+    """Pages that hold no items (a cover, a summary, a rates sheet): handled, with the reason kept."""
+    for number in pages:
+        page_of(source, number)
+    _replace(session, source, pages, [], {"skip": reason}, Report(), by)
+
+
+def handled_pages(session: Session, source_id: str) -> set[int]:
+    """Pages a layout has covered, whether it found items on them or set them aside."""
+    return {
+        page for layout in session.scalars(select(Layout).where(Layout.source_id == source_id)) for page in layout.pages
+    }
 
 
 def source_items(session: Session, source_id: str) -> list[Item]:
@@ -103,7 +119,7 @@ def project_items(session: Session, project_id: str) -> list[Item]:
     return list(session.scalars(query))
 
 
-def _page(source: Source, number: int):
+def page_of(source: Source, number: int):
     if source.status != "read":
         raise NotReadable("source_not_read")
     page = next((p for p in source.pages if p.number == number), None)
@@ -112,8 +128,8 @@ def _page(source: Source, number: int):
     return page
 
 
-def _content(home: Path, source: Source, number: int, kind: str) -> dict[str, Any]:
-    page = _page(source, number)
+def content_of(home: Path, source: Source, number: int, kind: str) -> dict[str, Any]:
+    page = page_of(source, number)
     if page.kind != kind:
         raise NotReadable("wrong_page_kind")
     return page_content(home, source, number)
@@ -129,16 +145,18 @@ def _replace(
     by: str,
 ) -> dict[str, Any]:
     """Put the new items in place of whatever an earlier layout found on the same pages."""
+    last = session.scalar(select(func.max(Item.ref)).where(Item.project_id == source.project_id)) or 0
     session.execute(delete(Item).where(Item.source_id == source.id, Item.page.in_(pages)))
     for old in session.scalars(select(Layout).where(Layout.source_id == source.id)):
         if set(old.pages) & set(pages):
             session.delete(old)
     positions: dict[int, int] = {}
-    for draft in drafts:
+    for ref, draft in enumerate(drafts, start=last + 1):
         positions[draft.page] = positions.get(draft.page, 0) + 1
         session.add(
             Item(
                 project_id=source.project_id,
+                ref=ref,
                 source_id=source.id,
                 page=draft.page,
                 position=positions[draft.page],

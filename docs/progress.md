@@ -101,3 +101,38 @@
   English and Arabic PDFs, a scan and a locked PDF were read in a scratch data folder and previewed in English and
   Arabic.
 - **Next:** the agent (M5).
+
+## 27 September 2026: the agent
+
+- **Worker:** one agent per project on a background thread, a turn at a time (30 model requests at most), each
+  turn's context rebuilt from the records: the files and what was done with each page, the approved packages,
+  coverage, the engineer's rules, what waits for them, what they decided, the conversation and what is new. A
+  project gets a turn when the engineer wrote or answered, when its last turn was cut short, or when there is work
+  it can do without waiting; after 15 turns without hearing from the engineer it pauses. Stop takes effect between
+  steps. An AI failure that usually clears is retried twice; otherwise the project pauses with a plain reason.
+- **Tools:** list and read files (sheet cells with Excel's rows and columns; PDF words with their positions; page
+  pictures for scans), lay out sheets and PDF pages, transcribe scans, set pages aside, list items, propose the plan,
+  place items by number and range, flag an uncertain item, check the work, ask to publish, message and ask the
+  engineer. File text reaches the model fenced as data. No tool can answer for the engineer.
+- **Gates:** consent before a project's content first goes to a service (Tawreed raises it; the card names the
+  service); overlap when a new file repeats an earlier one (Tawreed raises it with a suggestion; a revision carries
+  each unchanged item's package over, and the engineer's placements stay the engineer's); the plan (keep, rename,
+  merge, split or remove packages); uncertain items (the choice can become a rule for the project or all projects);
+  questions; publishing (recorded; writing the revision is next).
+- **Packages:** every item has at most one assignment row, so it can't be in two packages. Items have short numbers
+  within the project and packages codes ("03") that are never given again. The engineer edits directly: create,
+  rename, merge, remove, move items; the agent never moves an item the engineer placed.
+- **Interface:** the step line follows the real stage; the one decision waiting (with how many more), the
+  conversation with the engineer's answers and Tawreed's notices, the message box and Stop; a packages summary and a
+  packages view with each item's values as the file states them and a link that opens the file at that item (its
+  row marked, or its box outlined on the page). Rules for all projects are listed in Settings. In Arabic, names set
+  into a sentence are isolated so Latin file and sheet names don't reorder the words around them.
+- **Found and fixed:** the database upgrade deleted every extracted item. SQLite alters a table by rebuilding it,
+  and with foreign keys on, dropping the old projects and files tables cascaded into their items. Migrations now run
+  with foreign keys off and the references are checked afterwards; a test upgrades a database with items in it.
+  Also: package codes were reused after a merge; the plan card tagged every package of a first plan as new.
+- **Checks:** 98 service tests (the agent end to end through every gate with a scripted model; stop, consent
+  declined, AI failure, long run, document text fenced), 40 interface tests, typecheck, Ruff. In the browser, the
+  real service with the scripted model went through consent, plan, an uncertain item and the publish request, in
+  English and Arabic. Not yet run against a real AI service: that sends data out, so it waits for the engineer.
+- **Next:** publishing the revision (M6).

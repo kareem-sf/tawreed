@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, must, type Provider } from "../api/client";
+import { api, must, succeed, type Provider } from "../api/client";
 
 export const PROVIDERS: Provider[] = ["anthropic", "openai", "google", "xai", "openai_compatible"];
 
@@ -52,6 +52,19 @@ export function useCheckModel(connectionId: string) {
           body: { model },
         }),
       ),
+    onSuccess: refresh,
+  });
+}
+
+/** Placements the engineer chose to apply to every project. */
+export function useRules() {
+  return useQuery({ queryKey: ["rules"], queryFn: () => must(api.GET("/rules")) });
+}
+
+export function useForgetRule() {
+  const refresh = useRefresh("rules");
+  return useMutation({
+    mutationFn: (ruleId: string) => succeed(api.DELETE("/rules/{rule_id}", { params: { path: { rule_id: ruleId } } })),
     onSuccess: refresh,
   });
 }

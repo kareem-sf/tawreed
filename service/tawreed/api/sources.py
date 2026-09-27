@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict
 from tawreed import sources
 from tawreed.api.common import DB, Home, problem
 from tawreed.api.projects import SourceOut
-from tawreed.sources import readers
 
 router = APIRouter(prefix="/projects/{project_id}/sources", tags=["sources"])
 
@@ -120,7 +119,4 @@ def page_image(project_id: str, source_id: str, number: int, session: DB, home: 
     page = _page(source, number)
     if page.kind == "sheet":
         raise problem(404, "no_page_image")
-    cached = sources.pages_folder(home, source) / f"{number}.png"
-    if not cached.exists():
-        cached.write_bytes(readers.render(sources.copy_of(home, source), source.kind, number))
-    return Response(cached.read_bytes(), media_type="image/png")
+    return Response(sources.page_image(home, source, number), media_type="image/png")

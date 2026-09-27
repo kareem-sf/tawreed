@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
-import { fakeService, project, renderApp } from "../testing";
+import { fakeService, project, renderApp, work } from "../testing";
 import { columnName } from "./SourcePreview";
 
 const recent = () => [{ id: "p1", name: "Al Noor Tower", updated_at: new Date().toISOString(), files: 2 }];
@@ -42,6 +42,7 @@ test("files being read say so, and the project is asked again until they are rea
         ],
       };
     },
+    "GET /projects/p1/work": () => work({ stage: asked > 1 ? "plan" : "read" }),
   });
   await openProject();
 
@@ -52,7 +53,8 @@ test("files being read say so, and the project is asked again until they are rea
   expect(screen.queryByRole("button", { name: "Locked.pdf" })).not.toBeInTheDocument(); // nothing to preview
 
   expect(await screen.findByText("3 sheets")).toBeInTheDocument();
-  expect(screen.getByText("Read").closest("li")).not.toHaveAttribute("aria-current");
+  await waitFor(() => expect(screen.getByText("Plan").closest("li")).toHaveAttribute("aria-current", "step"));
+  expect(screen.getByText("Read").closest("li")).toHaveAttribute("data-done");
   const settled = asked;
   await new Promise((resolve) => setTimeout(resolve, 1500));
   expect(asked).toBe(settled); // nothing is being read, so the project is not asked again
@@ -100,10 +102,10 @@ test("a sheet shows its cells exactly as read, with Excel's rows and columns, mo
     "1426885.13",
   ]);
   expect(within(grid).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["", "A", "B", "C", "D", "E", "F"]);
-  expect(screen.getByText("200 of 250 rows")).toBeInTheDocument();
+  expect(screen.getByText("Rows 1–200 of 250")).toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "Show more rows" }));
-  expect(await screen.findByText("250 of 250 rows")).toBeInTheDocument();
+  expect(await screen.findByText("Rows 1–250 of 250")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Show more rows" })).not.toBeInTheDocument();
   expect(calls.filter((c) => c.path === "/projects/p1/sources/s1/pages/1").map((c) => c.query)).toEqual([
     { start: "1", count: "200" },

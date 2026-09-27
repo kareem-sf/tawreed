@@ -137,6 +137,212 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Work */
+        get: operations["get_work_projects__project_id__work_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write
+         * @description The engineer writes to the agent. A stopped or paused agent carries on.
+         */
+        post: operations["write_projects__project_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop */
+        post: operations["stop_projects__project_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/decisions/{decision_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer */
+        post: operations["answer_projects__project_id__decisions__decision_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Items
+         * @description Items in use, in file order: all of them, one package's, or those not placed yet.
+         */
+        get: operations["list_items_projects__project_id__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Package */
+        post: operations["create_package_projects__project_id__packages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/packages/{package_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Package
+         * @description Remove a package; its items wait to be placed again.
+         */
+        delete: operations["remove_package_projects__project_id__packages__package_id__delete"];
+        options?: never;
+        head?: never;
+        /** Change Package */
+        patch: operations["change_package_projects__project_id__packages__package_id__patch"];
+        trace?: never;
+    };
+    "/projects/{project_id}/packages/{package_id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Packages
+         * @description Merge other packages into this one; their items keep their placement reasons.
+         */
+        post: operations["merge_packages_projects__project_id__packages__package_id__merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/placements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Place
+         * @description The engineer puts items in a package. It settles any question the agent asked about them.
+         */
+        post: operations["place_projects__project_id__placements_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Global Rules
+         * @description Rules the engineer chose to apply to every project.
+         */
+        get: operations["global_rules_rules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Forget Rule */
+        delete: operations["forget_rule_rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -263,6 +469,24 @@ export interface components {
             /** Data Folder */
             data_folder: string;
         };
+        /**
+         * Answer
+         * @description The engineer's answer. Which fields count depends on the kind of decision.
+         */
+        Answer: {
+            /** Approve */
+            approve?: boolean | null;
+            /** Relation */
+            relation?: ("addition" | "replacement" | "revision") | null;
+            /** Package Id */
+            package_id?: string | null;
+            /** Scope */
+            scope?: ("item" | "project" | "all") | null;
+            /** Choice */
+            choice?: string | null;
+            /** Note */
+            note?: string | null;
+        };
         /** Body_add_sources_projects__project_id__sources_post */
         Body_add_sources_projects__project_id__sources_post: {
             /** Files */
@@ -312,6 +536,79 @@ export interface components {
                 [key: string]: components["schemas"]["ModelCheck"];
             };
         };
+        /** CoverageOut */
+        CoverageOut: {
+            /** Items */
+            items: number;
+            /** Placed */
+            placed: number;
+            /** Unplaced */
+            unplaced: number;
+            /** Waiting */
+            waiting: number;
+            /** Pages Left */
+            pages_left: number;
+            /** Pending Files */
+            pending_files: number;
+        };
+        /**
+         * DecisionOut
+         * @description What the engineer is asked. Only the fields for its kind are set.
+         */
+        DecisionOut: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "consent" | "overlap" | "plan" | "uncertain" | "question" | "publish";
+            /**
+             * Raised By
+             * @enum {string}
+             */
+            raised_by: "agent" | "tawreed";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Answered At */
+            answered_at?: string | null;
+            /** Answer */
+            answer?: {
+                [key: string]: unknown;
+            } | null;
+            /** Provider */
+            provider?: string | null;
+            /** Host */
+            host?: string | null;
+            /** File */
+            file?: string | null;
+            /** Earlier */
+            earlier?: string | null;
+            /** Share */
+            share?: number | null;
+            /** Recommended */
+            recommended?: string | null;
+            /** Packages */
+            packages?: components["schemas"]["PlannedOut"][] | null;
+            /** Removed */
+            removed?: components["schemas"]["PackageRef"][] | null;
+            /** Note */
+            note?: string | null;
+            item?: components["schemas"]["ItemOut"] | null;
+            /** Candidates */
+            candidates?: components["schemas"]["PackageRef"][] | null;
+            /** Reason */
+            reason?: string | null;
+            /** Question */
+            question?: string | null;
+            /** Options */
+            options?: string[] | null;
+            /** Summary */
+            summary?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -329,6 +626,90 @@ export interface components {
             /** Height */
             height: number;
         };
+        /** ItemOut */
+        ItemOut: {
+            /** Id */
+            id: string;
+            /** Ref */
+            ref: number;
+            /** Code */
+            code: string;
+            /** Description */
+            description: string;
+            /** Unit */
+            unit: string;
+            /** Quantity Text */
+            quantity_text: string;
+            /** Rate Text */
+            rate_text: string;
+            /** Amount Text */
+            amount_text: string;
+            /** Comment */
+            comment: string;
+            /** Headings */
+            headings: string[];
+            /** Source Id */
+            source_id: string;
+            /** File */
+            file: string;
+            /** Page */
+            page: number;
+            /** Provenance */
+            provenance: {
+                [key: string]: unknown;
+            };
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "cell" | "text" | "image";
+            /** Verify */
+            verify: boolean;
+            /** Package Id */
+            package_id: string | null;
+            /** Decided By */
+            decided_by: string | null;
+        };
+        /** ItemsPage */
+        ItemsPage: {
+            /** Items */
+            items: components["schemas"]["ItemOut"][];
+            /** Total */
+            total: number;
+        };
+        /** Merge */
+        Merge: {
+            /** Package Ids */
+            package_ids: string[];
+        };
+        /** MessageIn */
+        MessageIn: {
+            /** Text */
+            text: string;
+        };
+        /** MessageOut */
+        MessageOut: {
+            /** Id */
+            id: number;
+            /**
+             * Sender
+             * @enum {string}
+             */
+            sender: "agent" | "engineer" | "tawreed";
+            /** Text */
+            text: string;
+            /** Notice */
+            notice: string | null;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** ModelCheck */
         ModelCheck: {
             /** Ok */
@@ -339,6 +720,51 @@ export interface components {
             sees_images: boolean;
             /** Checked At */
             checked_at: string;
+        };
+        /** PackageChange */
+        PackageChange: {
+            /** Name */
+            name?: string | null;
+            /** Scope */
+            scope?: string | null;
+        };
+        /** PackageIn */
+        PackageIn: {
+            /** Name */
+            name: string;
+            /**
+             * Scope
+             * @default
+             */
+            scope: string;
+        };
+        /** PackageOut */
+        PackageOut: {
+            /** Id */
+            id: string;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Scope */
+            scope: string;
+            /** Reason */
+            reason: string;
+            /** Items */
+            items: number;
+            /** Amount */
+            amount: string;
+            /** Without Amount */
+            without_amount: number;
+        };
+        /** PackageRef */
+        PackageRef: {
+            /** Id */
+            id: string;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
         };
         /** PageOut */
         PageOut: {
@@ -363,6 +789,24 @@ export interface components {
             width: number | null;
             /** Height */
             height: number | null;
+        };
+        /** Placement */
+        Placement: {
+            /** Item Ids */
+            item_ids: string[];
+            /** Package Id */
+            package_id: string;
+        };
+        /** PlannedOut */
+        PlannedOut: {
+            /** Name */
+            name: string;
+            /** Scope */
+            scope: string;
+            /** Reason */
+            reason: string;
+            /** Keeps */
+            keeps: components["schemas"]["PackageRef"][];
         };
         /** ProjectChange */
         ProjectChange: {
@@ -401,6 +845,18 @@ export interface components {
             updated_at: string;
             /** Files */
             files: number;
+        };
+        /** RuleOut */
+        RuleOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** SettingsChange */
         SettingsChange: {
@@ -535,6 +991,28 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WorkOut */
+        WorkOut: {
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "read" | "plan" | "place" | "check" | "publish";
+            /**
+             * Agent
+             * @enum {string}
+             */
+            agent: "working" | "idle" | "paused" | "no_ai";
+            /** Decisions */
+            decisions: components["schemas"]["DecisionOut"][];
+            /** Answered */
+            answered: components["schemas"]["DecisionOut"][];
+            /** Messages */
+            messages: components["schemas"]["MessageOut"][];
+            coverage: components["schemas"]["CoverageOut"];
+            /** Packages */
+            packages: components["schemas"]["PackageOut"][];
         };
     };
     responses: never;
@@ -829,6 +1307,421 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_work_projects__project_id__work_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_projects__project_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_projects__project_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_projects__project_id__decisions__decision_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Answer"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_items_projects__project_id__items_get: {
+        parameters: {
+            query?: {
+                package_id?: string | null;
+                unplaced?: boolean;
+                start?: number;
+                count?: number;
+            };
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_package_projects__project_id__packages_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageRef"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_package_projects__project_id__packages__package_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_package_projects__project_id__packages__package_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageChange"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageRef"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_packages_projects__project_id__packages__package_id__merge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Merge"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    place_projects__project_id__placements_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Placement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    global_rules_rules_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_rule_rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };

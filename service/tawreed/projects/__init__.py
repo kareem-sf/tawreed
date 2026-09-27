@@ -1,10 +1,10 @@
-"""Projects: a name and the BOQ files added to it."""
+"""Projects: a name, the BOQ files added to it, and the engineer's consent to send its content to an AI service."""
 
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import String, select
+from sqlalchemy import Boolean, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from tawreed.core.db import Base, UTCDateTime, now
@@ -18,9 +18,23 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     name: Mapped[str] = mapped_column(String(NAME_LIMIT))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)
-    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)  # also when its work last changed
+    # Stopped by the engineer, or paused by Tawreed (an AI failure, a long run); a message or an answer resumes it
+    agent_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The highest package number given, so a removed package's number (its code, "03") is never given again
+    package_numbers: Mapped[int] = mapped_column(Integer, default=0)
 
     sources = relationship("Source", back_populates="project", order_by="Source.added_at", passive_deletes=True)
+
+
+class Consent(Base):
+    """The engineer allowed this project's content to go to this connection's service."""
+
+    __tablename__ = "consents"
+
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    granted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)
 
 
 def folder(home: Path, project_id: str) -> Path:

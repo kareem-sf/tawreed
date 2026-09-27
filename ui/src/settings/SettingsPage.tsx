@@ -2,7 +2,16 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, explain, type Connection, type Provider } from "../api/client";
 import { useSettings } from "../app/settings";
 import type { Key } from "../i18n";
-import { PROVIDERS, useAddConnection, useCheckModel, useConnections, useModels, useRemoveConnection } from "./queries";
+import {
+  PROVIDERS,
+  useAddConnection,
+  useCheckModel,
+  useConnections,
+  useForgetRule,
+  useModels,
+  useRemoveConnection,
+  useRules,
+} from "./queries";
 
 const field = "h-9 rounded-lg border border-line bg-page px-3 outline-none focus:border-ink";
 const quiet = "h-9 rounded-lg border border-line px-3.5 disabled:opacity-50";
@@ -39,7 +48,35 @@ export function SettingsPage() {
 
       <h2 className="mt-6 mb-1 text-[13px] font-normal text-ink-2">{t("settings.connections")}</h2>
       <Connections />
+
+      <h2 className="mt-6 mb-1 text-[13px] font-normal text-ink-2">{t("settings.rules")}</h2>
+      <Rules />
     </div>
+  );
+}
+
+function Rules() {
+  const { t } = useSettings();
+  const rules = useRules();
+  const forget = useForgetRule();
+  if (!rules.data) return null;
+  if (rules.data.length === 0) return <p className="py-2 text-ink-2">{t("settings.noRules")}</p>;
+  return (
+    <ul className="flex flex-col">
+      {rules.data.map((rule) => (
+        <li key={rule.id} className="flex items-center gap-4 border-b border-line-soft py-2.5">
+          <span className="flex-1 [unicode-bidi:plaintext]">{rule.text}</span>
+          <button
+            type="button"
+            disabled={forget.isPending}
+            onClick={() => forget.mutate(rule.id)}
+            className="shrink-0 text-sm text-ink-2 underline hover:text-ink disabled:opacity-50"
+          >
+            {t("rules.remove")}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

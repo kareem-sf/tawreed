@@ -61,3 +61,13 @@ test("relative times and sizes read naturally in both languages", () => {
   expect(size(52_000, "en")).toBe("50.8 kB");
   expect(size(103, "en")).toBe("0.1 kB");
 });
+
+test("names in an Arabic sentence keep their own direction", () => {
+  const t = translator("ar");
+  expect(t("source.atRow", { file: "Tower BOQ.xlsx", sheet: "Div.03", row: 9 })).toBe(
+    "⁨Tower BOQ.xlsx⁩، ⁨Div.03⁩ الصف 9",
+  );
+  expect(translator("en")("source.atRow", { file: "Tower BOQ.xlsx", sheet: "Div.03", row: 9 })).toBe(
+    "Tower BOQ.xlsx, Div.03 row 9",
+  );
+});

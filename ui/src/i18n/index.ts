@@ -17,6 +17,10 @@ export function direction(language: Language): "rtl" | "ltr" {
   return language === "ar" ? "rtl" : "ltr";
 }
 
+// In Arabic, a name set into a sentence (a file, a sheet, a package) is isolated, so a Latin name keeps its own
+// order and doesn't pull the Arabic words around it out of place.
+const isolate = (text: string) => `⁨${text}⁩`;
+
 export function translator(language: Language): Translate {
   const plurals = new Intl.PluralRules(locale(language));
   const numbers = new Intl.NumberFormat(locale(language));
@@ -27,7 +31,8 @@ export function translator(language: Language): Translate {
     return text.replace(/\{(\w+)\}/g, (whole, name: string) => {
       const value = params[name];
       if (value === undefined) return whole;
-      return typeof value === "number" ? numbers.format(value) : value;
+      if (typeof value === "number") return numbers.format(value);
+      return language === "ar" ? isolate(value) : value;
     });
   };
 }

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from tawreed.core.db import Base, UTCDateTime, now
 from tawreed.projects import Project, folder
+from tawreed.sources import readers
 
 KINDS = {
     ".xlsx": "spreadsheet",
@@ -45,6 +46,10 @@ class Source(Base):
     added_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)
     status: Mapped[str] = mapped_column(String(16), default="added")  # added | reading | read | failed
     problem: Mapped[str | None] = mapped_column(String(40))  # why reading failed, as a code
+    # Against an earlier file it overlaps: pending (waiting for the engineer) | addition | replacement | revision
+    relation: Mapped[str | None] = mapped_column(String(16))
+    replaces_id: Mapped[str | None] = mapped_column(String(32))  # the earlier file a replacement or revision sets aside
+    active: Mapped[bool] = mapped_column(Boolean, default=True)  # False once a newer file replaces or revises it
 
     project = relationship(Project, back_populates="sources")
     pages = relationship("SourcePage", order_by="SourcePage.number", passive_deletes=True)
@@ -141,6 +146,14 @@ def pages_folder(home: Path, source: Source) -> Path:
 
 def page_content(home: Path, source: Source, number: int) -> dict[str, Any]:
     return json.loads((pages_folder(home, source) / f"{number}.json").read_text(encoding="utf-8"))
+
+
+def page_image(home: Path, source: Source, number: int) -> bytes:
+    """A PNG of a PDF page or an image; drawn once, then kept beside the page's content."""
+    cached = pages_folder(home, source) / f"{number}.png"
+    if not cached.exists():
+        cached.write_bytes(readers.render(copy_of(home, source), source.kind, number))
+    return cached.read_bytes()
 
 
 def get_source(session: Session, project_id: str, source_id: str) -> Source | None:

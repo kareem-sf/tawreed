@@ -33,11 +33,11 @@ export function useSource(projectId: string, sourceId: string) {
   });
 }
 
-/** A sheet's rows, a window at a time; `fetchNextPage` brings the next window. */
-export function useSheet(projectId: string, sourceId: string, page: number) {
+/** A sheet's rows from row `from`, a window at a time; `fetchNextPage` brings the next window. */
+export function useSheet(projectId: string, sourceId: string, page: number, from = 1) {
   return useInfiniteQuery({
-    queryKey: ["sheet", sourceId, page],
-    initialPageParam: 1,
+    queryKey: ["sheet", sourceId, page, from],
+    initialPageParam: from,
     queryFn: async ({ pageParam }) =>
       (await must(
         api.GET("/projects/{project_id}/sources/{source_id}/pages/{number}", {

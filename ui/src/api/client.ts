@@ -13,6 +13,13 @@ export type ModelCheck = components["schemas"]["ModelCheck"];
 export type SourceDetail = components["schemas"]["SourceDetail"];
 export type SourcePage = components["schemas"]["PageOut"];
 export type SheetView = components["schemas"]["SheetView"];
+export type Work = components["schemas"]["WorkOut"];
+export type Decision = components["schemas"]["DecisionOut"];
+export type Message = components["schemas"]["MessageOut"];
+export type PackageSummary = components["schemas"]["PackageOut"];
+export type PackageRef = components["schemas"]["PackageRef"];
+export type Item = components["schemas"]["ItemOut"];
+export type Answer = components["schemas"]["Answer"];
 
 const base = `${window.location.origin}/api`;
 
@@ -52,6 +59,12 @@ export async function must<T>(pending: Promise<{ data?: T; error?: unknown; resp
   const result = await pending;
   if (result.data !== undefined) return result.data;
   throw await failure(result.response, result.error);
+}
+
+/** For a request that answers with no content: nothing, or an ApiError carrying the service's own code. */
+export async function succeed(pending: Promise<{ error?: unknown; response: Response }>): Promise<void> {
+  const result = await pending;
+  if (!result.response.ok) throw await failure(result.response, result.error);
 }
 
 /** Send dropped files as a multipart form (openapi-fetch types can't describe File lists). */
