@@ -3,11 +3,15 @@ import { explain, type SheetView, type SourcePage } from "../api/client";
 import { useSettings } from "../app/settings";
 import { usePageImage, useSheet, useSource } from "./queries";
 
-/** A read file as Tawreed has it: each sheet as a grid of cells, each page or image as a picture. */
-export function SourcePreview({ projectId, sourceId }: { projectId: string; sourceId: string }) {
+/** Where an item is: its page, and its row on a sheet or its box (points from the top left) on a PDF page. */
+export type Focus = { page: number; row?: number; box?: number[] };
+
+/** A read file as Tawreed has it: each sheet as a grid of cells, each page or image as a picture. With a focus,
+ *  it opens at that item and marks it. */
+export function SourcePreview({ projectId, sourceId, focus }: { projectId: string; sourceId: string; focus?: Focus }) {
   const { t } = useSettings();
   const source = useSource(projectId, sourceId);
-  const [number, setNumber] = useState(1);
+  const [number, setNumber] = useState(focus?.page ?? 1);
 
   if (source.isError) {
     return (
@@ -20,6 +24,7 @@ export function SourcePreview({ projectId, sourceId }: { projectId: string; sour
   const { pages } = source.data;
   const page = pages.find((p) => p.number === number) ?? pages[0];
   if (!page) return null;
+  const focused = focus?.page === page.number ? focus : undefined;
 
   return (
     <div className="flex flex-col gap-3">
@@ -29,9 +34,9 @@ export function SourcePreview({ projectId, sourceId }: { projectId: string; sour
         <Pager count={pages.length} current={page.number} onChoose={setNumber} />
       )}
       {page.kind === "sheet" ? (
-        <SheetGrid key={page.number} projectId={projectId} sourceId={sourceId} page={page} />
+        <SheetGrid key={page.number} projectId={projectId} sourceId={sourceId} page={page} mark={focused?.row} />
       ) : (
-        <PageImage key={page.number} projectId={projectId} sourceId={sourceId} page={page} />
+        <PageImage key={page.number} projectId={projectId} sourceId={sourceId} page={page} box={focused?.box} />
       )}
     </div>
   );
@@ -100,9 +105,19 @@ function cellText(value: SheetView["rows"][number][number]): string {
   return String(value); // exactly as read: no rounding or grouping
 }
 
-function SheetGrid({ projectId, sourceId, page }: { projectId: string; sourceId: string; page: SourcePage }) {
+function SheetGrid({
+  projectId,
+  sourceId,
+  page,
+  mark,
+}: {
+  projectId: string;
+  sourceId: string;
+  page: SourcePage;
+  mark?: number;
+}) {
   const { t } = useSettings();
-  const sheet = useSheet(projectId, sourceId, page.number);
+  const sheet = useSheet(projectId, sourceId, page.number, mark ? Math.max(1, mark - 5) : 1);
 
   if (sheet.isError) {
     return (
@@ -135,7 +150,7 @@ function SheetGrid({ projectId, sourceId, page }: { projectId: string; sourceId:
           </thead>
           <tbody>
             {rows.map((row, r) => (
-              <tr key={first + r}>
+              <tr key={first + r} aria-current={first + r === mark ? "true" : undefined} className="aria-[current]:bg-amber-soft">
                 <th scope="row" className="sticky left-0 z-10 border-e border-t border-line bg-subtle px-2 py-0.5 text-end font-normal text-ink-2 tabular-nums">
                   {first + r}
                 </th>
@@ -155,7 +170,7 @@ function SheetGrid({ projectId, sourceId, page }: { projectId: string; sourceId:
         </table>
       </div>
       <div className="flex items-center gap-3 text-sm text-ink-2">
-        <span>{t("preview.rows", { shown: rows.length, count: total })}</span>
+        <span>{t("preview.rows", { first, last: first + rows.length - 1, count: total })}</span>
         {sheet.hasNextPage && (
           <button
             type="button"
@@ -171,7 +186,17 @@ function SheetGrid({ projectId, sourceId, page }: { projectId: string; sourceId:
   );
 }
 
-function PageImage({ projectId, sourceId, page }: { projectId: string; sourceId: string; page: SourcePage }) {
+function PageImage({
+  projectId,
+  sourceId,
+  page,
+  box,
+}: {
+  projectId: string;
+  sourceId: string;
+  page: SourcePage;
+  box?: number[];
+}) {
   const { t } = useSettings();
   const image = usePageImage(projectId, sourceId, page.number);
   const [url, setUrl] = useState<string>();
@@ -191,11 +216,26 @@ function PageImage({ projectId, sourceId, page }: { projectId: string; sourceId:
           {explain(image.error, t)}
         </p>
       ) : url ? (
-        <img
-          src={url}
-          alt={t("preview.pageImage", { page: page.number })}
-          className="w-full rounded-lg border border-line bg-white"
-        />
+        <div className="relative">
+          <img
+            src={url}
+            alt={t("preview.pageImage", { page: page.number })}
+            className="w-full rounded-lg border border-line bg-white"
+          />
+          {box && page.width && page.height && (
+            <div
+              data-testid="item-box"
+              aria-hidden="true"
+              className="absolute rounded-sm outline-2 outline-offset-2 outline-amber"
+              style={{
+                left: `${(box[0]! / page.width) * 100}%`,
+                top: `${(box[1]! / page.height) * 100}%`,
+                width: `${((box[2]! - box[0]!) / page.width) * 100}%`,
+                height: `${((box[3]! - box[1]!) / page.height) * 100}%`,
+              }}
+            />
+          )}
+        </div>
       ) : (
         <div
           className="w-full rounded-lg border border-line bg-soft"

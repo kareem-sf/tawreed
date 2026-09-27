@@ -30,3 +30,17 @@ test("a choice the service refuses is undone", async () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true"));
   expect(document.documentElement.dataset.theme).toBe("system");
 });
+
+test("rules the engineer made for all projects are listed and can be removed", async () => {
+  const calls = fakeService({
+    "GET /rules": () => [{ id: "r1", text: "“Skirting to match floor tiles” (L.M.) belongs in Finishes.", created_at: "" }],
+    "DELETE /rules/r1": () => new Response(null, { status: 204 }),
+  });
+  renderApp();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Settings" }));
+
+  expect(await screen.findByText("“Skirting to match floor tiles” (L.M.) belongs in Finishes.")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Remove" }));
+  await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/rules/r1")).toBe(true));
+});

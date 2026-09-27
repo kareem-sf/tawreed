@@ -1,8 +1,12 @@
 import { useRef, useState } from "react";
-import { explain, type Project, type Source } from "../api/client";
+import { explain, type Project, type Source, type Work } from "../api/client";
 import { ago, size } from "../app/format";
 import { useSettings } from "../app/settings";
 import type { Key, Translate } from "../i18n";
+import { Conversation } from "../work/Conversation";
+import { DecisionCard } from "../work/DecisionCard";
+import { Packages } from "../work/Packages";
+import { useWork } from "../work/queries";
 import { DropRegion, PickFiles } from "./files";
 import { isReading, useAddFiles, useProject, useRename } from "./queries";
 import { SourcePreview } from "./SourcePreview";
@@ -18,10 +22,11 @@ export function ProjectView({
   onClose: () => void;
   onOpenSettings: () => void;
 }) {
-  const { t, locale, ai } = useSettings();
+  const { t, ai } = useSettings();
   const project = useProject(projectId);
+  const work = useWork(projectId);
   const add = useAddFiles(projectId);
-  const [open, setOpen] = useState<string | null>(null); // the file being previewed
+  const [view, setView] = useState<"work" | "packages">("work");
 
   if (project.isError) {
     return (
@@ -32,12 +37,13 @@ export function ProjectView({
   }
   if (!project.data) return null;
   const { data } = project;
-  const current = isReading(data) ? "read" : null; // the agent reports the later steps
+  const stage = work.data?.stage ?? (isReading(data) ? "read" : null);
+  const [decision, ...more] = work.data?.decisions ?? [];
 
   return (
     <DropRegion onFiles={(files) => add.mutate(files)} className="min-h-full">
       {(over) => (
-        <div className={`mx-auto flex max-w-[880px] flex-col gap-4 px-4 pt-6 pb-10 ${over ? "opacity-60" : ""}`}>
+        <div className={`mx-auto flex max-w-[880px] flex-col gap-5 px-4 pt-6 pb-10 ${over ? "opacity-60" : ""}`}>
           <div className="flex items-center gap-3">
             <ProjectName project={data} />
             <span className="shrink-0 rounded-full border border-line px-2.5 text-[13px] text-ink-2">
@@ -63,17 +69,7 @@ export function ProjectView({
             </button>
           </div>
 
-          <ol aria-label={t("steps.label")} className="flex flex-wrap items-center gap-2.5 text-sm text-ink-2">
-            {STEPS.map((step, index) => (
-              <li key={step} aria-current={step === current ? "step" : undefined} className="group flex items-center gap-2.5">
-                <span className="flex items-center gap-1.5 group-aria-[current]:text-ink">
-                  <span className="size-[7px] rounded-full bg-idle group-aria-[current]:bg-ink group-aria-[current]:animate-pulse" aria-hidden="true" />
-                  {t(`step.${step}` as Key)}
-                </span>
-                {index < STEPS.length - 1 && <span className="h-px w-6 bg-line" aria-hidden="true" />}
-              </li>
-            ))}
-          </ol>
+          <Steps stage={stage} working={work.data?.agent === "working"} />
 
           {!ai && (
             <div className="flex items-center gap-4 rounded-xl border border-amber-line bg-amber-soft px-4 py-2.5 text-amber">
@@ -89,41 +85,124 @@ export function ProjectView({
               {explain(add.error, t)}
             </p>
           )}
+          {work.isError && (
+            <p role="alert" className="text-danger">
+              {explain(work.error, t)}
+            </p>
+          )}
 
-          <ul className="flex flex-col">
-            {data.sources.map((source) => {
-              const opened = open === source.id && source.status === "read";
-              return (
-                <li key={source.id} className="flex flex-col gap-3 border-t border-line-soft py-2.5">
-                  <div className="flex items-center gap-4">
-                    {source.status === "read" ? (
-                      <button
-                        type="button"
-                        aria-expanded={opened}
-                        onClick={() => setOpen(opened ? null : source.id)}
-                        className="min-w-0 flex-1 truncate text-start [unicode-bidi:plaintext] hover:underline rtl:text-right"
-                      >
-                        {source.filename}
-                      </button>
-                    ) : (
-                      <span className="min-w-0 flex-1 truncate [unicode-bidi:plaintext] rtl:text-right">
-                        {source.filename}
-                      </span>
-                    )}
-                    <span className="text-sm text-ink-2">{t(`kind.${source.kind}` as Key)}</span>
-                    <SourceStatus source={source} />
-                    <span className="w-20 text-end text-sm text-ink-2">{size(source.size, locale)}</span>
-                    <span className="w-28 text-end text-sm text-ink-2">{ago(source.added_at, locale)}</span>
-                  </div>
-                  {source.status === "failed" && <p className="text-sm text-danger">{problem(source, t)}</p>}
-                  {opened && <SourcePreview projectId={projectId} sourceId={source.id} />}
-                </li>
-              );
-            })}
-          </ul>
+          {view === "packages" ? (
+            <Packages projectId={projectId} onBack={() => setView("work")} />
+          ) : (
+            <>
+              {decision && <DecisionCard key={decision.id} projectId={projectId} decision={decision} more={more.length} />}
+              {work.data && <Conversation projectId={projectId} work={work.data} canWrite={Boolean(ai)} />}
+              {work.data && work.data.packages.length > 0 && (
+                <PackageSummary work={work.data} onOpen={() => setView("packages")} />
+              )}
+              <Files projectId={projectId} project={data} />
+            </>
+          )}
         </div>
       )}
     </DropRegion>
+  );
+}
+
+/** Read · Plan · Place · Check · Publish: done, where the work is now, and still to come. */
+function Steps({ stage, working }: { stage: string | null; working: boolean }) {
+  const { t } = useSettings();
+  const now = STEPS.findIndex((step) => step === stage);
+  return (
+    <ol aria-label={t("steps.label")} className="flex flex-wrap items-center gap-2.5 text-sm text-ink-2">
+      {STEPS.map((step, index) => (
+        <li
+          key={step}
+          aria-current={index === now ? "step" : undefined}
+          data-done={index < now || undefined}
+          className="group flex items-center gap-2.5"
+        >
+          <span className="flex items-center gap-1.5 group-aria-[current]:text-ink group-data-[done]:text-ink">
+            <span
+              className={`size-[7px] rounded-full bg-idle group-aria-[current]:bg-ink group-data-[done]:bg-ink ${index === now && working ? "animate-pulse" : ""}`}
+              aria-hidden="true"
+            />
+            {t(`step.${step}` as Key)}
+          </span>
+          {index < STEPS.length - 1 && <span className="h-px w-6 bg-line" aria-hidden="true" />}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function PackageSummary({ work, onOpen }: { work: Work; onOpen: () => void }) {
+  const { t } = useSettings();
+  const { coverage } = work;
+  return (
+    <section aria-label={t("packages.title")} className="flex flex-col">
+      <div className="flex items-baseline gap-3 pb-1.5">
+        <h2 className="font-semibold">{t("packages.title")}</h2>
+        <span className="text-sm text-ink-2">
+          {t("coverage.summary", { placed: coverage.placed, count: coverage.items })}
+          {coverage.waiting > 0 && ` · ${t("coverage.waiting", { count: coverage.waiting })}`}
+        </span>
+        <div className="flex-1" />
+        <button type="button" onClick={onOpen} className="text-sm underline">
+          {t("packages.view")}
+        </button>
+      </div>
+      <ul className="flex flex-col">
+        {work.packages.map((pkg) => (
+          <li key={pkg.id} className="flex items-baseline gap-3 border-t border-line-soft py-2">
+            <span className="text-sm tabular-nums text-ink-2">{pkg.code}</span>
+            <span className="flex-1 [unicode-bidi:plaintext]">{pkg.name}</span>
+            <span className="text-sm text-ink-2">{t("packages.items", { count: pkg.items })}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Files({ projectId, project }: { projectId: string; project: Project }) {
+  const { t, locale } = useSettings();
+  const [open, setOpen] = useState<string | null>(null); // the file being previewed
+  return (
+    <section aria-label={t("files.title")} className="flex flex-col">
+      <h2 className="pb-1.5 font-semibold">{t("files.title")}</h2>
+      <ul className="flex flex-col">
+        {project.sources.map((source) => {
+          const opened = open === source.id && source.status === "read";
+          return (
+            <li key={source.id} className="flex flex-col gap-3 border-t border-line-soft py-2.5">
+              <div className="flex items-center gap-4">
+                {source.status === "read" ? (
+                  <button
+                    type="button"
+                    aria-expanded={opened}
+                    onClick={() => setOpen(opened ? null : source.id)}
+                    className="min-w-0 flex-1 truncate text-start [unicode-bidi:plaintext] hover:underline rtl:text-right"
+                  >
+                    {source.filename}
+                  </button>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate [unicode-bidi:plaintext] rtl:text-right">
+                    {source.filename}
+                  </span>
+                )}
+                <span className="text-sm text-ink-2">{t(`kind.${source.kind}` as Key)}</span>
+                <SourceStatus source={source} />
+                <span className="w-20 text-end text-sm text-ink-2">{size(source.size, locale)}</span>
+                <span className="w-28 text-end text-sm text-ink-2">{ago(source.added_at, locale)}</span>
+              </div>
+              {source.status === "failed" && <p className="text-sm text-danger">{problem(source, t)}</p>}
+              {opened && <SourcePreview projectId={projectId} sourceId={source.id} />}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

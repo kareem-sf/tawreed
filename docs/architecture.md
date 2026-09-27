@@ -11,7 +11,7 @@ ui/        React + Vite + TypeScript, Tailwind + shadcn/ui, TanStack Query; API 
 desktop/   Tauri 2 shell: the window and native file dialogs. No domain logic.
 service/   Python 3.12, FastAPI, SQLAlchemy 2 + Alembic (SQLite), Pydantic AI
   tawreed/
-    core/        data home ~/.tawreed, database, atomic JSON files, event stream (SSE), job ledger, launch token
+    core/        data home ~/.tawreed, database, atomic JSON files, launch token
     ai/          connections and keys, the five API providers, the model check, subscription clients
     projects/    projects and consent records
     sources/     import, hashing, readers (Excel, CSV, ODS, PDF text with positions, page images), overlap
@@ -42,7 +42,13 @@ Each domain module owns its models, its service functions and the agent tools th
 - AI connections and keys are in `~/.tawreed/auth.json`, locked to the current user. The service never returns a
   key, and keys are redacted from logs and prompts.
 - `TAWREED_HOME` points the service at another data folder, for tests and scratch runs.
-- Long work runs in a durable job ledger. After a restart, interrupted work resumes or is shown as stopped.
+- Long work runs on background threads from records in the database: files waiting to be read, and the agent's
+  turns, each recorded as it starts and ends. After a restart, a file left half-read is read again and a turn cut
+  short is picked up again. The interface asks for the project's state every second or so while the agent works;
+  it is a local service, so polling is simpler than a push channel and costs nothing noticeable.
+- Database migrations run with SQLite's foreign keys off (SQLite changes a table by rebuilding it, and dropping
+  the old table would otherwise delete every row that refers to it), then the references are checked before the
+  migration is kept.
 
 ## The agent
 
@@ -50,8 +56,9 @@ Each domain module owns its models, its service functions and the agent tools th
   turn's context is rebuilt from the project's records, not carried as chat history.
 - **Structure from AI, values from Tawreed.** The agent proposes layouts, plans and assignments. Tawreed extracts
   values, validates proposals and computes every count and total. The agent never writes an item field or a number.
-- **Gates.** Tools that would change the project's commitments — overlap, plan, uncertain assignments, publish —
-  create pending decisions. Only the engineer's answer through the API carries them out.
+- **Gates.** Nothing that changes the project's commitments happens until the engineer answers through the API.
+  Tawreed itself raises consent (before a project's content first goes to a service) and overlap (when a new
+  file repeats an earlier one); the agent's tools raise the plan, uncertain items, questions and publishing.
 - **Real conversation.** The agent talks only through its message and question tools; the conversation shows
   exactly those records.
 - **Untrusted documents.** BOQ text is passed to the model as delimited data and is never treated as instructions.

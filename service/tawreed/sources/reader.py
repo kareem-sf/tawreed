@@ -4,6 +4,7 @@ import json
 import logging
 import shutil
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy import delete, select
@@ -15,9 +16,19 @@ log = logging.getLogger("tawreed.sources")
 
 
 class Reader:
-    def __init__(self, home: Path, sessions: sessionmaker[Session]):
+    """`after_read` runs in the same transaction once a file is read; `notify` runs once that is saved."""
+
+    def __init__(
+        self,
+        home: Path,
+        sessions: sessionmaker[Session],
+        after_read: Callable[[Session, Source], None] | None = None,
+        notify: Callable[[], None] | None = None,
+    ):
         self.home = home
         self.sessions = sessions
+        self.after_read = after_read
+        self.notify = notify
         self._wake = threading.Event()
         self._closing = threading.Event()
         self._thread = threading.Thread(target=self._run, name="tawreed-reader", daemon=True)
@@ -53,6 +64,8 @@ class Reader:
             session.commit()
             try:
                 read_source(session, self.home, source)
+                if source.status == "read" and self.after_read:
+                    self.after_read(session, source)
                 session.commit()
             except Exception:  # noqa: BLE001  (one bad file must not stop the reader for the others)
                 log.exception("Reading %s failed", source.filename)
@@ -60,7 +73,9 @@ class Reader:
                 source = session.get(Source, source.id)
                 source.status, source.problem = "failed", "unreadable_file"
                 session.commit()
-            return True
+        if self.notify:
+            self.notify()
+        return True
 
 
 def read_source(session: Session, home: Path, source: Source) -> None:

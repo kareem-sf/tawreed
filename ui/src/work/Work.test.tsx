@@ -1,0 +1,250 @@
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { expect, test } from "vitest";
+import { fakeService, project, renderApp, work, type Call } from "../testing";
+
+const recent = () => [{ id: "p1", name: "Al Noor Tower", updated_at: new Date().toISOString(), files: 2 }];
+const settings = () => ({ language: "en", theme: "system", ai: { connection_id: "c1", model: "m" } });
+
+async function openProject(routes: Record<string, (call: Call) => unknown>) {
+  const calls = fakeService({ "GET /settings": settings, "GET /projects": recent, "GET /projects/p1": () => project, ...routes });
+  renderApp();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /Al Noor Tower/ }));
+  await screen.findByDisplayValue("Al Noor Tower");
+  return { calls, user };
+}
+
+const decision = (kind: string, fields: Record<string, unknown>) => ({
+  id: `d-${kind}`,
+  kind,
+  raised_by: "agent",
+  created_at: "2026-09-27T09:00:00Z",
+  ...fields,
+});
+const packages = [
+  { id: "k1", code: "01", name: "Concrete works", scope: "", reason: "", items: 2, amount: "1465585.13", without_amount: 0 },
+  { id: "k2", code: "02", name: "Formwork and joints", scope: "", reason: "", items: 1, amount: "0", without_amount: 1 },
+];
+const answered = (calls: Call[], id: string) => calls.filter((c) => c.path === `/projects/p1/decisions/${id}`).map((c) => c.body);
+const ok = () => new Response(null, { status: 204 });
+
+test("nothing goes to the AI service until the engineer allows it", async () => {
+  const consent = decision("consent", { raised_by: "tawreed", provider: "openai_compatible", host: "api.runware.ai" });
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () => work({ decisions: [consent] }),
+    "POST /projects/p1/decisions/d-consent": ok,
+  });
+
+  const card = await screen.findByRole("region", { name: "Waiting for you" });
+  expect(card).toHaveTextContent("Send this project to OpenAI-compatible service (api.runware.ai)?");
+  expect(card).toHaveTextContent("Nothing is sent until you allow it.");
+  await user.click(within(card).getByRole("button", { name: "Allow" }));
+  await waitFor(() => expect(answered(calls, "d-consent")).toEqual([{ approve: true }]));
+});
+
+test("the plan is approved, or sent back with what should change", async () => {
+  const plan = decision("plan", {
+    note: "Three trades, as the market prices them.",
+    packages: [
+      { name: "Concrete works", scope: "Plain and reinforced concrete.", reason: "Ready-mix suppliers.", keeps: [] },
+      { name: "Formwork and joints", scope: "", reason: "", keeps: [{ id: "k2", code: "02", name: "Formwork" }, { id: "k3", code: "03", name: "Joints" }] },
+    ],
+    removed: [{ id: "k4", code: "04", name: "Sundries" }],
+  });
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "plan", decisions: [plan, decision("question", { question: "?", options: ["a", "b"] })] }),
+    "POST /projects/p1/decisions/d-plan": ok,
+  });
+
+  const card = await screen.findByRole("region", { name: "Waiting for you" });
+  expect(within(card).getByRole("heading")).toHaveTextContent("A plan of 2 packages");
+  expect(card).toHaveTextContent("and 1 more");
+  expect(card).toHaveTextContent("Concrete worksNew"); // it changes approved packages, so each says what it keeps
+  expect(card).toHaveTextContent("Merges 02 Formwork and 03 Joints");
+  expect(card).toHaveTextContent("Removes 04 Sundries. Their items will be placed again.");
+
+  await user.click(within(card).getByRole("button", { name: "Ask for changes" }));
+  await user.type(within(card).getByRole("textbox", { name: "Ask for changes" }), "Keep joints separate");
+  await user.click(within(card).getByRole("button", { name: "Send" }));
+  await user.click(within(card).getByRole("button", { name: "Approve plan" }));
+  await waitFor(() =>
+    expect(answered(calls, "d-plan")).toEqual([{ approve: false, note: "Keep joints separate" }, { approve: true }]),
+  );
+});
+
+test("an uncertain item shows where it is in its file, and the choice can become a rule", async () => {
+  const item = {
+    id: "i4",
+    ref: 4,
+    code: "3.1.4",
+    description: "Waterstops to construction joints",
+    unit: "L.M.",
+    quantity_text: "",
+    rate_text: "",
+    amount_text: "",
+    comment: "",
+    headings: [],
+    source_id: "s1",
+    file: "Architectural.xlsx",
+    page: 1,
+    provenance: { sheet: "Div.03", row: 12, cells: {} },
+    origin: "cell",
+    verify: false,
+    package_id: null,
+    decided_by: null,
+  };
+  const uncertain = decision("uncertain", {
+    item,
+    candidates: [
+      { id: "k1", code: "01", name: "Concrete works" },
+      { id: "k2", code: "02", name: "Formwork and joints" },
+    ],
+    recommended: "k2",
+    reason: "Cast in, but bought with joints.",
+  });
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "place", decisions: [uncertain], packages }),
+    "POST /projects/p1/decisions/d-uncertain": ok,
+    "GET /projects/p1/sources/s1": () => ({
+      ...project.sources[0],
+      pages: [{ number: 1, kind: "sheet", name: "Div.03", has_text: true, hidden: false, rows: 20, cols: 6, width: null, height: null }],
+    }),
+    "GET /projects/p1/sources/s1/pages/1": ({ query }) => ({
+      kind: "sheet",
+      name: "Div.03",
+      first_row: Number(query?.start),
+      rows: Array.from({ length: 21 - Number(query?.start) }, (_, i) =>
+        Number(query?.start) + i === 12 ? ["3.1.4", "Waterstops to construction joints", "L.M."] : [`r${Number(query?.start) + i}`],
+      ),
+      total_rows: 20,
+      merged: [],
+    }),
+  });
+
+  const card = await screen.findByRole("region", { name: "Waiting for you" });
+  expect(card).toHaveTextContent("Which package does this item belong in?");
+  expect(within(card).getByRole("radio", { name: "This project" })).toBeChecked();
+  expect(within(card).getByRole("button", { name: /Formwork and joints/ })).toHaveTextContent("Suggested");
+
+  await user.click(within(card).getByRole("button", { name: "Architectural.xlsx, Div.03 row 12" }));
+  const marked = await within(card).findByRole("row", { current: true });
+  expect(marked).toHaveTextContent("12"); // the item's own row, opened near it and marked
+  expect(calls.find((c) => c.path === "/projects/p1/sources/s1/pages/1")?.query).toEqual({ start: "7", count: "200" });
+
+  await user.click(within(card).getByRole("radio", { name: "All projects" }));
+  await user.click(within(card).getByRole("button", { name: /Formwork and joints/ }));
+  await waitFor(() => expect(answered(calls, "d-uncertain")).toEqual([{ package_id: "k2", scope: "all" }]));
+});
+
+test("the conversation shows only what was said and decided, and the engineer can write or stop", async () => {
+  const messages = [
+    { id: 1, sender: "agent", text: "Two sheets list items.", notice: null, params: null, created_at: "2026-09-27T09:00:00Z" },
+    { id: 2, sender: "engineer", text: "Keep MEP apart.", notice: null, params: null, created_at: "2026-09-27T09:02:00Z" },
+    {
+      id: 3,
+      sender: "tawreed",
+      text: "",
+      notice: "ai_failed",
+      params: { problem: "rate_limited" },
+      created_at: "2026-09-27T09:03:00Z",
+    },
+  ];
+  const plan = decision("plan", { packages: [], answer: { approve: true, note: null }, answered_at: "2026-09-27T09:01:00Z" });
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "place", agent: "working", messages, answered: [plan], packages }),
+    "POST /projects/p1/messages": ({ body }) => ({ id: 4, sender: "engineer", text: (body as { text: string }).text, notice: null, params: null, created_at: "" }),
+    "POST /projects/p1/stop": ok,
+  });
+
+  const conversation = await screen.findByRole("region", { name: "Conversation" });
+  const lines = within(conversation).getAllByRole("listitem").map((li) => li.textContent);
+  expect(lines).toEqual([
+    "TawreedTwo sheets list items.",
+    "You approved the package plan.",
+    "YouKeep MEP apart.",
+    "Tawreed paused. The service is limiting requests, or the account is out of credit. Try again later. Write to it to try again.",
+  ]);
+  expect(screen.getByRole("list", { name: "Progress" }).querySelector("[aria-current]")).toHaveTextContent("Place");
+
+  await user.type(screen.getByRole("textbox", { name: "Write to Tawreed" }), "Split MEP into electrical and plumbing{Enter}");
+  await waitFor(() =>
+    expect(calls).toContainEqual({ method: "POST", path: "/projects/p1/messages", body: { text: "Split MEP into electrical and plumbing" } }),
+  );
+  await user.click(within(conversation).getByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(calls.some((c) => c.path === "/projects/p1/stop")).toBe(true));
+});
+
+test("the engineer moves, renames, merges and removes packages directly", async () => {
+  const concrete = [
+    {
+      id: "i1",
+      ref: 1,
+      code: "3.1.1",
+      description: "Plain concrete grade C15 blinding",
+      unit: "m3",
+      quantity_text: "86",
+      rate_text: "450",
+      amount_text: "38700",
+      comment: "",
+      headings: [],
+      source_id: "s1",
+      file: "Architectural.xlsx",
+      page: 1,
+      provenance: { sheet: "Div.03", row: 9 },
+      origin: "cell",
+      verify: false,
+      package_id: "k1",
+      decided_by: "agent",
+    },
+  ];
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () =>
+      work({ stage: "check", packages, coverage: { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0 } }),
+    "GET /projects/p1/items": () => ({ items: concrete, total: 1 }),
+    "POST /projects/p1/placements": ok,
+    "PATCH /projects/p1/packages/k1": () => ({ id: "k1", code: "01", name: "Concrete" }),
+    "POST /projects/p1/packages/k1/merge": ok,
+    "DELETE /projects/p1/packages/k2": ok,
+  });
+
+  const summary = await screen.findByRole("region", { name: "Packages" });
+  expect(summary).toHaveTextContent("3 of 3 items placed");
+  await user.click(within(summary).getByRole("button", { name: "View and edit" }));
+
+  await user.click(await screen.findByRole("button", { name: /Concrete works/ }));
+  const row = await screen.findByRole("row", { name: /3\.1\.1/ });
+  expect(within(row).getAllByRole("cell").map((c) => c.textContent).slice(1, 7)).toEqual([
+    "3.1.1",
+    "Plain concrete grade C15 blinding",
+    "m3",
+    "86",
+    "450",
+    "38700",
+  ]);
+  await user.click(within(row).getByRole("checkbox", { name: "Select 3.1.1" }));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Move to…" }), "k2");
+  await user.click(screen.getByRole("button", { name: "Move" }));
+  await waitFor(() =>
+    expect(calls).toContainEqual({ method: "POST", path: "/projects/p1/placements", body: { item_ids: ["i1"], package_id: "k2" } }),
+  );
+
+  await user.click(screen.getByRole("button", { name: "Rename" }));
+  const name = screen.getByRole("textbox", { name: "Rename" });
+  await user.clear(name);
+  await user.type(name, "Concrete{Enter}");
+  await waitFor(() => expect(calls).toContainEqual({ method: "PATCH", path: "/projects/p1/packages/k1", body: { name: "Concrete" } }));
+
+  await user.click(screen.getByRole("button", { name: /Formwork and joints/ }));
+  const merges = screen.getAllByRole("combobox", { name: "Merge into…" });
+  await user.selectOptions(merges[1]!, "k1");
+  await user.click(screen.getAllByRole("button", { name: "Merge" })[1]!);
+  await waitFor(() =>
+    expect(calls).toContainEqual({ method: "POST", path: "/projects/p1/packages/k1/merge", body: { package_ids: ["k2"] } }),
+  );
+  await user.click(screen.getAllByRole("button", { name: "Remove" })[1]!);
+  await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/projects/p1/packages/k2")).toBe(true));
+
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  expect(await screen.findByRole("region", { name: "Conversation" })).toBeInTheDocument();
+});

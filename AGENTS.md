@@ -20,7 +20,8 @@ specification is `docs/spec.md`; the architecture is `docs/architecture.md`; the
   progress text.
 - **A tool, not an app.** Drop a BOQ and the work starts. Four tabs (Home, History, Settings, About), one clear
   next action, no sidebars, dashboards or decoration. Plain construction language, English and Arabic with full
-  RTL. Every number is one click from its source. No provider, model or token details outside Settings.
+  RTL. Every number is one click from its source. No provider, model or token details outside Settings, except
+  that the consent card names the service a project's content would go to.
 - **Fonts.** Figtree for English (open licence, bundled; light headings, regular body). Thmanyah Sans for Arabic:
   its licence forbids committing, uploading or hosting the font files, so they live only in the gitignored
   `ui/src/fonts/thmanyah/` and ship only inside the compiled app.
