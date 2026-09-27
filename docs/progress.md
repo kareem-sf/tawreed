@@ -220,3 +220,21 @@ machine.
   standard input, or `codex exec` waits for more input. Left in place: `request_user_input`, the MCP resource
   helpers, and `apply_patch`, which the read-only sandbox stops from writing.
 - **Next:** Codex as a connection in Settings and as a way to run the agent's turns.
+
+## 28 September 2026: ChatGPT through Codex
+
+- **How it runs:** the service serves the agent's tools over MCP at `/mcp` and the model check's at `/mcp-check`.
+  Each Codex run gets a one-time token, passed in an environment variable; the endpoint answers nothing else, not
+  even the service's own token. `codex exec` runs locked down as recorded above, with the prompt on standard input.
+  Turns stop at once on Stop and after 20 minutes at most; a signed-out or failing Codex pauses the project with a
+  plain reason. This replaced the stdio bridge: no tool-server process starts for each turn.
+- **Settings:** ChatGPT (Codex) needs no key. Settings shows whether Codex is installed and signed in, opens Codex's
+  own sign-in, lists the account's models from Codex's catalogue, and checks a model through `/mcp-check` (a one-off
+  code, and a number read from an attached image).
+- **Checks:** 112 service tests (six for Codex, with a stand-in for the client against the real service on a real
+  port), 42 interface tests, typecheck, Ruff, Clippy.
+- **Real run** on the engineer's subscription, on a synthetic project in a scratch data folder: the model check
+  passed in 12 s and read the image. The agent then read the workbook, laid out both item sheets, set the rates sheet
+  aside and proposed two packages (one turn, 39 s); after approval it placed all 5 items and asked to publish (22 s);
+  Rev 00 was published, and the agent wrote to the engineer without asking to publish again. No tool call was
+  refused and no other tool was used.
