@@ -8,7 +8,7 @@ compatibility layers.
 
 ```
 ui/        React + Vite + TypeScript, Tailwind + shadcn/ui, TanStack Query; API types generated from OpenAPI
-desktop/   Tauri 2 shell: the window and native file dialogs. No domain logic.
+desktop/   Tauri 2 shell: the window; installed, it also starts the service and forwards to it. No domain logic.
 service/   Python 3.12, FastAPI, SQLAlchemy 2 + Alembic (SQLite), Pydantic AI
   tawreed/
     core/        data home ~/.tawreed, database, atomic JSON files, launch token
@@ -70,6 +70,16 @@ Each domain module owns its models, its service functions and the agent tools th
 - Subscriptions: Tawreed runs the official client (`codex`, `grok`) non-interactively in an empty working folder,
   with its own shell, file and web tools turned off and Tawreed's MCP bridge as the only tool server. The same tool
   definitions serve both paths.
+
+## The installed app
+
+- The service is frozen with PyInstaller into one folder and shipped as a resource of the NSIS installer (installed
+  for the current user, no administrator rights). The interface is embedded in the Tauri executable.
+- On start the desktop app picks a free loopback port and a fresh token, starts the service hidden with both, and
+  answers the interface's requests to its own `api` scheme (`http://api.localhost` on Windows) by forwarding them
+  to the service with the token. As in development, the page never holds the token.
+- The app holds the service's standard input open; the service stops when it closes, so it can't outlive the app,
+  even after a crash.
 
 ## Fonts
 

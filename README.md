@@ -49,6 +49,17 @@ the desktop window. Set `TAWREED_HOME` to use another data folder, for example a
 
 CI runs all of these on every pull request and fails if the API types are out of date.
 
+## Windows installer
+
+`npm run package` freezes the service with PyInstaller into `service/dist/tawreed-service/` and builds the NSIS
+installer into `desktop/target/release/bundle/nsis/`. The installed app starts that service itself on a free local
+port with a fresh token, forwards the interface's requests to it, and the service stops when the app does. Its log
+is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.tawreed.desktop\logs`).
+
+`npm run release` then writes `SHA256SUMS.txt` beside the installer and prints the `gh release create` command for
+a draft release. Make release builds on a machine with the Thmanyah files in place, so the installer carries them;
+the script says whether it does.
+
 ## License
 
 [MIT](LICENSE) © 2026 Kareem Safwat.

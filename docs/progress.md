@@ -184,3 +184,22 @@ machine.
   Claude MCP servers, hooks and personal instruction files unless switched off by environment variables. It can be
   restricted, but only by a long list of settings whose defaults can change between versions.
 - **Not tested:** a real signed-in run, which uses the engineer's subscription.
+
+## 27 September 2026: the Windows installer
+
+- **Package:** `npm run package` freezes the service with PyInstaller (one folder, about 100 MB; the migration
+  scripts and every dependency's package metadata ship with it) and builds an NSIS installer for the current user
+  (`Tawreed_0.1.0_x64-setup.exe`, 53 MB). The interface, Figtree and, on this machine, Thmanyah Sans are embedded
+  in the executable; the service is its only resource.
+- **Installed app:** the desktop shell starts the service hidden on a free port with a fresh token and a log in the
+  app's log folder, and answers the interface's `api` scheme by forwarding each request with the token, so the
+  page never holds it. The service runs with `--exit-with-stdin`: the app holds that pipe, so the service stops when
+  the app closes and also when it is killed.
+- **Release:** `npm run release` writes `SHA256SUMS.txt` beside the installer, says whether Thmanyah is embedded,
+  and prints the `gh release create --draft` command. Release builds are made on the engineer's machine for the
+  font licence; nothing has been published.
+- **Checks:** 107 service tests (including the service stopping when its input closes), 41 interface tests,
+  typecheck, Ruff and Clippy. The frozen service was run on its own and read a workbook, a PDF and a scan. The
+  release executable was run from the build folder on a scratch data folder: it started its service, the page
+  listed the scratch project through the proxy, Arabic rendered in Thmanyah Sans right to left, and closing or
+  killing the app stopped the service. The installer itself was built but not installed on this machine.

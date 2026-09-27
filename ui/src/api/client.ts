@@ -22,7 +22,14 @@ export type Item = components["schemas"]["ItemOut"];
 export type Answer = components["schemas"]["Answer"];
 export type Revision = components["schemas"]["RevisionOut"];
 
-const base = `${window.location.origin}/api`;
+// In development (browser or desktop window) the Vite server forwards /api to the service with the access token.
+// Installed, the desktop app answers its own `api` scheme the same way: http://api.localhost on Windows.
+const installed = import.meta.env.PROD && "__TAURI_INTERNALS__" in window;
+const base = installed
+  ? navigator.userAgent.includes("Windows")
+    ? "http://api.localhost"
+    : "api://localhost"
+  : `${window.location.origin}/api`;
 
 /** A failure the interface can explain: the service's stable code and details, or "offline". */
 export class ApiError extends Error {
@@ -40,7 +47,6 @@ function offline(): never {
   throw new ApiError("offline");
 }
 
-// The development server forwards /api to the local service and adds the access token.
 export const api = createClient<paths>({
   baseUrl: base,
   fetch: (request) => globalThis.fetch(request).catch(offline),

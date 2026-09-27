@@ -10,3 +10,5 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+getrandom = "0.3"  # the service's access token
+ureq = "3"  # forwards the interface's requests to the service

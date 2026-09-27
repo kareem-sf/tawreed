@@ -29,3 +29,6 @@ ui/src/fonts/thmanyah/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Frozen service build
+service/build/
