@@ -109,9 +109,11 @@ pub fn list_models() -> Result<Vec<ModelInfo>, String> {
     if !status.authenticated {
         return Err("Codex CLI is not signed in".into());
     }
+    let codex_home = managed_codex_home()?;
 
     let mut child = quiet_command(exe)
         .args(["app-server", "--listen", "stdio://"])
+        .env("CODEX_HOME", &codex_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -279,6 +281,85 @@ pub fn managed_bin() -> Result<PathBuf, String> {
     Ok(store::data_dir()?.join("bin").join(binary))
 }
 
+const CODEX_CONFIG_TOML: &str = "cli_auth_credentials_store = \"file\"\n";
+
+/// Resolve and create the provider-owned Codex home beneath the Tawreed data
+/// root. Codex-owned credentials stay inside Tawreed's managed storage with
+/// file-based authentication, isolated from any user-level `~/.codex`.
+pub fn ensure_codex_home(data_root: &Path) -> Result<PathBuf, String> {
+    let home = data_root.join("providers").join("codex");
+    std::fs::create_dir_all(&home).map_err(|e| format!("create Codex home: {e}"))?;
+    let config = home.join("config.toml");
+    if !config.exists() {
+        let temporary = home.join(".config.toml.tmp");
+        std::fs::write(&temporary, CODEX_CONFIG_TOML)
+            .and_then(|_| std::fs::rename(&temporary, &config))
+            .map_err(|e| format!("write Codex credential policy: {e}"))?;
+    }
+    Ok(home)
+}
+
+pub fn managed_codex_home() -> Result<PathBuf, String> {
+    ensure_codex_home(&store::data_dir()?)
+}
+
+fn validated_api_key(value: &str) -> Result<String, String> {
+    let key = value.trim();
+    if key.is_empty()
+        || key.len() > 4096
+        || key.chars().any(char::is_control)
+    {
+        return Err("invalid_codex_api_key".into());
+    }
+    Ok(key.to_string())
+}
+
+/// Run the noninteractive API-key login so provider-owned credentials land in
+/// the managed Codex home. The key travels only through the child's stdin pipe.
+pub fn login_with_api_key(api_key: &str) -> Result<(), String> {
+    let key = validated_api_key(api_key)?;
+    let status = detect(false);
+    let exe = status.path.ok_or("Codex CLI not installed")?;
+    let home = managed_codex_home()?;
+
+    let mut child = quiet_command(exe)
+        .args(["login", "--with-api-key"])
+        .env("CODEX_HOME", &home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn Codex login: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(key.as_bytes())
+            .and_then(|_| stdin.write_all(b"\n"))
+            .and_then(|_| stdin.flush())
+            .map_err(|e| format!("write Codex login stdin: {e}"))?;
+    }
+    drop(child.stdin.take());
+
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or("Codex login stderr unavailable")?;
+    let stderr_reader = std::thread::spawn(move || drain_pipe(stderr_pipe, 64 * 1024));
+
+    if wait_with_timeout(&mut child, Duration::from_secs(60)) != Some(true) {
+        let detail = bounded_tail(&stderr_reader.join().unwrap_or_default(), 400);
+        return Err(if detail.trim().is_empty() {
+            "Codex API-key sign-in failed".to_string()
+        } else {
+            format!("Codex API-key sign-in failed. {detail}")
+        });
+    }
+    invalidate_cache();
+    store::log_line("Codex API-key sign-in completed");
+    Ok(())
+}
+
+
 #[derive(Clone, Debug)]
 struct CodexCandidate {
     path: PathBuf,
@@ -429,8 +510,12 @@ fn exe_version(path: &Path) -> Option<String> {
 }
 
 fn authenticated(path: &Path) -> bool {
+    let Ok(codex_home) = managed_codex_home() else {
+        return false;
+    };
     let Ok(mut child) = quiet_command(path)
         .args(["login", "status"])
+        .env("CODEX_HOME", codex_home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -530,6 +615,7 @@ pub fn complete(
         );
     }
     let exe = status.path.ok_or("Codex path missing")?;
+    let codex_home = managed_codex_home()?;
     let work_dir = create_request_dir()?;
     let result_path = work_dir.join("response.json");
     let schema_path = work_dir.join("output-schema.json");
@@ -583,7 +669,8 @@ pub fn complete(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env("NO_COLOR", "1");
+            .env("NO_COLOR", "1")
+            .env("CODEX_HOME", &codex_home);
         for secret in [
             "ANTHROPIC_API_KEY",
             "OPENAI_API_KEY",
@@ -683,8 +770,10 @@ pub fn complete(
 pub fn login() -> Result<(), String> {
     let status = detect(false);
     let exe = status.path.ok_or("Codex CLI not installed")?;
+    let codex_home = managed_codex_home()?;
     quiet_command(exe)
         .arg("login")
+        .env("CODEX_HOME", &codex_home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -873,8 +962,7 @@ mod detection_tests {
     use super::*;
 
     #[test]
-    fn includes_current_npm_vendor_layouts() {
-        let appdata = PathBuf::from(r"C:\Users\engineer\AppData\Roaming");
+    fn includes_current_npm_vendor_layouts() {        let appdata = PathBuf::from(r"C:\Users\engineer\AppData\Roaming");
         let candidates = npm_vendor_candidates(&appdata);
         let paths: Vec<String> = candidates
             .iter()
@@ -905,5 +993,41 @@ mod detection_tests {
         candidates
             .retain(|candidate| seen.insert(candidate.path.to_string_lossy().to_ascii_lowercase()));
         assert_eq!(candidates.len(), 1);
+    }
+
+    #[test]
+    fn ensures_a_file_backed_credential_store_beneath_the_data_root() {
+        let root = tempfile::tempdir().unwrap();
+
+        let home = super::ensure_codex_home(root.path()).unwrap();
+
+        assert_eq!(home, root.path().join("providers").join("codex"));
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert_eq!(config, "cli_auth_credentials_store = \"file\"\n");
+
+        // Idempotent, and never overwrites provider-owned configuration.
+        std::fs::write(home.join("config.toml"), "model = \"gpt-5\"\n").unwrap();
+        super::ensure_codex_home(root.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.join("config.toml")).unwrap(),
+            "model = \"gpt-5\"\n"
+        );
+    }
+
+    #[test]
+    fn rejects_api_keys_that_are_empty_oversized_or_contain_control_characters() {
+        assert_eq!(
+            super::validated_api_key("  ").unwrap_err(),
+            "invalid_codex_api_key"
+        );
+        assert_eq!(
+            super::validated_api_key(&"x".repeat(4097)).unwrap_err(),
+            "invalid_codex_api_key"
+        );
+        assert_eq!(
+            super::validated_api_key("sk-test\nvalue").unwrap_err(),
+            "invalid_codex_api_key"
+        );
+        assert_eq!(super::validated_api_key(" sk-test-value ").unwrap(), "sk-test-value");
     }
 }

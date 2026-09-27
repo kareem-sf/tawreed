@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { setSetting } from '../../bridge';
 import { currentDesktopWindow } from '../../platform/desktop/window';
 import Logo from '../../components/Logo';
-import { ProviderSetup } from '../settings/ProviderSetup';
+import { ConnectionsCenter } from '../connections/ConnectionsCenter';
 import { isArabicLocale } from '../../i18n/locale';
 
 type OnboardingStep = 'language' | 'video' | 'connection';
@@ -13,8 +13,6 @@ type OnboardingStep = 'language' | 'video' | 'connection';
 interface Props {
   initialStep: OnboardingStep;
   required: boolean;
-  hasKey: boolean;
-  hasCompatibleKey: boolean;
   onComplete: () => void;
   onClose: () => void;
 }
@@ -24,14 +22,13 @@ const stepOrder: OnboardingStep[] = ['language', 'video', 'connection'];
 export default function Onboarding({
   initialStep,
   required,
-  hasKey,
-  hasCompatibleKey,
   onComplete,
   onClose,
 }: Props) {
   const { t, i18n } = useTranslation();
   const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [finishing, setFinishing] = useState(false);
+  const [connectionReady, setConnectionReady] = useState(false);
   const appWindow = useMemo(() => currentDesktopWindow(), []);
   const ar = isArabicLocale(i18n);
   const index = stepOrder.indexOf(step);
@@ -197,11 +194,8 @@ export default function Onboarding({
                 <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('connectTitle')}</h1>
                 <Text size="sm" c="dimmed" mt={5}>{t('connectDetail')}</Text>
               </div>
-              <div className="mt-6">
-                <ProviderSetup
-                  hasKey={hasKey}
-                  hasCompatibleKey={hasCompatibleKey}
-                />
+              <div className="mx-auto mt-6 max-w-xl">
+                <ConnectionsCenter onReadyChange={setConnectionReady} />
               </div>
               <Group justify="space-between" mt="xl">
                 <Button
@@ -225,6 +219,7 @@ export default function Onboarding({
                   <Button
                     color="yellow"
                     loading={finishing}
+                    disabled={!connectionReady && required}
                     onClick={() => void finish(false)}
                   >
                     {t('finishSetup')}

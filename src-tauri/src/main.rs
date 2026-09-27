@@ -49,6 +49,8 @@ fn main() {
             platform_commands::list_connections,
             platform_commands::save_api_key_connection,
             platform_commands::delete_connection,
+            platform_commands::codex_login_chatgpt,
+            platform_commands::codex_login_api_key,
             platform_commands::create_project,
             platform_commands::list_projects,
             platform_commands::latest_project_checkpoint,

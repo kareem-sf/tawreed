@@ -6,11 +6,14 @@ if (process.argv.slice(2).includes('--health-check')) {
   process.stdout.write(HEALTH_RESPONSE);
 } else {
   try {
-    const [{ AgentKernel }, { runProcessLoop }] = await Promise.all([
+    const [{ AgentKernel, productionProviders }, { runProcessLoop }] = await Promise.all([
       import('./kernel'),
       import('./process-loop'),
     ]);
-    const kernel = new AgentKernel({ providers: new Map(), environment: process.env });
+    const kernel = new AgentKernel({
+      providers: productionProviders(process.env),
+      environment: process.env,
+    });
     const outcome = await runProcessLoop({
       input: process.stdin,
       output: process.stdout,

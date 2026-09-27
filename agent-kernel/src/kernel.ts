@@ -1,5 +1,8 @@
 import type { ProviderBridge, ProviderId } from './providers/types';
 import {
+  CodexBridge,
+} from './providers/codex';
+import {
   DEFAULT_PROVIDER_HEALTH_TIMEOUT_MS,
   ProviderHealthMonitor,
 } from './provider-health';
@@ -33,6 +36,55 @@ import {
   resolveProjectWorkspace,
   sameCanonicalPath,
 } from './project-context';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+const MANAGED_CODEX_ENVIRONMENT_VARIABLES = [
+  'PATH',
+  'SYSTEMROOT',
+  'TEMP',
+  'TMP',
+  'HOME',
+  'USERPROFILE',
+  'COMSPEC',
+] as const;
+
+function allowedCodexEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of MANAGED_CODEX_ENVIRONMENT_VARIABLES) {
+    const value = environment[name];
+    if (typeof value === 'string' && value.length > 0) picked[name] = value;
+  }
+  return picked;
+}
+
+function managedCodexBinary(dataRoot: string): string | undefined {
+  const binary = process.platform === 'win32' ? 'codex.exe' : 'codex';
+  const candidate = join(dataRoot, 'bin', binary);
+  try {
+    return existsSync(candidate) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function productionProviders(
+  environment: Readonly<Record<string, string | undefined>>,
+): ReadonlyMap<ProviderId, ProviderBridge> {
+  const providers = new Map<ProviderId, ProviderBridge>();
+  const codexHome = environment.CODEX_HOME?.trim();
+  if (!codexHome) return providers;
+  const dataRoot = environment.TAWREED_DATA_DIR?.trim();
+  const codexPath = dataRoot ? managedCodexBinary(dataRoot) : undefined;
+  providers.set('codex', new CodexBridge({
+    codexHome,
+    ...(codexPath === undefined ? {} : { codexPath }),
+    allowedEnv: allowedCodexEnvironment(environment),
+  }));
+  return providers;
+}
 
 export interface KernelLimits {
   maxSessions: number;

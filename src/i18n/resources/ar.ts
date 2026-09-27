@@ -250,7 +250,21 @@ const ar = {
   "updateReleaseInvalid": "لم يجتز الإصدار الأخير فحوصات الأمان في توريد",
   "updateDownloadFailed": "تعذر فتح صفحة الإصدار الرسمية.",
   "tryAgain": "إعادة المحاولة",
-  "mitLicense": "رخصة MIT"
+  "mitLicense": "رخصة MIT",
+  "connectWithChatgpt": "الاتصال بحساب ChatGPT",
+  "useApiKey": "استخدام مفتاح API",
+  "apiKeyLabel": "مفتاح API الخاص بـ Codex",
+  "plaintextCredentialWarning": "أفهم أن هذا المفتاح يُحفظ على هذا الجهاز كنص مقروء.",
+  "connect": "اتصال",
+  "connecting": "جارٍ الاتصال…",
+  "testConnection": "اختبار الاتصال",
+  "removeConnection": "إزالة",
+  "advancedDetails": "تفاصيل المزوّد",
+  "codexCardDetail": "يمكن لتوريد استخدام خطة ChatGPT الخاصة بك عبر Codex، أو مفتاح OpenAI API، لتحسين اقتراحات الحزم.",
+  "chatgptLoginDetail": "تُفتح نافذة المتصفح لحسابك في ChatGPT. عُد إلى هنا بعد تسجيل الدخول.",
+  "apiKeyLoginDetail": "الصق مفتاح OpenAI API مرة واحدة؛ يسجّل توريد الدخول ويبقيه على هذا الجهاز.",
+  "connectionActionFailed": "لم تكتمل العملية. تحقق من الاتصال وحاول مجددًا.",
+  "providerModelsNote": "يبقى اختيار النموذج تلقائيًا ما لم تغيّره من الإعدادات."
 } as const;
 
 export default ar;

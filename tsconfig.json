@@ -16,7 +16,8 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@openai/codex-sdk": ["./agent-kernel/node_modules/@openai/codex-sdk/dist/index.d.ts"]
     },
     "types": ["vite/client", "node"]
   },

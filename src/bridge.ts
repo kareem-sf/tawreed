@@ -17,6 +17,15 @@ export type {
   RuntimeProgressHandler,
   RuntimeProtocolErrorHandler,
 } from './platform/desktop/runtime';
+export {
+  agentHealth,
+  codexLoginApiKey,
+  codexLoginChatgpt,
+  createConnectionsBridge,
+  deleteConnection,
+  listConnections,
+  saveApiKeyConnection,
+} from './platform/desktop/connections';
 
 export interface BootstrapInfo {
   first_run: boolean;

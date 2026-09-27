@@ -1,4 +1,5 @@
 use crate::agent::AgentSupervisor;
+use crate::codex;
 use crate::runtime::{RuntimeBootstrapStatus, RuntimeManager};
 use crate::storage::connections::{ConnectionStore, ConnectionSummary};
 use crate::storage::projects::{Checkpoint, ProjectStore, ProjectSummary};
@@ -57,6 +58,31 @@ pub fn save_api_key_connection(provider: String, api_key: String) -> Result<(), 
 pub fn delete_connection(provider: String) -> Result<(), String> {
     let layout = DataLayout::discover()?;
     ConnectionStore::new(layout.connections).remove(&provider)
+}
+
+#[tauri::command]
+pub fn codex_login_chatgpt() -> Result<(), String> {
+    codex::login()
+}
+
+/// Sign Codex in with the API key the user already saved. The key never
+/// crosses back into the webview: it is read from the plaintext store here,
+/// piped to the CLI's stdin, and dropped when this command ends.
+#[tauri::command]
+pub fn codex_login_api_key() -> Result<(), String> {
+    let layout = DataLayout::discover()?;
+    let store = ConnectionStore::new(layout.connections.clone());
+    let Some(key) = store.secret("codex")? else {
+        return Err("codex_api_key_missing".into());
+    };
+    codex::login_with_api_key(&key)?;
+    let home = codex::managed_codex_home()?;
+    ConnectionStore::new(layout.connections).upsert_provider_file(
+        "codex",
+        &home.to_string_lossy(),
+    )?;
+    codex::invalidate_cache();
+    Ok(())
 }
 
 #[tauri::command]

@@ -250,7 +250,21 @@ const en = {
   "updateReleaseInvalid": "The latest release failed Tawreed security checks",
   "updateDownloadFailed": "Could not open the official release page.",
   "tryAgain": "Try again",
-  "mitLicense": "MIT License"
+  "mitLicense": "MIT License",
+  "connectWithChatgpt": "Connect with ChatGPT",
+  "useApiKey": "Use an API key",
+  "apiKeyLabel": "Codex API key",
+  "plaintextCredentialWarning": "I understand this key is stored on this computer as readable text.",
+  "connect": "Connect",
+  "connecting": "Connecting…",
+  "testConnection": "Test connection",
+  "removeConnection": "Remove",
+  "advancedDetails": "Provider details",
+  "codexCardDetail": "Tawreed can use your ChatGPT plan through Codex, or an OpenAI API key, to improve package suggestions.",
+  "chatgptLoginDetail": "A browser window opens for your ChatGPT account. Return here when you are signed in.",
+  "apiKeyLoginDetail": "Paste your OpenAI API key once; Tawreed signs in and keeps it on this computer.",
+  "connectionActionFailed": "That did not complete. Check the connection and try again.",
+  "providerModelsNote": "Model selection stays automatic unless you change it in Settings."
 } as const;
 
 export default en;

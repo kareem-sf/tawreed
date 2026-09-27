@@ -56,8 +56,6 @@ function ReadyApp({ runtime }: { runtime: RuntimeBootstrapStatus }) {
         <Onboarding
           initialStep={configuration.onboardingStep}
           required={configuration.onboardingRequired}
-          hasKey={boot.has_api_key}
-          hasCompatibleKey={boot.has_compatible_key}
           onComplete={() => void configuration.completeOnboarding()}
           onClose={configuration.closeOnboarding}
         />
