@@ -28,8 +28,8 @@ specification is `docs/spec.md`; the architecture is `docs/architecture.md`; the
 - **Data.** Everything lives under `~/.tawreed` (`TAWREED_HOME` overrides it): keys in `auth.json`, settings in
   `settings.json`, projects in the database. Never commit customer BOQs, keys, extracted content or databases.
   Use synthetic data for tests and approvals; real BOQs are read in place only with the engineer's say-so.
-- **AI connections.** API keys for Anthropic, OpenAI, Google, xAI and one OpenAI-compatible endpoint; ChatGPT/Codex
-  and Grok subscriptions only through their official clients. Never read or copy subscription tokens.
+- **AI connections.** API keys for Anthropic, OpenAI, Google, xAI and one OpenAI-compatible endpoint; a ChatGPT
+  subscription only through the official Codex client. Never read or copy subscription tokens.
 - **Simple.** A modular monolith. Prefer maintained libraries and documented APIs; check them before relying on
   them. No speculative infrastructure, compatibility layers or code nothing uses.
 - **Done means verified.** Each change ends with service tests, UI tests, typecheck and lint passing, and UI changes

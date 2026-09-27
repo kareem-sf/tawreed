@@ -67,7 +67,7 @@ Each domain module owns its models, its service functions and the agent tools th
 ### Providers
 
 - API keys: Pydantic AI runs the tool loop against the chosen model.
-- Subscriptions: Tawreed runs the official client (`codex`, `grok`) non-interactively in an empty working folder,
+- Subscription: Tawreed runs the official Codex client non-interactively in an empty working folder,
   with its own shell, file and web tools turned off and Tawreed's MCP bridge as the only tool server. The same tool
   definitions serve both paths.
 

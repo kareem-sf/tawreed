@@ -58,8 +58,8 @@ Export to… actions. Arabic projects get right-to-left sheets.
 ## AI
 
 - API keys for Anthropic, OpenAI, Google, xAI and one OpenAI-compatible endpoint.
-- ChatGPT/Codex and Grok subscriptions, only through their official clients. Tawreed never reads or copies their
-  sign-in tokens.
+- A ChatGPT subscription, only through the official Codex client. Tawreed never reads or copies its sign-in
+  tokens.
 - A model can be used only after Tawreed checks that it calls tools correctly. The same check records whether it
   can read images, which scanned pages need.
 - The first time a project's content would go to a connection, Tawreed shows what is sent and where, and asks.
