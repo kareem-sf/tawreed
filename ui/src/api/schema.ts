@@ -451,7 +451,7 @@ export interface paths {
         /**
          * Add Connection
          * @description Keep a key only once it works. An OpenAI-compatible service may not list its models; for those, the model
-         *     check proves the key.
+         *     check proves the key. Codex is kept once it is installed and signed in; there is only ever one.
          */
         post: operations["add_connection_ai_connections_post"];
         delete?: never;
@@ -511,6 +511,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai/codex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Codex Status
+         * @description Whether the Codex client is installed and signed in, as it reports itself.
+         */
+        get: operations["codex_status_ai_codex_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/codex/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Codex Sign In
+         * @description Open Codex's own sign-in; Tawreed never sees the credentials.
+         */
+        post: operations["codex_sign_in_ai_codex_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -564,14 +604,26 @@ export interface components {
             /** Model */
             model: string;
         };
+        /** CodexStatus */
+        CodexStatus: {
+            /** Installed */
+            installed: boolean;
+            /** Version */
+            version: string | null;
+            /** Signed In */
+            signed_in: boolean;
+        };
         /** ConnectionCreate */
         ConnectionCreate: {
             /**
              * Provider
              * @enum {string}
              */
-            provider: "anthropic" | "openai" | "google" | "xai" | "openai_compatible";
-            /** Api Key */
+            provider: "anthropic" | "openai" | "google" | "xai" | "openai_compatible" | "codex";
+            /**
+             * Api Key
+             * @default
+             */
             api_key: string;
             /** Base Url */
             base_url?: string | null;
@@ -584,7 +636,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "anthropic" | "openai" | "google" | "xai" | "openai_compatible";
+            provider: "anthropic" | "openai" | "google" | "xai" | "openai_compatible" | "codex";
             /** Label */
             label: string;
             /** Base Url */
@@ -2175,6 +2227,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ConnectionOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    codex_status_ai_codex_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodexStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    codex_sign_in_ai_codex_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

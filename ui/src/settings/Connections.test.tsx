@@ -13,7 +13,7 @@ async function openSettings() {
   return user;
 }
 
-test("the five services are offered, and none is connected at first", async () => {
+test("the services are offered, and none is connected at first", async () => {
   fakeService({});
   await openSettings();
 
@@ -26,6 +26,7 @@ test("the five services are offered, and none is connected at first", async () =
     "Google",
     "xAI",
     "OpenAI-compatible service",
+    "ChatGPT (Codex)",
   ]);
   expect(screen.getByText(/Keys are kept in plain text in auth.json/)).toBeInTheDocument();
 });
@@ -183,4 +184,40 @@ test("with an AI chosen, Home no longer asks for one", async () => {
 
   expect(await screen.findByDisplayValue("Al Noor Tower")).toBeInTheDocument();
   expect(screen.queryByText("Connect an AI service in Settings so Tawreed can start.")).not.toBeInTheDocument();
+});
+
+test("ChatGPT through Codex needs no key: Codex signs in by itself, then the connection is added", async () => {
+  let signedIn = false;
+  let connections: unknown[] = [];
+  const calls = fakeService({
+    "GET /ai/codex": () => ({ installed: true, version: "0.153.4", signed_in: signedIn }),
+    "POST /ai/codex/sign-in": () => {
+      signedIn = true;
+      return new Response(null, { status: 204 });
+    },
+    "GET /ai/connections": () => connections,
+    "POST /ai/connections": () => {
+      connections = [{ id: "c9", provider: "codex", label: "ChatGPT (Codex)", base_url: null, key_hint: "", checks: {} }];
+      return json(connections[0], 201);
+    },
+    "GET /ai/connections/c9/models": () => ["gpt-5.5"],
+  });
+  const user = await openSettings();
+
+  await user.click(await screen.findByRole("radio", { name: "ChatGPT (Codex)" }));
+  expect(await screen.findByText("Codex 0.153.4 is installed but not signed in.")).toBeInTheDocument();
+  expect(screen.getByText(/can’t reach your files, run commands or search the web/)).toBeInTheDocument();
+  expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add connection" })).toBeDisabled();
+
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(await screen.findByText("Codex 0.153.4 is signed in to ChatGPT.", {}, { timeout: 6000 })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Add connection" }));
+
+  expect(await screen.findByText("Signed in through Codex")).toBeInTheDocument();
+  expect(calls.find((c) => c.method === "POST" && c.path === "/ai/connections")?.body).toEqual({
+    provider: "codex",
+    api_key: "",
+    base_url: null,
+  });
 });

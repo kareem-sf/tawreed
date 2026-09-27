@@ -1615,7 +1615,7 @@
           "ai"
         ],
         "summary": "Add Connection",
-        "description": "Keep a key only once it works. An OpenAI-compatible service may not list its models; for those, the model\ncheck proves the key.",
+        "description": "Keep a key only once it works. An OpenAI-compatible service may not list its models; for those, the model\ncheck proves the key. Codex is kept once it is installed and signed in; there is only ever one.",
         "operationId": "add_connection_ai_connections_post",
         "parameters": [
           {
@@ -1825,6 +1825,87 @@
           }
         }
       }
+    },
+    "/ai/codex": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Codex Status",
+        "description": "Whether the Codex client is installed and signed in, as it reports itself.",
+        "operationId": "codex_status_ai_codex_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai/codex/sign-in": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Codex Sign In",
+        "description": "Open Codex's own sign-in; Tawreed never sees the credentials.",
+        "operationId": "codex_sign_in_ai_codex_sign_in_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2009,6 +2090,36 @@
         ],
         "title": "CheckRequest"
       },
+      "CodexStatus": {
+        "properties": {
+          "installed": {
+            "type": "boolean",
+            "title": "Installed"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "signed_in": {
+            "type": "boolean",
+            "title": "Signed In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "installed",
+          "version",
+          "signed_in"
+        ],
+        "title": "CodexStatus"
+      },
       "ConnectionCreate": {
         "properties": {
           "provider": {
@@ -2018,14 +2129,15 @@
               "openai",
               "google",
               "xai",
-              "openai_compatible"
+              "openai_compatible",
+              "codex"
             ],
             "title": "Provider"
           },
           "api_key": {
             "type": "string",
-            "minLength": 1,
-            "title": "Api Key"
+            "title": "Api Key",
+            "default": ""
           },
           "base_url": {
             "anyOf": [
@@ -2041,8 +2153,7 @@
         },
         "type": "object",
         "required": [
-          "provider",
-          "api_key"
+          "provider"
         ],
         "title": "ConnectionCreate"
       },
@@ -2059,7 +2170,8 @@
               "openai",
               "google",
               "xai",
-              "openai_compatible"
+              "openai_compatible",
+              "codex"
             ],
             "title": "Provider"
           },
