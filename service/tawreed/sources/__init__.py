@@ -1,12 +1,15 @@
-"""The BOQ files of a project. Tawreed keeps an unchanged copy of each, named by its content hash."""
+"""The BOQ files of a project. Tawreed keeps an unchanged copy of each, named by its content hash, and reads it
+into pages: one per sheet, PDF page or image frame."""
 
 import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint, select
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, UniqueConstraint, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from tawreed.core.db import Base, UTCDateTime, now
@@ -40,8 +43,34 @@ class Source(Base):
     size: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(16))
     added_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)
+    status: Mapped[str] = mapped_column(String(16), default="added")  # added | reading | read | failed
+    problem: Mapped[str | None] = mapped_column(String(40))  # why reading failed, as a code
 
     project = relationship(Project, back_populates="sources")
+    pages = relationship("SourcePage", order_by="SourcePage.number", passive_deletes=True)
+
+    @property
+    def page_count(self) -> int:
+        return len(self.pages)
+
+
+class SourcePage(Base):
+    """One sheet, PDF page or image frame. Its content (cells or positioned text) is kept in a JSON file."""
+
+    __tablename__ = "source_pages"
+    __table_args__ = (UniqueConstraint("source_id", "number"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    source_id: Mapped[str] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), index=True)
+    number: Mapped[int] = mapped_column(Integer)  # from 1, in file order
+    kind: Mapped[str] = mapped_column(String(8))  # sheet | page | image
+    name: Mapped[str] = mapped_column(String(100), default="")  # the sheet's name
+    has_text: Mapped[bool] = mapped_column(Boolean)  # False for scans and images: read from the image instead
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)  # a hidden sheet
+    rows: Mapped[int | None] = mapped_column(Integer)
+    cols: Mapped[int | None] = mapped_column(Integer)
+    width: Mapped[float | None] = mapped_column(Float)
+    height: Mapped[float | None] = mapped_column(Float)
 
 
 @dataclass(frozen=True)
@@ -99,3 +128,21 @@ def add_files(session: Session, home: Path, project: Project, files: list[Incomi
         added.append(source)
     project.updated_at = now()
     return added
+
+
+def copy_of(home: Path, source: Source) -> Path:
+    """Tawreed's unchanged copy of the file."""
+    return folder(home, source.project_id) / "sources" / f"{source.sha256}{Path(source.filename).suffix.lower()}"
+
+
+def pages_folder(home: Path, source: Source) -> Path:
+    return folder(home, source.project_id) / "pages" / source.id
+
+
+def page_content(home: Path, source: Source, number: int) -> dict[str, Any]:
+    return json.loads((pages_folder(home, source) / f"{number}.json").read_text(encoding="utf-8"))
+
+
+def get_source(session: Session, project_id: str, source_id: str) -> Source | None:
+    source = session.get(Source, source_id)
+    return source if source and source.project_id == project_id else None

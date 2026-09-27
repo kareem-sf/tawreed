@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from tawreed import projects as service
@@ -22,6 +22,9 @@ class SourceOut(BaseModel):
     size: int
     kind: Literal["spreadsheet", "csv", "pdf", "image"]
     added_at: datetime
+    status: Literal["added", "reading", "read", "failed"]
+    problem: str | None
+    page_count: int
 
 
 class ProjectOut(BaseModel):
@@ -72,7 +75,11 @@ def list_projects(session: DB) -> list[ProjectSummary]:
 
 @router.post("", status_code=201)
 def start_project(
-    session: DB, home: Home, files: Annotated[list[UploadFile], File()], name: Annotated[str | None, Form()] = None
+    request: Request,
+    session: DB,
+    home: Home,
+    files: Annotated[list[UploadFile], File()],
+    name: Annotated[str | None, Form()] = None,
 ) -> ProjectOut:
     """Start a project from dropped BOQ files. Without a name, it is named after the first file."""
     incoming = _checked(files)
@@ -80,6 +87,7 @@ def start_project(
     project = service.create_project(session, title)
     sources.add_files(session, home, project, incoming)
     session.commit()
+    request.app.state.reader.wake()
     session.refresh(project)
     return ProjectOut.model_validate(project)
 
@@ -101,12 +109,15 @@ def change_project(project_id: str, body: ProjectChange, session: DB) -> Project
 
 
 @router.post("/{project_id}/sources")
-def add_sources(project_id: str, session: DB, home: Home, files: Annotated[list[UploadFile], File()]) -> ProjectOut:
+def add_sources(
+    project_id: str, request: Request, session: DB, home: Home, files: Annotated[list[UploadFile], File()]
+) -> ProjectOut:
     """Add more BOQ files to a project. A file the project already has is ignored."""
     project = service.get_project(session, project_id)
     if project is None:
         raise problem(404, "project_not_found")
     sources.add_files(session, home, project, _checked(files))
     session.commit()
+    request.app.state.reader.wake()
     session.refresh(project)
     return ProjectOut.model_validate(project)
