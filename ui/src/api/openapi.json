@@ -2539,30 +2539,6 @@
             "format": "date-time",
             "title": "Created At"
           },
-          "answered_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Answered At"
-          },
-          "answer": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Answer"
-          },
           "provider": {
             "anyOf": [
               {
@@ -4162,13 +4138,6 @@
             "type": "array",
             "title": "Decisions"
           },
-          "answered": {
-            "items": {
-              "$ref": "#/components/schemas/DecisionOut"
-            },
-            "type": "array",
-            "title": "Answered"
-          },
           "coverage": {
             "$ref": "#/components/schemas/CoverageOut"
           },
@@ -4195,7 +4164,6 @@
           "stage",
           "run",
           "decisions",
-          "answered",
           "coverage",
           "packages",
           "published"

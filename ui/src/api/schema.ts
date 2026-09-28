@@ -775,12 +775,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Answered At */
-            answered_at?: string | null;
-            /** Answer */
-            answer?: {
-                [key: string]: unknown;
-            } | null;
             /** Provider */
             provider?: string | null;
             /** Host */
@@ -1307,8 +1301,6 @@ export interface components {
             run: components["schemas"]["RunOut"];
             /** Decisions */
             decisions: components["schemas"]["DecisionOut"][];
-            /** Answered */
-            answered: components["schemas"]["DecisionOut"][];
             coverage: components["schemas"]["CoverageOut"];
             /** Packages */
             packages: components["schemas"]["PackageOut"][];

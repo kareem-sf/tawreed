@@ -51,7 +51,6 @@ export function work(changes: Record<string, unknown> = {}) {
     stage: "read",
     run: { state: "idle" },
     decisions: [],
-    answered: [],
     coverage: { items: 0, placed: 0, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "0", totals_differ: 0 },
     packages: [],
     ...changes,
