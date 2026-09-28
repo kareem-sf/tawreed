@@ -3,8 +3,9 @@
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, select
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from tawreed.core.db import Base, UTCDateTime, now
@@ -19,8 +20,11 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(NAME_LIMIT))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)  # also when its work last changed
-    # Stopped by the engineer, or paused by Tawreed (an AI failure, a long run); a message or an answer resumes it
-    agent_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Stopped by the engineer, or paused by Tawreed (an AI failure, a step that got nowhere); Continue carries on
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    pause_reason: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # {code, ...details}
+    # The engineer's Redo waiting for its step: {step, note, source_id?}, cleared once the step has run
+    redo: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     # The highest package number given, so a removed package's number (its code, "03") is never given again
     package_numbers: Mapped[int] = mapped_column(Integer, default=0)
 

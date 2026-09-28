@@ -1,7 +1,7 @@
 import { explain, type Revision } from "../api/client";
 import { ago, size } from "../app/format";
 import { useSettings } from "../app/settings";
-import { useExportRevision, useOpenRevision, useRevisions } from "./queries";
+import { useExportRevision, useOpenRevision, useRevisions, useRun } from "./queries";
 
 /** The revision the project's current work is in: what was written, and where it is. */
 export function Published({ projectId, projectName, revision }: { projectId: string; projectName: string; revision: Revision }) {
@@ -24,7 +24,31 @@ export function Published({ projectId, projectName, revision }: { projectId: str
           ))}
       </ul>
       <Actions projectId={projectId} projectName={projectName} revision={revision} primary />
+      <PublishAgain projectId={projectId} />
     </section>
+  );
+}
+
+/** Publish the same work again, for instance once with rates and once for suppliers to price. */
+function PublishAgain({ projectId }: { projectId: string }) {
+  const { t } = useSettings();
+  const { publish } = useRun(projectId);
+  return (
+    <>
+      <button
+        type="button"
+        disabled={publish.isPending}
+        onClick={() => publish.mutate()}
+        className="self-start text-sm text-ink-2 underline hover:text-ink disabled:opacity-50"
+      >
+        {t("publish.again")}
+      </button>
+      {publish.isError && (
+        <p role="alert" className="text-sm text-danger">
+          {explain(publish.error, t)}
+        </p>
+      )}
+    </>
   );
 }
 

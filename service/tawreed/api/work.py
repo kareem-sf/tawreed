@@ -1,7 +1,8 @@
-"""The agent's work on a project as the engineer sees it: the step, what waits for them, the conversation and the
-packages; and what the engineer does about it: write, stop, answer, and edit the packages directly."""
+"""The work on a project as the engineer sees it: the step and what runs now, what waits for them, and the packages;
+and what the engineer does about it: stop, continue, answer, redo a step with a note, and edit the packages."""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query, Request, Response
@@ -9,15 +10,14 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tawreed import decisions, packages, publish
+from tawreed import decisions, ledger, packages, publish
 from tawreed import projects as project_records
-from tawreed.agent import records
-from tawreed.agent.runtime import chosen
 from tawreed.api.common import DB, Home, problem
 from tawreed.api.revisions import RevisionOut, revision_out
 from tawreed.ledger import Item
 from tawreed.projects import Project
 from tawreed.sources import Source
+from tawreed.workflow.runner import ask_to_publish, chosen
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["work"])
 rules_router = APIRouter(prefix="/rules", tags=["work"])
@@ -73,7 +73,7 @@ class DecisionOut(BaseModel):
     """What the engineer is asked. Only the fields for its kind are set."""
 
     id: str
-    kind: Literal["consent", "overlap", "plan", "uncertain", "question", "publish"]
+    kind: Literal["consent", "overlap", "plan", "uncertain", "publish"]
     raised_by: Literal["agent", "tawreed"]
     created_at: datetime
     answered_at: datetime | None = None
@@ -86,22 +86,10 @@ class DecisionOut(BaseModel):
     recommended: str | None = None  # overlap: a relation; uncertain: a package id
     packages: list[PlannedOut] | None = None  # plan
     removed: list[PackageRef] | None = None  # plan: current packages it drops; their items are placed again
-    note: str | None = None  # plan: the agent's thinking
+    note: str | None = None  # plan: the thinking behind it
     item: ItemOut | None = None  # uncertain
     candidates: list[PackageRef] | None = None  # uncertain
     reason: str | None = None  # uncertain
-    question: str | None = None
-    options: list[str] | None = None
-    summary: str | None = None  # publish
-
-
-class MessageOut(BaseModel):
-    id: int
-    sender: Literal["agent", "engineer", "tawreed"]
-    text: str
-    notice: str | None
-    params: dict[str, Any] | None
-    created_at: datetime
 
 
 class CoverageOut(BaseModel):
@@ -111,21 +99,39 @@ class CoverageOut(BaseModel):
     waiting: int
     pages_left: int
     pending_files: int
+    amount: str  # all packages' amounts, computed by Tawreed
+    totals_differ: int  # sheets or pages whose stated totals differ from their items' own amounts
+
+
+class RunOut(BaseModel):
+    """What the workflow is doing on the project now."""
+
+    state: Literal["running", "paused", "idle", "no_ai"]
+    step: Literal["read", "plan", "place"] | None = None  # running
+    file: str | None = None  # running read: the file
+    done: int | None = None  # running read: pages handled; place: items placed
+    total: int | None = None  # of how many
+    problem: dict[str, Any] | None = None  # paused: {code, ...details}
 
 
 class WorkOut(BaseModel):
     stage: Stage
-    agent: Literal["working", "idle", "paused", "no_ai"]
+    run: RunOut
     decisions: list[DecisionOut]  # waiting, oldest first
     answered: list[DecisionOut]  # the latest the engineer answered, oldest first
-    messages: list[MessageOut]
     coverage: CoverageOut
     packages: list[PackageOut]
     published: RevisionOut | None  # the latest revision
 
 
-class MessageIn(BaseModel):
-    text: Text
+class Redo(BaseModel):
+    """Run a step again, with the engineer's note for the AI."""
+
+    step: Literal["read", "place"]
+    source_id: str | None = None  # read: the file
+    page: int | None = None  # read: one page, or the whole file
+    package_id: str | None = None  # place: one package's items, or everything the AI placed
+    note: Text | None = None
 
 
 class ItemsPage(BaseModel):
@@ -232,10 +238,6 @@ def _decision(session: Session, decision: decisions.Decision) -> DecisionOut:
             out.item = _item(item, source.filename, packages.assignments(session, decision.project_id).get(item.id))
         out.candidates = [_ref(current[i]) for i in p["candidates"] if i in current]
         out.recommended, out.reason = p["recommended"], p["reason"]
-    elif decision.kind == "question":
-        out.question, out.options = p["question"], p["options"]
-    else:
-        out.summary = p.get("summary")
     return out
 
 
@@ -265,22 +267,33 @@ def stage(
 # Routes ---------------------------------------------------------------------------------------------------------
 
 
+def _run(session: Session, request: Request, home, project: Project, coverage: packages.Coverage) -> RunOut:
+    running = request.app.state.worker.running(project.id)
+    if running and running.name == "read":
+        source = session.get(Source, running.source_id)
+        handled = ledger.handled_pages(session, source.id)
+        return RunOut(state="running", step="read", file=source.filename, done=len(handled), total=len(source.pages))
+    if running and running.name == "place":
+        return RunOut(state="running", step="place", done=coverage.placed, total=coverage.items)
+    if running:
+        return RunOut(state="running", step=running.name)
+    if project.paused:
+        return RunOut(state="paused", problem=project.pause_reason)
+    return RunOut(state="idle" if chosen(home) else "no_ai")
+
+
 @router.get("/work")
 def get_work(project_id: str, request: Request, session: DB, home: Home) -> WorkOut:
     project = _project(session, project_id)
     waiting = decisions.waiting(session, project_id)
     coverage = packages.coverage(session, project_id, decisions.waiting_items(session, project_id))
-    agent = request.app.state.worker.status(project_id) if chosen(home) else "no_ai"
     latest = publish.latest(session, project_id)
     return WorkOut(
         stage=stage(session, project, waiting, coverage),
+        run=_run(session, request, home, project, coverage),
         published=revision_out(latest) if latest else None,
-        agent=agent,
         decisions=[_decision(session, d) for d in waiting],
         answered=[_decision(session, d) for d in decisions.answered(session, project_id)[-30:]],
-        messages=[
-            MessageOut.model_validate(m, from_attributes=True) for m in records.messages(session, project_id, 200)
-        ],
         coverage=CoverageOut(
             items=coverage.items,
             placed=coverage.placed,
@@ -288,6 +301,8 @@ def get_work(project_id: str, request: Request, session: DB, home: Home) -> Work
             waiting=coverage.waiting,
             pages_left=coverage.pages_left,
             pending_files=coverage.pending_files,
+            amount=str(packages.money(sum((c.amount for c in coverage.packages), Decimal(0)))),
+            totals_differ=sum(1 for t in coverage.totals if packages.money(t["difference"]) != 0),
         ),
         packages=[
             PackageOut(
@@ -303,21 +318,66 @@ def get_work(project_id: str, request: Request, session: DB, home: Home) -> Work
     )
 
 
-@router.post("/messages", status_code=201)
-def write(project_id: str, body: MessageIn, request: Request, session: DB) -> MessageOut:
-    """The engineer writes to the agent. A stopped or paused agent carries on."""
-    project = _project(session, project_id)
-    message = records.say(session, project_id, "engineer", body.text)
-    project.agent_paused = False
-    session.commit()
-    request.app.state.worker.resume(project_id)
-    return MessageOut.model_validate(message, from_attributes=True)
-
-
 @router.post("/stop", status_code=204)
 def stop(project_id: str, request: Request, session: DB) -> Response:
+    """Stop the running step; the project waits until the engineer continues."""
     _project(session, project_id)
     request.app.state.worker.stop(project_id)
+    return Response(status_code=204)
+
+
+def _carry_on(session: Session, request: Request, project: Project) -> None:
+    project.paused, project.pause_reason = False, None
+    session.commit()
+    request.app.state.worker.carry_on(project.id)
+
+
+@router.post("/continue", status_code=204)
+def carry_on(project_id: str, request: Request, session: DB) -> Response:
+    """A stopped or paused project carries on from where it is."""
+    _carry_on(session, request, _project(session, project_id))
+    return Response(status_code=204)
+
+
+@router.post("/redo", status_code=204)
+def redo(project_id: str, body: Redo, request: Request, session: DB) -> Response:
+    """Run a step again with the engineer's note: read a file (or one page) again, or place again what the AI
+    placed (in one package, or everywhere). The engineer's own placements stay."""
+    project = _project(session, project_id)
+    if body.step == "read":
+        source = session.get(Source, body.source_id or "")
+        if source is None or source.project_id != project_id or source.status != "read":
+            raise problem(404, "source_not_found")
+        pages = [body.page] if body.page is not None else [p.number for p in source.pages]
+        ledger.clear_pages(session, source, pages)
+        decisions.withdraw_gone(session, project_id)
+        project.redo = {"step": "read", "source_id": source.id, "note": body.note}
+    else:
+        placed = packages.assignments(session, project_id)
+        again = [
+            session.get(Item, item_id)
+            for item_id, a in placed.items()
+            if a.decided_by == "agent" and (body.package_id is None or a.package_id == body.package_id)
+        ]
+        packages.unplace(session, project, again)
+        if body.package_id is None:
+            for decision in decisions.waiting(session, project_id, "uncertain"):
+                decisions.withdraw(decision)
+        project.redo = {"step": "place", "note": body.note}
+    packages.touch(project)
+    _carry_on(session, request, project)
+    return Response(status_code=204)
+
+
+@router.post("/publish", status_code=204)
+def ask_again(project_id: str, session: DB) -> Response:
+    """Show the publish card again, to publish the current work (again, for instance without rates)."""
+    project = _project(session, project_id)
+    coverage = packages.coverage(session, project_id, decisions.waiting_items(session, project_id))
+    if not (coverage.complete and coverage.packages) or decisions.waiting(session, project_id):
+        raise problem(409, "not_ready_to_publish")
+    ask_to_publish(session, project)
+    session.commit()
     return Response(status_code=204)
 
 
@@ -344,7 +404,7 @@ def answer(
     if revision:
         decision.answer = {**decision.answer, "revision": revision.name, "prices": revision.manifest["prices"]}
     session.commit()
-    request.app.state.worker.resume(project_id)
+    request.app.state.worker.carry_on(project_id)
     return Response(status_code=204)
 
 
@@ -431,7 +491,7 @@ def merge_packages(project_id: str, package_id: str, body: Merge, request: Reque
 
 @router.post("/placements", status_code=204)
 def place(project_id: str, body: Placement, request: Request, session: DB) -> Response:
-    """The engineer puts items in a package. It settles any question the agent asked about them."""
+    """The engineer puts items in a package. It settles any question raised about them."""
     project = _project(session, project_id)
     try:
         package = packages.get_package(session, project_id, body.package_id)

@@ -1,9 +1,9 @@
 """What waits for the engineer, and what their answer does.
 
-Tools and Tawreed only raise decisions; nothing they propose takes effect until the engineer answers here. The
-kinds: consent (may this project go to this AI service?), overlap (is a new file an addition, a replacement or a
-revision?), plan (the packages), uncertain (which package an item belongs in), question (anything else the agent
-needs to know) and publish (write the revision)."""
+The AI's step tools and Tawreed only raise decisions; nothing they propose takes effect until the engineer answers
+here. The kinds: consent (may this project go to this AI service?), overlap (is a new file an addition, a replacement
+or a revision?), plan (the packages), uncertain (which package an item belongs in) and publish (write the
+revision)."""
 
 import uuid
 from datetime import datetime
@@ -30,13 +30,22 @@ class Decision(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    kind: Mapped[str] = mapped_column(String(12))  # consent | overlap | plan | uncertain | question | publish
+    kind: Mapped[str] = mapped_column(String(12))  # consent | overlap | plan | uncertain | publish
     raised_by: Mapped[str] = mapped_column(String(8))  # agent | tawreed
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)  # what the engineer is asked, by kind
     status: Mapped[str] = mapped_column(String(10), default="waiting")  # waiting | answered | withdrawn
     answer: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now)
     answered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class PlanEntry(BaseModel):
+    """One package of a plan as the engineer edited it."""
+
+    name: str = Field(min_length=1, max_length=packages.NAME_LIMIT)
+    scope: str = Field(default="", max_length=1000)
+    reason: str = Field(default="", max_length=1000)
+    keeps: list[str] = Field(default_factory=list)  # the current packages it continues, by id
 
 
 class Answer(BaseModel):
@@ -47,8 +56,9 @@ class Answer(BaseModel):
     package_id: str | None = None  # uncertain
     # uncertain: how far the choice applies; the project if unsaid
     scope: Literal["item", "project", "all"] | None = None
-    choice: str | None = Field(default=None, max_length=500)  # question: one of the options
-    # question: their own words; plan, publish: what to change
+    # plan: the plan as the engineer edited it, to apply instead of the proposal
+    packages: list[PlanEntry] | None = Field(default=None, max_length=packages.PACKAGES_MOST)
+    # plan, when not approved: what to change, for the plan to be proposed again
     note: str | None = Field(default=None, max_length=4000)
     # publish: whether the package workbooks show rates and amounts; they do unless said
     prices: bool | None = None
@@ -91,6 +101,13 @@ def raise_decision(session: Session, project_id: str, kind: str, payload: dict[s
 
 def withdraw(decision: Decision) -> None:
     decision.status, decision.answered_at = "withdrawn", now()
+
+
+def withdraw_gone(session: Session, project_id: str) -> None:
+    """Withdraw the questions about items that are no longer there, once their page was read again."""
+    for decision in waiting(session, project_id, "uncertain"):
+        if session.get(Item, decision.payload["item_id"]) is None:
+            withdraw(decision)
 
 
 # Raised by Tawreed ---------------------------------------------------------------------------------------------
@@ -166,25 +183,35 @@ def answer(session: Session, project: Project, decision: Decision, body: Answer)
         _settle_overlap(session, project, payload, body.relation)
         record = {"relation": body.relation}
     elif kind == "plan":
-        if body.approve:
-            packages.apply_plan(session, project, payload["packages"])
-            for stale in waiting(session, project.id, "uncertain"):  # placed again against the new plan
-                withdraw(stale)
-        record = {"approve": body.approve, "note": body.note}
+        record = _settle_plan(session, project, payload, body)
     elif kind == "uncertain":
         record = _settle_uncertain(session, project, payload, body)
-    elif kind == "question":
-        if not (body.choice or body.note):
-            raise Unanswerable("answer_missing")
-        if body.choice and body.choice not in payload["options"]:
-            raise Unanswerable("unknown_choice")
-        record = {"choice": body.choice, "note": body.note}
-    else:  # publish: carried out by the publisher once it exists for this project
-        record = {"approve": body.approve, "note": body.note}
+    else:  # publish: the revision is written by the route before the answer is kept
+        record = {"approve": body.approve}
     decision.status, decision.answer, decision.answered_at = "answered", record, now()
-    # The engineer is here and has answered, so the agent carries on; unless they just declined to let it.
-    project.agent_paused = kind == "consent" and not body.approve
+    # The engineer is here and has answered, so the work carries on; unless they just declined to send it to the AI.
+    declined = kind == "consent" and not body.approve
+    project.paused, project.pause_reason = declined, {"code": "no_consent"} if declined else None
     session.flush()
+
+
+def _settle_plan(session: Session, project: Project, payload: dict[str, Any], body: Answer) -> dict[str, Any]:
+    """Approved: the plan (as the engineer edited it, if they did) becomes the packages. Not approved: with a note,
+    or with no packages yet, the plan is proposed again; otherwise the current packages stay."""
+    if not body.approve:
+        if body.note or not packages.packages(session, project.id):
+            project.redo = {"step": "plan", "note": body.note}
+        return {"approve": False, "note": body.note}
+    proposed = [entry.model_dump() for entry in body.packages] if body.packages is not None else payload["packages"]
+    try:
+        packages.check_plan(session, project.id, proposed)
+        packages.apply_plan(session, project, proposed)
+    except packages.Refused as refused:
+        raise Unanswerable(refused.code) from refused
+    for stale in waiting(session, project.id, "uncertain"):  # placed again against the new plan
+        withdraw(stale)
+    project.redo = None
+    return {"approve": True, "edited": [e["name"] for e in proposed] if body.packages is not None else None}
 
 
 def _settle_overlap(session: Session, project: Project, payload: dict[str, Any], relation: str) -> None:

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, must, revisionZip, succeed, type Answer } from "../api/client";
+import { api, must, revisionZip, succeed, type Answer, type SheetLayout } from "../api/client";
 
-/** How often an open project's work is asked for: often while the agent works, calmly otherwise. */
+/** How often an open project's work is asked for: often while a step runs, calmly otherwise. */
 export const WORKING_POLL = 1000;
 export const IDLE_POLL = 3000;
 
@@ -9,7 +9,7 @@ export function useWork(projectId: string) {
   return useQuery({
     queryKey: ["work", projectId],
     queryFn: () => must(api.GET("/projects/{project_id}/work", { params: { path: { project_id: projectId } } })),
-    refetchInterval: (query) => (query.state.data?.agent === "working" ? WORKING_POLL : IDLE_POLL),
+    refetchInterval: (query) => (query.state.data?.run.state === "running" ? WORKING_POLL : IDLE_POLL),
   });
 }
 
@@ -33,24 +33,56 @@ function useRefresh(projectId: string) {
   return () => {
     void client.invalidateQueries({ queryKey: ["work", projectId] });
     void client.invalidateQueries({ queryKey: ["items", projectId] });
+    void client.invalidateQueries({ queryKey: ["source"] });
   };
 }
 
-export function useSend(projectId: string) {
+/** Stop the running step, carry on after a pause, or ask for the publish card again. */
+export function useRun(projectId: string) {
+  const onSuccess = useRefresh(projectId);
+  const project = { params: { path: { project_id: projectId } } };
+  return {
+    stop: useMutation({ mutationFn: () => succeed(api.POST("/projects/{project_id}/stop", project)), onSuccess }),
+    carryOn: useMutation({ mutationFn: () => succeed(api.POST("/projects/{project_id}/continue", project)), onSuccess }),
+    publish: useMutation({ mutationFn: () => succeed(api.POST("/projects/{project_id}/publish", project)), onSuccess }),
+  };
+}
+
+export type Redo =
+  | { step: "read"; source_id: string; page?: number; note?: string }
+  | { step: "place"; package_id?: string; note?: string };
+
+/** Run a step again, with the engineer's note for the AI. */
+export function useRedo(projectId: string) {
   const onSuccess = useRefresh(projectId);
   return useMutation({
-    mutationFn: (text: string) =>
-      must(api.POST("/projects/{project_id}/messages", { params: { path: { project_id: projectId } }, body: { text } })),
+    mutationFn: (body: Redo) =>
+      succeed(api.POST("/projects/{project_id}/redo", { params: { path: { project_id: projectId } }, body })),
     onSuccess,
   });
 }
 
-export function useStop(projectId: string) {
+/** The engineer's own reading of a page: a sheet's columns, or that it lists no items. */
+export function useLayouts(projectId: string, sourceId: string) {
   const onSuccess = useRefresh(projectId);
-  return useMutation({
-    mutationFn: () => succeed(api.POST("/projects/{project_id}/stop", { params: { path: { project_id: projectId } } })),
-    onSuccess,
-  });
+  const page = (number: number) => ({ params: { path: { project_id: projectId, source_id: sourceId, number } } });
+  return {
+    columns: useMutation({
+      mutationFn: ({ number, layout }: { number: number; layout: SheetLayout }) =>
+        succeed(api.PUT("/projects/{project_id}/sources/{source_id}/pages/{number}/layout", { ...page(number), body: layout })),
+      onSuccess,
+    }),
+    setAside: useMutation({
+      mutationFn: ({ number, reason }: { number: number; reason: string }) =>
+        succeed(
+          api.POST("/projects/{project_id}/sources/{source_id}/pages/{number}/set-aside", {
+            ...page(number),
+            body: { reason },
+          }),
+        ),
+      onSuccess,
+    }),
+  };
 }
 
 export function useAnswer(projectId: string) {

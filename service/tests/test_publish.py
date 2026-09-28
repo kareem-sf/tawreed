@@ -23,7 +23,7 @@ PLAN = ["Concrete works", "Formwork and joints", "Earthworks"]
 
 
 def ready(client, files=None) -> str:
-    """A project read, laid out, planned and placed, as the agent would leave it, with publishing requested."""
+    """A project read, laid out, planned and placed, as the AI's steps would leave it, with the publish card up."""
     project = read_all(client, start(client, files or {"Tower BOQ.xlsx": workbook()})["id"])
     home = client.app.state.home
     with client.app.state.sessions() as session:
@@ -40,7 +40,7 @@ def ready(client, files=None) -> str:
         packages.place(session, me, [items[3]], formwork, "agent")
         packages.place(session, me, [items[4]], formwork, "engineer", "The engineer chose this package.")
         packages.place(session, me, [items[5]], earthworks, "agent")
-        decisions.raise_decision(session, me.id, "publish", {"summary": "Three packages."}, "agent")
+        decisions.raise_decision(session, me.id, "publish", {}, "tawreed")
         session.commit()
     return project["id"]
 
@@ -163,11 +163,11 @@ def test_the_coverage_check_and_decision_log_account_for_every_item(client):
     log = openpyxl.load_workbook(revision / "Decision log - Rev 00.xlsx")
     placed_by = {r[0]: r[4] for r in rows(log["Placements"], 2)}
     assert placed_by == {
-        "3.1.1": "Tawreed's agent",
-        "3.1.2": "Tawreed's agent",
-        "3.1.3": "Tawreed's agent",
+        "3.1.1": "Tawreed (AI)",
+        "3.1.2": "Tawreed (AI)",
+        "3.1.3": "Tawreed (AI)",
         "3.1.4": "The engineer",
-        "1": "Tawreed's agent",
+        "1": "Tawreed (AI)",
     }
     how = [r[2] for r in rows(log["Reading"], 2)]
     assert how[0].startswith("row 4; Columns: code A, description B, unit C, quantity D, rate E, amount F")

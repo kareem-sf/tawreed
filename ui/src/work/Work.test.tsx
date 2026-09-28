@@ -43,33 +43,72 @@ test("nothing goes to the AI service until the engineer allows it", async () => 
   await waitFor(() => expect(answered(calls, "d-consent")).toEqual([{ approve: true }]));
 });
 
-test("the plan is approved, or sent back with what should change", async () => {
-  const plan = decision("plan", {
+const proposal = () =>
+  decision("plan", {
     note: "Three trades, as the market prices them.",
     packages: [
       { name: "Concrete works", scope: "Plain and reinforced concrete.", reason: "Ready-mix suppliers.", keeps: [] },
       { name: "Formwork and joints", scope: "", reason: "", keeps: [{ id: "k2", code: "02", name: "Formwork" }, { id: "k3", code: "03", name: "Joints" }] },
+      { name: "Earthworks", scope: "Excavation.", reason: "", keeps: [] },
     ],
     removed: [{ id: "k4", code: "04", name: "Sundries" }],
   });
+
+test("the plan is approved as proposed, proposed again with a note, or the current packages kept", async () => {
   const { calls, user } = await openProject({
-    "GET /projects/p1/work": () => work({ stage: "plan", decisions: [plan, decision("question", { question: "?", options: ["a", "b"] })] }),
+    "GET /projects/p1/work": () => work({ stage: "plan", decisions: [proposal(), decision("uncertain", {})] }),
     "POST /projects/p1/decisions/d-plan": ok,
   });
 
   const card = await screen.findByRole("region", { name: "Waiting for you" });
-  expect(within(card).getByRole("heading")).toHaveTextContent("A plan of 2 packages");
+  expect(within(card).getByRole("heading")).toHaveTextContent("A plan of 3 packages");
   expect(card).toHaveTextContent("and 1 more");
-  expect(card).toHaveTextContent("Concrete worksNew"); // it changes approved packages, so each says what it keeps
+  expect(card).toHaveTextContent("Concrete worksNew"); // it changes current packages, so each says what it keeps
   expect(card).toHaveTextContent("Merges 02 Formwork and 03 Joints");
   expect(card).toHaveTextContent("Removes 04 Sundries. Their items will be placed again.");
 
-  await user.click(within(card).getByRole("button", { name: "Ask for changes" }));
-  await user.type(within(card).getByRole("textbox", { name: "Ask for changes" }), "Keep joints separate");
-  await user.click(within(card).getByRole("button", { name: "Send" }));
+  await user.click(within(card).getByRole("button", { name: "Propose again…" }));
+  await user.type(within(card).getByRole("textbox", { name: "A note for the AI (optional)" }), "Keep joints separate");
+  await user.click(within(card).getByRole("button", { name: "Run again" }));
+  await user.click(within(card).getByRole("button", { name: "Keep the current packages" }));
   await user.click(within(card).getByRole("button", { name: "Approve plan" }));
   await waitFor(() =>
-    expect(answered(calls, "d-plan")).toEqual([{ approve: false, note: "Keep joints separate" }, { approve: true }]),
+    expect(answered(calls, "d-plan")).toEqual([
+      { approve: false, note: "Keep joints separate" },
+      { approve: false },
+      { approve: true },
+    ]),
+  );
+});
+
+test("the engineer edits the plan before approving it", async () => {
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "plan", decisions: [proposal()] }),
+    "POST /projects/p1/decisions/d-plan": ok,
+  });
+
+  const card = await screen.findByRole("region", { name: "Waiting for you" });
+  await user.click(within(card).getByRole("button", { name: "Edit plan" }));
+  const first = within(card).getByRole("textbox", { name: "Name of package 1" });
+  await user.clear(first);
+  await user.type(first, "Concrete");
+  await user.selectOptions(within(card).getByRole("combobox", { name: "Merge package 3 into…" }), "0");
+  await user.click(within(card).getByRole("button", { name: "Add a package" }));
+  expect(within(card).getByRole("button", { name: "Approve plan" })).toBeDisabled(); // the new one needs a name
+  await user.type(within(card).getByRole("textbox", { name: "Name of package 3" }), "Waterproofing");
+  await user.click(within(card).getByRole("button", { name: "Remove package 2" }));
+  await user.click(within(card).getByRole("button", { name: "Approve plan" }));
+
+  await waitFor(() =>
+    expect(answered(calls, "d-plan")).toEqual([
+      {
+        approve: true,
+        packages: [
+          { name: "Concrete", scope: "Plain and reinforced concrete. Excavation.", reason: "Ready-mix suppliers.", keeps: [] },
+          { name: "Waterproofing", scope: "", reason: "", keeps: [] },
+        ],
+      },
+    ]),
   );
 });
 
@@ -137,42 +176,91 @@ test("an uncertain item shows where it is in its file, and the choice can become
   await waitFor(() => expect(answered(calls, "d-uncertain")).toEqual([{ package_id: "k2", scope: "all" }]));
 });
 
-test("the conversation shows only what was said and decided, and the engineer can write or stop", async () => {
-  const messages = [
-    { id: 1, sender: "agent", text: "Two sheets list items.", notice: null, params: null, created_at: "2026-09-27T09:00:00Z" },
-    { id: 2, sender: "engineer", text: "Keep MEP apart.", notice: null, params: null, created_at: "2026-09-27T09:02:00Z" },
-    {
-      id: 3,
-      sender: "tawreed",
-      text: "",
-      notice: "ai_failed",
-      params: { problem: "rate_limited" },
-      created_at: "2026-09-27T09:03:00Z",
-    },
-  ];
-  const plan = decision("plan", { packages: [], answer: { approve: true, note: null }, answered_at: "2026-09-27T09:01:00Z" });
+test("the status line says what runs, with Stop, or why it paused, with Continue; there is no chat", async () => {
+  const plan = decision("plan", { packages: [], answer: { approve: true, edited: ["Concrete"] }, answered_at: "2026-09-27T09:01:00Z" });
+  let run: Record<string, unknown> = { state: "running", step: "place", done: 150, total: 320 };
   const { calls, user } = await openProject({
-    "GET /projects/p1/work": () => work({ stage: "place", agent: "working", messages, answered: [plan], packages }),
-    "POST /projects/p1/messages": ({ body }) => ({ id: 4, sender: "engineer", text: (body as { text: string }).text, notice: null, params: null, created_at: "" }),
-    "POST /projects/p1/stop": ok,
+    "GET /projects/p1/work": () => work({ stage: "place", run, answered: [plan], packages }),
+    "POST /projects/p1/stop": () => {
+      run = { state: "paused", problem: { code: "ai_failed", problem: "rate_limited" } };
+      return ok();
+    },
+    "POST /projects/p1/continue": ok,
   });
 
-  const conversation = await screen.findByRole("region", { name: "Conversation" });
-  const lines = within(conversation).getAllByRole("listitem").map((li) => li.textContent);
-  expect(lines).toEqual([
-    "TawreedTwo sheets list items.",
-    "You approved the package plan.",
-    "YouKeep MEP apart.",
-    "Tawreed paused. The service is limiting requests, or the account is out of credit. Try again later. Write to it to try again.",
-  ]);
+  expect(await screen.findByRole("status")).toHaveTextContent("Placing items: 150 of 320 placed");
   expect(screen.getByRole("list", { name: "Progress" }).querySelector("[aria-current]")).toHaveTextContent("Place");
+  expect(screen.getByRole("region", { name: "Done so far" })).toHaveTextContent("You approved the package plan, as you edited it.");
+  expect(screen.queryByRole("textbox")).not.toHaveAttribute("aria-label", "Write to Tawreed");
 
-  await user.type(screen.getByRole("textbox", { name: "Write to Tawreed" }), "Split MEP into electrical and plumbing{Enter}");
+  await user.click(screen.getByRole("button", { name: "Stop" }));
+  expect(await screen.findByText(/^Paused\. The service is limiting requests/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(calls.map((c) => c.path)).toEqual(expect.arrayContaining(["/projects/p1/stop", "/projects/p1/continue"])));
+});
+
+test("a file's page says how it was read, and the engineer sets its columns or has it read again", async () => {
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "place", packages }),
+    "GET /projects/p1/sources/s1": () => ({
+      ...project.sources[0],
+      pages: [
+        {
+          number: 1,
+          kind: "sheet",
+          name: "Div.03",
+          has_text: true,
+          hidden: false,
+          rows: 20,
+          cols: 6,
+          width: null,
+          height: null,
+          handled: {
+            by: "agent",
+            set_aside: null,
+            items: 5,
+            sheet: { first_row: 4, last_row: null, code: "A", description: ["B"], unit: "C", quantity: "D", rate: "E", amount: "F", comment: null },
+          },
+        },
+      ],
+    }),
+    "GET /projects/p1/sources/s1/pages/1": () => ({ kind: "sheet", name: "Div.03", first_row: 1, rows: [["x"]], total_rows: 1, merged: [] }),
+    "PUT /projects/p1/sources/s1/pages/1/layout": ok,
+    "POST /projects/p1/redo": ok,
+  });
+
+  await user.click(await screen.findByRole("button", { name: "Architectural.xlsx" }));
+  expect(await screen.findByText("Read by Tawreed (AI): 5 items")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Columns…" }));
+  await user.clear(screen.getByRole("spinbutton", { name: "First row" }));
+  await user.type(screen.getByRole("spinbutton", { name: "First row" }), "6");
+  await user.selectOptions(screen.getByRole("combobox", { name: "Rate" }), "");
+  await user.click(screen.getByRole("button", { name: "Read it this way" }));
   await waitFor(() =>
-    expect(calls).toContainEqual({ method: "POST", path: "/projects/p1/messages", body: { text: "Split MEP into electrical and plumbing" } }),
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+      first_row: 6,
+      last_row: null,
+      code: "A",
+      description: ["B"],
+      unit: "C",
+      quantity: "D",
+      rate: null,
+      amount: "F",
+      comment: null,
+    }),
   );
-  await user.click(within(conversation).getByRole("button", { name: "Stop" }));
-  await waitFor(() => expect(calls.some((c) => c.path === "/projects/p1/stop")).toBe(true));
+
+  await user.click(await screen.findByRole("button", { name: "Read again…" }));
+  await user.type(screen.getByRole("textbox", { name: "A note for the AI (optional)" }), "The items start on row 6.");
+  await user.click(screen.getByRole("button", { name: "Run again" }));
+  await waitFor(() =>
+    expect(calls.find((c) => c.path === "/projects/p1/redo")?.body).toEqual({
+      step: "read",
+      source_id: "s1",
+      page: 1,
+      note: "The items start on row 6.",
+    }),
+  );
 });
 
 test("the engineer moves, renames, merges and removes packages directly", async () => {
@@ -200,12 +288,17 @@ test("the engineer moves, renames, merges and removes packages directly", async 
   ];
   const { calls, user } = await openProject({
     "GET /projects/p1/work": () =>
-      work({ stage: "check", packages, coverage: { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0 } }),
+      work({
+        stage: "check",
+        packages,
+        coverage: { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "1465585.13", totals_differ: 0 },
+      }),
     "GET /projects/p1/items": () => ({ items: concrete, total: 1 }),
     "POST /projects/p1/placements": ok,
     "PATCH /projects/p1/packages/k1": () => ({ id: "k1", code: "01", name: "Concrete" }),
     "POST /projects/p1/packages/k1/merge": ok,
     "DELETE /projects/p1/packages/k2": ok,
+    "POST /projects/p1/redo": ok,
   });
 
   const summary = await screen.findByRole("region", { name: "Packages" });
@@ -245,8 +338,19 @@ test("the engineer moves, renames, merges and removes packages directly", async 
   await user.click(screen.getAllByRole("button", { name: "Remove" })[1]!);
   await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/projects/p1/packages/k2")).toBe(true));
 
+  await user.click(screen.getAllByRole("button", { name: "Place again…" })[0]!);
+  await user.type(screen.getByRole("textbox", { name: "A note for the AI (optional)" }), "Blinding goes with concrete.");
+  await user.click(screen.getByRole("button", { name: "Run again" }));
+  await waitFor(() =>
+    expect(calls).toContainEqual({
+      method: "POST",
+      path: "/projects/p1/redo",
+      body: { step: "place", package_id: "k1", note: "Blinding goes with concrete." },
+    }),
+  );
+
   await user.click(screen.getByRole("button", { name: "Back" }));
-  expect(await screen.findByRole("region", { name: "Conversation" })).toBeInTheDocument();
+  expect(await screen.findByRole("region", { name: "Packages" })).toHaveTextContent("View and edit");
 });
 
 test("a published revision shows what was written, and opens or exports its folder", async () => {
@@ -264,24 +368,28 @@ test("a published revision shows what was written, and opens or exports its fold
       { path: "manifest.json", bytes: 900 },
     ],
   };
-  const publishAsked = decision("publish", { summary: "Three packages; every item placed." });
+  const publishAsked = decision("publish", { raised_by: "tawreed" });
+  const coverage = { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "1465585.13", totals_differ: 1 };
   let published = false;
   const { calls, user } = await openProject({
     "GET /projects/p1/work": () =>
       published
         ? work({ stage: "published", published: revision, packages })
-        : work({ stage: "publish", decisions: [publishAsked], packages }),
+        : work({ stage: "publish", decisions: [publishAsked], packages, coverage }),
     "POST /projects/p1/decisions/d-publish": () => {
       published = true;
       return ok();
     },
     "GET /projects/p1/revisions": () => [revision],
     "POST /projects/p1/revisions/0/open": ok,
+    "POST /projects/p1/publish": ok,
     "GET /projects/p1/revisions/0/export": () => new Response(new Uint8Array([80, 75]), { headers: { "Content-Type": "application/zip" } }),
   });
 
   const card = await screen.findByRole("region", { name: "Waiting for you" });
   expect(card).toHaveTextContent("Ready to publish");
+  expect(card).toHaveTextContent("Packages: 2 · Items: 3 · Amounts: 1,465,585.13"); // computed by Tawreed
+  expect(card).toHaveTextContent("1 sheet or page states totals that differ from its items. Check it before publishing.");
   const prices = within(card).getByRole("checkbox", { name: /Show rates and amounts in the package workbooks/ });
   expect(prices).toBeChecked();
   await user.click(prices);
@@ -308,4 +416,6 @@ test("a published revision shows what was written, and opens or exports its fold
       expect.arrayContaining(["POST /projects/p1/revisions/0/open", "GET /projects/p1/revisions/0/export"]),
     ),
   );
+  await user.click(within(done).getByRole("button", { name: "Publish again…" }));
+  await waitFor(() => expect(calls.some((c) => c.path === "/projects/p1/publish")).toBe(true));
 });

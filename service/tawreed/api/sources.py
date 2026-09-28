@@ -1,12 +1,15 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select
 
-from tawreed import sources
+from tawreed import decisions, ledger, packages, sources
 from tawreed.api.common import DB, Home, problem
 from tawreed.api.projects import SourceOut
+from tawreed.ledger.extract import SheetLayout
+from tawreed.projects import Project
 
 router = APIRouter(prefix="/projects/{project_id}/sources", tags=["sources"])
 
@@ -27,8 +30,25 @@ class PageOut(BaseModel):
     height: float | None
 
 
+class Handled(BaseModel):
+    """How a page was read: laid out (a sheet's columns, when it is a sheet) or set aside, and by whom."""
+
+    by: Literal["agent", "engineer"]
+    set_aside: str | None  # the reason, when set aside
+    sheet: SheetLayout | None  # a sheet's layout, to edit
+    items: int
+
+
+class HandledPage(PageOut):
+    handled: Handled | None
+
+
 class SourceDetail(SourceOut):
-    pages: list[PageOut]
+    pages: list[HandledPage]
+
+
+class SetAside(BaseModel):
+    reason: str = Field(min_length=1, max_length=300)
 
 
 class SheetView(BaseModel):
@@ -75,7 +95,66 @@ def _page(source: sources.Source, number: int) -> sources.SourcePage:
 
 @router.get("/{source_id}")
 def get_source(project_id: str, source_id: str, session: DB) -> SourceDetail:
-    return SourceDetail.model_validate(_source(session, project_id, source_id))
+    source = _source(session, project_id, source_id)
+    counts = dict(
+        session.execute(
+            select(ledger.Item.page, func.count()).where(ledger.Item.source_id == source.id).group_by(ledger.Item.page)
+        ).all()
+    )
+    how = {}
+    for layout in session.scalars(select(ledger.Layout).where(ledger.Layout.source_id == source.id)):
+        for number in layout.pages:
+            how[number] = Handled(
+                by=layout.decided_by,
+                set_aside=layout.spec.get("skip"),
+                sheet=SheetLayout(**layout.spec) if "first_row" in layout.spec else None,
+                items=counts.get(number, 0),
+            )
+    return SourceDetail(
+        **SourceOut.model_validate(source).model_dump(),
+        pages=[
+            HandledPage(**PageOut.model_validate(page).model_dump(), handled=how.get(page.number))
+            for page in source.pages
+        ],
+    )
+
+
+def _changed(session, request: Request, source: sources.Source) -> None:
+    """After the engineer's own layout: earlier placements carry over, questions about items gone are withdrawn."""
+    project = session.get(Project, source.project_id)
+    packages.carry_over(session, project, source)
+    packages.touch(project)
+    decisions.withdraw_gone(session, project.id)
+    session.commit()
+    request.app.state.worker.wake()
+
+
+@router.put("/{source_id}/pages/{number}/layout", status_code=204)
+def lay_out_sheet(
+    project_id: str, source_id: str, number: int, body: SheetLayout, request: Request, session: DB, home: Home
+) -> Response:
+    """The engineer sets a sheet's columns. Its items are read again from the cells; the AI leaves it as it is."""
+    source = _source(session, project_id, source_id)
+    try:
+        ledger.lay_out_sheet(session, home, source, number, body, "engineer")
+    except ledger.NotReadable as error:
+        session.rollback()
+        raise problem(409, error.code) from error
+    _changed(session, request, source)
+    return Response(status_code=204)
+
+
+@router.post("/{source_id}/pages/{number}/set-aside", status_code=204)
+def set_aside(project_id: str, source_id: str, number: int, body: SetAside, request: Request, session: DB) -> Response:
+    """The engineer says a page lists no items."""
+    source = _source(session, project_id, source_id)
+    try:
+        ledger.skip_pages(session, source, [number], body.reason, "engineer")
+    except ledger.NotReadable as error:
+        session.rollback()
+        raise problem(409, error.code) from error
+    _changed(session, request, source)
+    return Response(status_code=204)
 
 
 @router.get("/{source_id}/pages/{number}")

@@ -3,15 +3,19 @@ import { explain, type Item, type PackageSummary } from "../api/client";
 import { useSettings } from "../app/settings";
 import { SourcePreview } from "../home/SourcePreview";
 import { whereIs } from "./DecisionCard";
-import { useEdits, useItems, useWork, type ItemFilter } from "./queries";
+import { NoteForm } from "./NoteForm";
+import { useEdits, useItems, useRedo, useWork, type ItemFilter } from "./queries";
 
-/** The packages and their items, to look at and change directly. The same checked operations the agent uses. */
+/** The packages and their items, to look at and change directly, with the same checked operations the AI's
+ *  steps use; or to have the AI place them again, with a note. */
 export function Packages({ projectId, onBack }: { projectId: string; onBack: () => void }) {
   const { t } = useSettings();
   const work = useWork(projectId);
   const edits = useEdits(projectId);
+  const redo = useRedo(projectId);
   const [adding, setAdding] = useState(false);
-  const failed = Object.values(edits).find((m) => m.isError);
+  const [placingAll, setPlacingAll] = useState(false);
+  const failed = [...Object.values(edits), redo].find((m) => m.isError);
 
   if (!work.data) return null;
   const { packages, coverage } = work.data;
@@ -27,12 +31,24 @@ export function Packages({ projectId, onBack }: { projectId: string; onBack: () 
         </button>
         <h2 className="text-[28px] font-light">{t("packages.title")}</h2>
         <div className="flex-1" />
+        {!placingAll && packages.length > 0 && (
+          <button type="button" onClick={() => setPlacingAll(true)} className="rounded-lg border border-line px-3.5 py-1 text-sm">
+            {t("packages.placeAllAgain")}
+          </button>
+        )}
         {!adding && (
           <button type="button" onClick={() => setAdding(true)} className="rounded-lg border border-line px-3.5 py-1 text-sm">
             {t("packages.new")}
           </button>
         )}
       </div>
+      {placingAll && (
+        <NoteForm
+          busy={redo.isPending}
+          onCancel={() => setPlacingAll(false)}
+          onRun={(note) => redo.mutate({ step: "place", note }, { onSuccess: () => setPlacingAll(false) })}
+        />
+      )}
       <p className="text-sm text-ink-2">{t("coverage.summary", { placed: coverage.placed, count: coverage.items })}</p>
       {adding && (
         <NameForm
@@ -63,6 +79,7 @@ export function Packages({ projectId, onBack }: { projectId: string; onBack: () 
             key={pkg.id}
             projectId={projectId}
             edits={edits}
+            redo={redo}
             filter={{ package_id: pkg.id }}
             package_={pkg}
             title={pkg.name}
@@ -125,6 +142,7 @@ type Edits = ReturnType<typeof useEdits>;
 function Group({
   projectId,
   edits,
+  redo,
   filter,
   package_,
   title,
@@ -133,6 +151,7 @@ function Group({
 }: {
   projectId: string;
   edits: Edits;
+  redo?: ReturnType<typeof useRedo>;
   filter: ItemFilter;
   package_?: PackageSummary;
   title: string;
@@ -142,6 +161,7 @@ function Group({
   const { t } = useSettings();
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [placing, setPlacing] = useState(false);
   const [into, setInto] = useState("");
   const others = packages.filter((p) => p.id !== package_?.id);
 
@@ -197,6 +217,11 @@ function Group({
                 </button>
               </>
             )}
+            {redo && !placing && (
+              <button type="button" onClick={() => setPlacing(true)} className="rounded-md border border-line px-2.5 py-0.5 hover:border-ink">
+                {t("packages.placeAgain")}
+              </button>
+            )}
             <button
               type="button"
               disabled={edits.remove.isPending}
@@ -206,6 +231,15 @@ function Group({
               {t("packages.remove")}
             </button>
           </div>
+          {redo && placing && (
+            <NoteForm
+              busy={redo.isPending}
+              onCancel={() => setPlacing(false)}
+              onRun={(note) =>
+                redo.mutate({ step: "place", package_id: package_.id, note }, { onSuccess: () => setPlacing(false) })
+              }
+            />
+          )}
         </div>
       )}
       {open && <Items projectId={projectId} edits={edits} filter={filter} packages={packages} />}

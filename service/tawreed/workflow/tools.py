@@ -1,9 +1,9 @@
-"""The agent's tools. They read, lay out and propose. None of them can answer a decision, change an item's values or
-state a number: Tawreed extracts the values and computes every count and total the tools report."""
+"""The tools of the AI's steps. They read, lay out and propose. None of them can answer a decision, change an item's
+values or state a number: Tawreed extracts the values and computes every count and total the tools report. Each
+step gets only its own tools (STEP_TOOLS), and a Read step only its own file."""
 
 import re
 import threading
-from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -15,8 +15,7 @@ from pydantic_ai import BinaryContent, ModelRetry, RunContext, ToolReturn
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from tawreed import decisions, ledger, packages, publish
-from tawreed.agent import records
+from tawreed import decisions, ledger, packages
 from tawreed.ledger import Item, Layout
 from tawreed.ledger.extract import PdfLayout, SheetLayout, TranscribedRow
 from tawreed.ledger.numbers import parse_number
@@ -28,11 +27,10 @@ CELL_TEXT = 150  # characters of a cell shown
 ITEMS_LISTED = 150  # items in one list_items
 PLACED_AT_ONCE = 2000  # items in one place_items
 UNCERTAIN_WAITING = 30  # uncertain items the engineer is asked about at once
-PACKAGES_MOST = 60
 
 NOT_READABLE = {
-    "source_not_read": "That file isn't read (or couldn't be read). list_files shows each file's state.",
-    "page_not_found": "That page isn't in the file. list_files shows its pages.",
+    "source_not_read": "That file isn't read (or couldn't be read).",
+    "page_not_found": "That page isn't in the file: the step's list of pages shows them.",
     "wrong_page_kind": "Use lay_out_sheet for a sheet and lay_out_pdf for PDF pages.",
 }
 
@@ -42,16 +40,20 @@ class Stopped(Exception):
 
 
 @dataclass
-class Turn:
+class Step:
+    """One run of a step on one project: read (one file), plan or place."""
+
     home: Path
     sessions: sessionmaker[Session]
     project_id: str
     stop: threading.Event
     sees_images: bool
+    name: str  # read | plan | place
+    source_id: str | None = None  # read: the file
 
 
 @contextmanager
-def _session(ctx: RunContext[Turn]) -> Iterator[Session]:
+def _session(ctx: RunContext[Step]) -> Iterator[Session]:
     """A session for one tool call. A refusal goes back to the model as the reason, and nothing is saved."""
     if ctx.deps.stop.is_set():
         raise Stopped()
@@ -76,14 +78,14 @@ def data(text: str) -> str:
     return f"<boq-data>\n{text.replace('</boq-data', '</ boq-data')}\n</boq-data>"
 
 
-def _project(session: Session, ctx: RunContext[Turn]) -> Project:
+def _project(session: Session, ctx: RunContext[Step]) -> Project:
     return session.get(Project, ctx.deps.project_id)
 
 
-def _file(session: Session, ctx: RunContext[Turn], file_id: str) -> Source:
+def _file(session: Session, ctx: RunContext[Step], file_id: str) -> Source:
     source = session.get(Source, file_id)
-    if source is None or source.project_id != ctx.deps.project_id:
-        raise ValueError("No file has that id. list_files shows the files and their ids.")
+    if source is None or source.project_id != ctx.deps.project_id or file_id != ctx.deps.source_id:
+        raise ValueError("That isn't this step's file: use the file id the step gives.")
     return source
 
 
@@ -133,15 +135,12 @@ def _items(session: Session, project_id: str, refs: list[int]) -> list[Item]:
 # Reading the files --------------------------------------------------------------------------------------------
 
 
-def list_files(ctx: RunContext[Turn]) -> str:
-    """The project's BOQ files with their ids, pages and what has been done with each page."""
-    with _session(ctx) as session:
-        return files_overview(session, ctx.deps.project_id, detailed=True)
-
-
-def files_overview(session: Session, project_id: str, detailed: bool) -> str:
-    sources = session.scalars(select(Source).where(Source.project_id == project_id).order_by(Source.added_at)).all()
-    names = {s.id: s.filename for s in sources}
+def files_overview(session: Session, project_id: str, detailed: bool, source_id: str | None = None) -> str:
+    query = select(Source).where(Source.project_id == project_id).order_by(Source.added_at)
+    if source_id:
+        query = query.where(Source.id == source_id)
+    sources = session.scalars(query).all()
+    names = dict(session.execute(select(Source.id, Source.filename).where(Source.project_id == project_id)).all())
     lines = []
     for source in sources:
         state = {
@@ -157,7 +156,7 @@ def files_overview(session: Session, project_id: str, detailed: bool) -> str:
             lines.append(f"{head} · set aside by the engineer: a newer file replaces it")
             continue
         if source.relation == "pending":
-            head += " · waiting for the engineer to say how it relates to an earlier file; lay it out meanwhile"
+            head += " · waiting for the engineer to say how it relates to an earlier file"
         elif source.relation in ("replacement", "revision"):
             head += f" · a {source.relation} of {names.get(source.replaces_id, 'an earlier file')}"
         elif source.relation == "addition":
@@ -189,18 +188,20 @@ def files_overview(session: Session, project_id: str, detailed: bool) -> str:
                 done = f"set aside: {layout.spec['skip']}"
             else:
                 done = f"laid out: {counts.get(page.number, 0)} items"
+            if layout is not None and layout.decided_by == "engineer":
+                done += " (by the engineer: leave it)"
             extra = f" ({', '.join(notes)})" if notes else ""
             lines.append(f"  page {page.number}: {kind}{extra} · {done}")
     return "\n".join(lines) or "No files yet."
 
 
-def read_sheet(ctx: RunContext[Turn], file_id: str, page: int, first_row: int = 1) -> str:
+def read_sheet(ctx: RunContext[Step], file_id: str, page: int, first_row: int = 1) -> str:
     """Read a sheet's cells, about 120 rows at a time, with Excel's row numbers and column letters. Empty rows and
     cells are left out.
 
     Args:
-        file_id: The file's id from list_files.
-        page: The sheet's page number from list_files.
+        file_id: The file's id.
+        page: The sheet's page number.
         first_row: The first row to show.
     """
     with _session(ctx) as session:
@@ -219,12 +220,12 @@ def read_sheet(ctx: RunContext[Turn], file_id: str, page: int, first_row: int = 
     return f"{head}\n{data(chr(10).join(lines) or '(these rows are empty)')}"
 
 
-def read_pdf_page(ctx: RunContext[Turn], file_id: str, page: int) -> str:
+def read_pdf_page(ctx: RunContext[Step], file_id: str, page: int) -> str:
     """Read a PDF page's text line by line, each word with where it runs across the page (x0-x1, in points from
     the left edge), so you can see where the table's columns fall. Lines count from the top of the page.
 
     Args:
-        file_id: The file's id from list_files.
+        file_id: The file's id.
         page: The page number.
     """
     with _session(ctx) as session:
@@ -238,18 +239,15 @@ def read_pdf_page(ctx: RunContext[Turn], file_id: str, page: int) -> str:
     return f"{head}\n{data(chr(10).join(lines) or '(no text on this page)')}"
 
 
-def view_page(ctx: RunContext[Turn], file_id: str, page: int) -> ToolReturn | str:
+def view_page(ctx: RunContext[Step], file_id: str, page: int) -> ToolReturn | str:
     """Look at a PDF page or an image as a picture: for scans, and to check a table's layout.
 
     Args:
-        file_id: The file's id from list_files.
+        file_id: The file's id.
         page: The page number.
     """
     if not ctx.deps.sees_images:
-        return (
-            "The AI Tawreed works with can't read images, so scanned pages can't be read. Tell the engineer: they "
-            "can choose an AI that reads images in Settings."
-        )
+        return "The AI Tawreed works with can't read images, so scanned pages can't be read: leave them."
     with _session(ctx) as session:
         source = _file(session, ctx, file_id)
         found = ledger.page_of(source, page)
@@ -301,49 +299,58 @@ def _where(skipped: dict) -> str:
     return f"row {skipped['row']}" if "row" in skipped else f"page {skipped.get('page')}, line {skipped.get('line')}"
 
 
+def _not_the_engineers(session: Session, source: Source, pages: list[int]) -> None:
+    """The engineer's own layouts are final."""
+    for layout in session.scalars(select(Layout).where(Layout.source_id == source.id)):
+        if layout.decided_by == "engineer" and set(layout.pages) & set(pages):
+            raise ValueError("The engineer laid out that page themselves: leave it as it is.")
+
+
 def _after_layout(session: Session, project: Project, source: Source) -> None:
     packages.carry_over(session, project, source)
     packages.touch(project)
 
 
-def lay_out_sheet(ctx: RunContext[Turn], file_id: str, page: int, layout: SheetLayout) -> str:
+def lay_out_sheet(ctx: RunContext[Step], file_id: str, page: int, layout: SheetLayout) -> str:
     """Give a sheet that lists BOQ items its layout: the rows that hold items and the column (Excel letter) for each
     field. Tawreed then reads every item's values exactly as the cells state them and reports what it found.
 
     Args:
-        file_id: The file's id from list_files.
+        file_id: The file's id.
         page: The sheet's page number.
         layout: Where the items are. Descriptions spread over several columns are joined in order.
     """
     with _session(ctx) as session:
         source, project = _file(session, ctx, file_id), _project(session, ctx)
+        _not_the_engineers(session, source, [page])
         summary = ledger.lay_out_sheet(session, ctx.deps.home, source, page, layout, "agent")
         _after_layout(session, project, source)
         return _report(session, source, summary, [page])
 
 
-def lay_out_pdf(ctx: RunContext[Turn], file_id: str, layout: PdfLayout) -> str:
+def lay_out_pdf(ctx: RunContext[Step], file_id: str, layout: PdfLayout) -> str:
     """Give PDF pages that list BOQ items their layout: where each column runs across the page (x0 to x1 in points,
     from read_pdf_page) and which lines to leave out at the top and bottom. Tawreed then splits every line into
     its fields exactly as written and reports what it found.
 
     Args:
-        file_id: The file's id from list_files.
+        file_id: The file's id.
         layout: The pages it applies to and where the columns fall.
     """
     with _session(ctx) as session:
         source, project = _file(session, ctx, file_id), _project(session, ctx)
+        _not_the_engineers(session, source, layout.pages)
         summary = ledger.lay_out_pdf(session, ctx.deps.home, source, layout, "agent")
         _after_layout(session, project, source)
         return _report(session, source, summary, layout.pages)
 
 
-def transcribe_page(ctx: RunContext[Turn], file_id: str, page: int, rows: list[TranscribedRow]) -> str:
+def transcribe_page(ctx: RunContext[Step], file_id: str, page: int, rows: list[TranscribedRow]) -> str:
     """For a page with no text (a scan): write down every BOQ row you read on its picture, exactly as printed,
     top to bottom. Each row you write is marked for the engineer to check against the page.
 
     Args:
-        file_id: The file's id from list_files.
+        file_id: The file's id.
         page: The page number.
         rows: The rows as printed. Leave a field empty when the page leaves it empty.
     """
@@ -353,21 +360,23 @@ def transcribe_page(ctx: RunContext[Turn], file_id: str, page: int, rows: list[T
         source, project = _file(session, ctx, file_id), _project(session, ctx)
         if ledger.page_of(source, page).has_text:
             raise ValueError("This page has text: lay it out with lay_out_pdf instead.")
+        _not_the_engineers(session, source, [page])
         summary = ledger.record_transcription(session, ctx.deps.home, source, page, rows, "agent")
         _after_layout(session, project, source)
         return _report(session, source, summary, [page])
 
 
-def set_aside_pages(ctx: RunContext[Turn], file_id: str, pages: list[int], reason: str) -> str:
+def set_aside_pages(ctx: RunContext[Step], file_id: str, pages: list[int], reason: str) -> str:
     """Mark pages that list no BOQ items (a cover, a summary of totals, a rates list) as handled, with the reason.
 
     Args:
-        file_id: The file's id from list_files.
+        file_id: The file's id.
         pages: The page numbers.
         reason: Why they hold no items, in a few words.
     """
     with _session(ctx) as session:
         source, project = _file(session, ctx, file_id), _project(session, ctx)
+        _not_the_engineers(session, source, pages)
         ledger.skip_pages(session, source, pages, reason[:300], "agent")
         packages.touch(project)
         return f"Set aside {plural(len(pages), 'page')} of {source.filename}."
@@ -377,7 +386,7 @@ def set_aside_pages(ctx: RunContext[Turn], file_id: str, pages: list[int], reaso
 
 
 def list_items(
-    ctx: RunContext[Turn],
+    ctx: RunContext[Step],
     unplaced_only: bool = False,
     package: int | None = None,
     search: str | None = None,
@@ -439,14 +448,14 @@ class PlannedPackage(BaseModel):
     reason: str = Field(max_length=1000, description="Why it is a package of its own: how the market trades it")
     keeps: list[int] = Field(
         default_factory=list,
-        description="When changing an approved plan: the numbers of current packages this one continues (two or "
-        "more to merge them). Empty for a new package.",
+        description="When changing the current packages: the numbers of those this one continues (two or more to "
+        "merge them). Empty for a new package.",
     )
 
 
-def propose_plan(ctx: RunContext[Turn], plan: list[PlannedPackage], note: str) -> str:
-    """Propose the packages to the engineer, or a change to the approved ones. They approve it or ask for changes;
-    nothing changes until they approve. A new proposal replaces one still waiting.
+def propose_plan(ctx: RunContext[Step], plan: list[PlannedPackage], note: str) -> str:
+    """Propose the packages, or a change to the current ones. The engineer approves or edits the plan; nothing
+    changes until they do. A new proposal replaces one still waiting.
 
     Args:
         plan: The whole set of packages, in the order they should be listed.
@@ -455,39 +464,29 @@ def propose_plan(ctx: RunContext[Turn], plan: list[PlannedPackage], note: str) -
     with _session(ctx) as session:
         project_id = ctx.deps.project_id
         coverage = packages.coverage(session, project_id, decisions.waiting_items(session, project_id))
-        if coverage.pages_left or coverage.pending_files:
-            raise ValueError(
-                "Handle every page first (lay it out or set it aside), and wait for the engineer's "
-                "overlap decisions, so the plan covers every item."
-            )
-        if not coverage.items:
-            raise ValueError("There are no items yet: lay out the pages that list them first.")
-        if not 1 <= len(plan) <= PACKAGES_MOST:
-            raise ValueError(f"Propose between 1 and {PACKAGES_MOST} packages.")
-        names = Counter(p.name.strip().casefold() for p in plan)
-        if any(n > 1 for n in names.values()):
-            raise ValueError("Each package needs its own name.")
+        if coverage.pages_left or coverage.pending_files or not coverage.items:
+            raise ValueError("The files aren't all read yet, so a plan can't cover every item.")
         current = {p.number: p.id for p in packages.packages(session, project_id)}
-        proposed = []
-        for planned in plan:
-            unknown = [n for n in planned.keeps if n not in current]
-            if unknown:
-                raise ValueError(f"There is no current package {unknown[0]}.")
-            proposed.append(
-                {
-                    "name": planned.name.strip(),
-                    "scope": planned.scope.strip(),
-                    "reason": planned.reason.strip(),
-                    "keeps": [current[n] for n in planned.keeps],
-                }
-            )
+        unknown = [n for planned in plan for n in planned.keeps if n not in current]
+        if unknown:
+            raise ValueError(f"There is no current package {unknown[0]}.")
+        proposed = [
+            {
+                "name": planned.name.strip(),
+                "scope": planned.scope.strip(),
+                "reason": planned.reason.strip(),
+                "keeps": [current[n] for n in planned.keeps],
+            }
+            for planned in plan
+        ]
+        packages.check_plan(session, project_id, proposed)
         for earlier in decisions.waiting(session, project_id, "plan"):
             decisions.withdraw(earlier)
         decisions.raise_decision(session, project_id, "plan", {"packages": proposed, "note": note[:2000]}, "agent")
-        return "The plan is with the engineer. Wait for their answer before placing items."
+        return "The plan is with the engineer. The step is done: stop."
 
 
-def place_items(ctx: RunContext[Turn], package: int, items: str, reason: str = "") -> str:
+def place_items(ctx: RunContext[Step], package: int, items: str, reason: str = "") -> str:
     """Place items in a package of the approved plan. An item already placed moves; one the engineer placed stays.
 
     Args:
@@ -508,7 +507,7 @@ def place_items(ctx: RunContext[Turn], package: int, items: str, reason: str = "
         return f"Placed {plural(count, 'item')} in {packages.code(target)} {target.name}. Still to place: {left}."
 
 
-def flag_uncertain(ctx: RunContext[Turn], item: int, candidates: list[int], recommended: int, reason: str) -> str:
+def flag_uncertain(ctx: RunContext[Step], item: int, candidates: list[int], recommended: int, reason: str) -> str:
     """Ask the engineer which package an item belongs in, when you can't place it with confidence.
 
     Args:
@@ -543,120 +542,9 @@ def flag_uncertain(ctx: RunContext[Turn], item: int, candidates: list[int], reco
         return f"Item {item} is waiting for the engineer. Carry on with the others."
 
 
-def check_work(ctx: RunContext[Turn]) -> str:
-    """Where every item stands, computed by Tawreed: placed, still to place, or waiting for the engineer; each
-    package's item count and amount; and the totals the files state beside the items' own sums."""
-    with _session(ctx) as session:
-        project_id = ctx.deps.project_id
-        coverage = packages.coverage(session, project_id, decisions.waiting_items(session, project_id))
-    lines = [
-        f"Items in use: {coverage.items}. Placed: {coverage.placed}. Still to place: {coverage.unplaced}. "
-        f"Waiting for the engineer: {coverage.waiting}.",
-        f"Pages not handled yet: {coverage.pages_left}. "
-        f"Files waiting for an overlap decision: {coverage.pending_files}.",
-    ]
-    lines += [
-        f"- {packages.code(c.package)} {c.package.name}: {c.items} items, amounts {packages.money(c.amount)}"
-        + (f" ({c.without_amount} without an amount)" if c.without_amount else "")
-        for c in coverage.packages
-    ]
-    for t in coverage.totals:
-        verdict = (
-            "they agree"
-            if packages.money(t["difference"]) == 0
-            else f"they differ by {packages.money(t['difference'])}"
-        )
-        lines.append(
-            f"- {t['file']}, {t['where']}: the {plural(t['count'], 'total')} it states add up to "
-            f"{packages.money(t['stated_sum'])}; its items add up to {packages.money(t['items_sum'])}: {verdict}."
-        )
-    lines.append("Ready to publish." if coverage.complete and coverage.packages else "Not ready to publish yet.")
-    return "\n".join(lines)
-
-
-def _engineer_wrote_since(session: Session, project_id: str, moment) -> bool:
-    """Whether the engineer has written since then: the one reason to publish unchanged work again, for instance
-    once with rates and once without."""
-    query = select(records.Message.id).where(
-        records.Message.project_id == project_id,
-        records.Message.sender == "engineer",
-        records.Message.created_at > moment,
-    )
-    return session.scalars(query.limit(1)).first() is not None
-
-
-def request_publish(ctx: RunContext[Turn], summary: str) -> str:
-    """Ask the engineer to publish the revision, once every item is placed. They see the result before they approve.
-
-    Args:
-        summary: For the engineer: what the revision holds and anything they should look at first, in a few lines.
-    """
-    with _session(ctx) as session:
-        project_id = ctx.deps.project_id
-        coverage = packages.coverage(session, project_id, decisions.waiting_items(session, project_id))
-        if not (coverage.complete and coverage.packages):
-            raise ValueError("Not every item is placed yet: check_work shows what is left.")
-        if decisions.waiting(session, project_id):
-            raise ValueError("Something is still waiting for the engineer; ask to publish once it is settled.")
-        published = publish.current(session, _project(session, ctx))
-        if published and not _engineer_wrote_since(session, project_id, published.created_at):
-            raise ValueError(
-                f"{published.name} already holds the current work: nothing has changed since, and the engineer "
-                "hasn't asked for it again."
-            )
-        decisions.raise_decision(session, project_id, "publish", {"summary": summary[:2000]}, "agent")
-        return "The engineer has been asked to publish. Wait for their answer."
-
-
-# Talking to the engineer --------------------------------------------------------------------------------------
-
-
-def message_engineer(ctx: RunContext[Turn], text: str) -> str:
-    """Write to the engineer: what you found, what you need, what comes next. This is the only way they see what
-    you say.
-
-    Args:
-        text: The message, short and plain.
-    """
-    with _session(ctx) as session:
-        records.say(session, ctx.deps.project_id, "agent", text.strip()[:4000])
-        return "Sent."
-
-
-def ask_engineer(ctx: RunContext[Turn], question: str, options: list[str]) -> str:
-    """Ask the engineer something only they can decide, with two to four answers to choose from (they can also
-    answer in their own words). One question at a time.
-
-    Args:
-        question: The question, with what they need to know to answer it.
-        options: Two to four short answers.
-    """
-    with _session(ctx) as session:
-        project_id = ctx.deps.project_id
-        if not 2 <= len(options) <= 4:
-            raise ValueError("Give two to four options.")
-        if decisions.waiting(session, project_id, "question"):
-            raise ValueError("Your earlier question is still waiting for the engineer; ask one at a time.")
-        payload = {"question": question.strip()[:2000], "options": [o.strip()[:200] for o in options]}
-        decisions.raise_decision(session, project_id, "question", payload, "agent")
-        return "Asked. Carry on with what doesn't depend on the answer."
-
-
-TOOLS = [
-    list_files,
-    read_sheet,
-    read_pdf_page,
-    view_page,
-    lay_out_sheet,
-    lay_out_pdf,
-    transcribe_page,
-    set_aside_pages,
-    list_items,
-    propose_plan,
-    place_items,
-    flag_uncertain,
-    check_work,
-    request_publish,
-    message_engineer,
-    ask_engineer,
-]
+STEP_TOOLS = {
+    "read": [read_sheet, read_pdf_page, view_page, lay_out_sheet, lay_out_pdf, transcribe_page, set_aside_pages],
+    "plan": [list_items, propose_plan],
+    "place": [list_items, place_items, flag_uncertain],
+}
+TOOLS = list(dict.fromkeys(tool for tools in STEP_TOOLS.values() for tool in tools))  # every step's, for the MCP server

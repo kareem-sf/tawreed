@@ -365,6 +365,154 @@
         }
       }
     },
+    "/projects/{project_id}/sources/{source_id}/pages/{number}/layout": {
+      "put": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Lay Out Sheet",
+        "description": "The engineer sets a sheet's columns. Its items are read again from the cells; the AI leaves it as it is.",
+        "operationId": "lay_out_sheet_projects__project_id__sources__source_id__pages__number__layout_put",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Number"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SheetLayout"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/sources/{source_id}/pages/{number}/set-aside": {
+      "post": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Set Aside",
+        "description": "The engineer says a page lists no items.",
+        "operationId": "set_aside_projects__project_id__sources__source_id__pages__number__set_aside_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Number"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAside"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/projects/{project_id}/sources/{source_id}/pages/{number}": {
       "get": {
         "tags": [
@@ -586,14 +734,106 @@
         }
       }
     },
-    "/projects/{project_id}/messages": {
+    "/projects/{project_id}/stop": {
       "post": {
         "tags": [
           "work"
         ],
-        "summary": "Write",
-        "description": "The engineer writes to the agent. A stopped or paused agent carries on.",
-        "operationId": "write_projects__project_id__messages_post",
+        "summary": "Stop",
+        "description": "Stop the running step; the project waits until the engineer continues.",
+        "operationId": "stop_projects__project_id__stop_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/continue": {
+      "post": {
+        "tags": [
+          "work"
+        ],
+        "summary": "Carry On",
+        "description": "A stopped or paused project carries on from where it is.",
+        "operationId": "carry_on_projects__project_id__continue_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/redo": {
+      "post": {
+        "tags": [
+          "work"
+        ],
+        "summary": "Redo",
+        "description": "Run a step again with the engineer's note: read a file (or one page) again, or place again what the AI\nplaced (in one package, or everywhere). The engineer's own placements stay.",
+        "operationId": "redo_projects__project_id__redo_post",
         "parameters": [
           {
             "name": "project_id",
@@ -620,21 +860,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MessageIn"
+                "$ref": "#/components/schemas/Redo"
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageOut"
-                }
-              }
-            }
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -649,13 +882,14 @@
         }
       }
     },
-    "/projects/{project_id}/stop": {
+    "/projects/{project_id}/publish": {
       "post": {
         "tags": [
           "work"
         ],
-        "summary": "Stop",
-        "operationId": "stop_projects__project_id__stop_post",
+        "summary": "Ask Again",
+        "description": "Show the publish card again, to publish the current work (again, for instance without rates).",
+        "operationId": "ask_again_projects__project_id__publish_post",
         "parameters": [
           {
             "name": "project_id",
@@ -1118,7 +1352,7 @@
           "work"
         ],
         "summary": "Place",
-        "description": "The engineer puts items in a package. It settles any question the agent asked about them.",
+        "description": "The engineer puts items in a package. It settles any question raised about them.",
         "operationId": "place_projects__project_id__placements_post",
         "parameters": [
           {
@@ -2002,17 +2236,20 @@
             ],
             "title": "Scope"
           },
-          "choice": {
+          "packages": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 500
+                "items": {
+                  "$ref": "#/components/schemas/PlanEntry"
+                },
+                "type": "array",
+                "maxItems": 60
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Choice"
+            "title": "Packages"
           },
           "note": {
             "anyOf": [
@@ -2249,6 +2486,14 @@
           "pending_files": {
             "type": "integer",
             "title": "Pending Files"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          },
+          "totals_differ": {
+            "type": "integer",
+            "title": "Totals Differ"
           }
         },
         "type": "object",
@@ -2258,7 +2503,9 @@
           "unplaced",
           "waiting",
           "pages_left",
-          "pending_files"
+          "pending_files",
+          "amount",
+          "totals_differ"
         ],
         "title": "CoverageOut"
       },
@@ -2275,7 +2522,6 @@
               "overlap",
               "plan",
               "uncertain",
-              "question",
               "publish"
             ],
             "title": "Kind"
@@ -2456,42 +2702,6 @@
               }
             ],
             "title": "Reason"
-          },
-          "question": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Question"
-          },
-          "options": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Options"
-          },
-          "summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Summary"
           }
         },
         "type": "object",
@@ -2516,6 +2726,149 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "Handled": {
+        "properties": {
+          "by": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "engineer"
+            ],
+            "title": "By"
+          },
+          "set_aside": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Aside"
+          },
+          "sheet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SheetLayout"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "type": "integer",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "by",
+          "set_aside",
+          "sheet",
+          "items"
+        ],
+        "title": "Handled",
+        "description": "How a page was read: laid out (a sheet's columns, when it is a sheet) or set aside, and by whom."
+      },
+      "HandledPage": {
+        "properties": {
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sheet",
+              "page",
+              "image"
+            ],
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "has_text": {
+            "type": "boolean",
+            "title": "Has Text"
+          },
+          "hidden": {
+            "type": "boolean",
+            "title": "Hidden"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
+          },
+          "cols": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cols"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "handled": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Handled"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "number",
+          "kind",
+          "name",
+          "has_text",
+          "hidden",
+          "rows",
+          "cols",
+          "width",
+          "height",
+          "handled"
+        ],
+        "title": "HandledPage"
       },
       "ImageView": {
         "properties": {
@@ -2700,80 +3053,6 @@
         ],
         "title": "Merge"
       },
-      "MessageIn": {
-        "properties": {
-          "text": {
-            "type": "string",
-            "maxLength": 4000,
-            "minLength": 1,
-            "title": "Text"
-          }
-        },
-        "type": "object",
-        "required": [
-          "text"
-        ],
-        "title": "MessageIn"
-      },
-      "MessageOut": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "sender": {
-            "type": "string",
-            "enum": [
-              "agent",
-              "engineer",
-              "tawreed"
-            ],
-            "title": "Sender"
-          },
-          "text": {
-            "type": "string",
-            "title": "Text"
-          },
-          "notice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notice"
-          },
-          "params": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Params"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "sender",
-          "text",
-          "notice",
-          "params",
-          "created_at"
-        ],
-        "title": "MessageOut"
-      },
       "ModelCheck": {
         "properties": {
           "ok": {
@@ -2932,92 +3211,6 @@
         ],
         "title": "PackageRef"
       },
-      "PageOut": {
-        "properties": {
-          "number": {
-            "type": "integer",
-            "title": "Number"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "sheet",
-              "page",
-              "image"
-            ],
-            "title": "Kind"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "has_text": {
-            "type": "boolean",
-            "title": "Has Text"
-          },
-          "hidden": {
-            "type": "boolean",
-            "title": "Hidden"
-          },
-          "rows": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rows"
-          },
-          "cols": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cols"
-          },
-          "width": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Width"
-          },
-          "height": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Height"
-          }
-        },
-        "type": "object",
-        "required": [
-          "number",
-          "kind",
-          "name",
-          "has_text",
-          "hidden",
-          "rows",
-          "cols",
-          "width",
-          "height"
-        ],
-        "title": "PageOut"
-      },
       "Placement": {
         "properties": {
           "item_ids": {
@@ -3040,6 +3233,41 @@
           "package_id"
         ],
         "title": "Placement"
+      },
+      "PlanEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "scope": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Scope",
+            "default": ""
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Reason",
+            "default": ""
+          },
+          "keeps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keeps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "PlanEntry",
+        "description": "One package of a plan as the engineer edited it."
       },
       "PlannedOut": {
         "properties": {
@@ -3166,6 +3394,70 @@
         ],
         "title": "ProjectSummary"
       },
+      "Redo": {
+        "properties": {
+          "step": {
+            "type": "string",
+            "enum": [
+              "read",
+              "place"
+            ],
+            "title": "Step"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "package_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step"
+        ],
+        "title": "Redo",
+        "description": "Run a step again, with the engineer's note for the AI."
+      },
       "RevisionFile": {
         "properties": {
           "path": {
@@ -3255,6 +3547,102 @@
         ],
         "title": "RuleOut"
       },
+      "RunOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "paused",
+              "idle",
+              "no_ai"
+            ],
+            "title": "State"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "plan",
+                  "place"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "RunOut",
+        "description": "What the workflow is doing on the project now."
+      },
+      "SetAside": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "SetAside"
+      },
       "SettingsChange": {
         "properties": {
           "language": {
@@ -3339,6 +3727,110 @@
           "ai"
         ],
         "title": "SettingsOut"
+      },
+      "SheetLayout": {
+        "properties": {
+          "first_row": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "First Row"
+          },
+          "last_row": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Row"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z]{1,3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "description": {
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{1,3}$"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Description"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z]{1,3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{1,3}$",
+            "title": "Quantity"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z]{1,3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z]{1,3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z]{1,3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "first_row",
+          "description",
+          "quantity"
+        ],
+        "title": "SheetLayout",
+        "description": "Which rows hold items and which column holds what. Columns are Excel letters; rows count from 1."
       },
       "SheetView": {
         "properties": {
@@ -3463,7 +3955,7 @@
           },
           "pages": {
             "items": {
-              "$ref": "#/components/schemas/PageOut"
+              "$ref": "#/components/schemas/HandledPage"
             },
             "type": "array",
             "title": "Pages"
@@ -3660,15 +4152,8 @@
             ],
             "title": "Stage"
           },
-          "agent": {
-            "type": "string",
-            "enum": [
-              "working",
-              "idle",
-              "paused",
-              "no_ai"
-            ],
-            "title": "Agent"
+          "run": {
+            "$ref": "#/components/schemas/RunOut"
           },
           "decisions": {
             "items": {
@@ -3683,13 +4168,6 @@
             },
             "type": "array",
             "title": "Answered"
-          },
-          "messages": {
-            "items": {
-              "$ref": "#/components/schemas/MessageOut"
-            },
-            "type": "array",
-            "title": "Messages"
           },
           "coverage": {
             "$ref": "#/components/schemas/CoverageOut"
@@ -3715,10 +4193,9 @@
         "type": "object",
         "required": [
           "stage",
-          "agent",
+          "run",
           "decisions",
           "answered",
-          "messages",
           "coverage",
           "packages",
           "published"

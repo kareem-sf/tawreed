@@ -11,12 +11,12 @@ import pytest
 import uvicorn
 from conftest import TOKEN
 from reading import read_all, start, workbook
-from test_agent import answer, settle, waiting
+from test_workflow import answer, settle, waiting
 
 from tawreed import settings
-from tawreed.agent.records import TurnRecord
 from tawreed.ai import codex, connections
 from tawreed.api.app import create_app
+from tawreed.workflow.records import StepRecord
 
 FAKE = Path(__file__).with_name("fake_codex.py")
 SIGNED_IN = {"installed": True, "version": "0.153.4", "signed_in": True}
@@ -46,7 +46,7 @@ def live(tmp_path, monkeypatch):
 
 
 def until(client, project_id, condition, seconds=30.0) -> dict:
-    """The project's work once the condition holds, whether or not the agent is still working."""
+    """The project's work once the condition holds, whether or not a step is still running."""
     deadline = time.monotonic() + seconds
     while True:
         work = client.get(f"/projects/{project_id}/work").json()
@@ -63,7 +63,7 @@ def use_codex(home: Path) -> None:
 
 
 def started(client) -> str:
-    """A project read and allowed to go to the service, so the agent starts."""
+    """A project read and allowed to go to the service, so the workflow starts."""
     project_id = read_all(client, start(client, {"Tower BOQ.xlsx": workbook()})["id"])["id"]
     work = settle(client, project_id, waiting("consent"))
     assert (work["decisions"][0]["provider"], work["decisions"][0]["host"]) == ("codex", None)
@@ -71,22 +71,21 @@ def started(client) -> str:
     return project_id
 
 
-def turns(client, project_id) -> list[TurnRecord]:
+def runs(client, project_id) -> list[StepRecord]:
     with client.app.state.sessions() as session:
-        return session.query(TurnRecord).filter_by(project_id=project_id).order_by(TurnRecord.id).all()
+        return session.query(StepRecord).filter_by(project_id=project_id).order_by(StepRecord.id).all()
 
 
-def test_a_turn_runs_through_codex_with_tawreeds_tools(live, tmp_path):
+def test_a_step_runs_through_codex_with_only_its_own_tools(live, tmp_path):
     use_codex(tmp_path)
     project_id = started(live)
 
-    work = until(live, project_id, lambda w: any(m["sender"] == "agent" for m in w["messages"]))
-    until(live, project_id, lambda w: bool(turns(live, project_id)[0].ended))
-    live.post(f"/projects/{project_id}/stop")  # the stand-in never lays the pages out, so the agent would go on
-    assert [m["text"] for m in work["messages"] if m["sender"] == "agent"][0] == "Codex here: I read the file list."
-    first = turns(live, project_id)[0]
-    assert first.model == "codex gpt-5.5" and first.ended == "done"
-    assert first.calls == [{"tool": "list_files", "sent_back": None}, {"tool": "message_engineer", "sent_back": None}]
+    work = until(live, project_id, lambda w: w["run"]["state"] == "paused")  # the stand-in never lays pages out
+    assert work["run"]["problem"] == {"code": "no_progress", "step": "read"}
+    first = runs(live, project_id)[0]
+    assert (first.step, first.model, first.ended) == ("read", "codex gpt-5.5", "done")
+    assert first.calls[0]["tool"] == "list_items" and "isn't part of this step" in first.calls[0]["sent_back"]
+    assert first.calls[1] == {"tool": "read_sheet", "sent_back": None}
     assert (first.input_tokens, first.output_tokens) == (1200, 80)
     assert live.app.state.runs.get(None) is None  # every run's token is closed afterwards
 
@@ -95,24 +94,24 @@ def test_stop_ends_a_codex_run_at_once(live, tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_CODEX_WAIT", "60")
     use_codex(tmp_path)
     project_id = started(live)
-    until(live, project_id, lambda w: w["agent"] == "working")
+    work = until(live, project_id, lambda w: w["run"]["state"] == "running")
+    assert (work["run"]["step"], work["run"]["file"], work["run"]["total"]) == ("read", "Tower BOQ.xlsx", 3)
 
     stopped_at = time.monotonic()
     assert live.post(f"/projects/{project_id}/stop").status_code == 204
-    until(live, project_id, lambda w: bool(turns(live, project_id)) and bool(turns(live, project_id)[-1].ended))
+    until(live, project_id, lambda w: bool(runs(live, project_id)) and bool(runs(live, project_id)[-1].ended))
     assert time.monotonic() - stopped_at < 15
-    assert turns(live, project_id)[-1].ended == "stopped"
-    work = until(live, project_id, lambda w: w["agent"] == "paused")
-    assert not [m for m in work["messages"] if m["sender"] == "agent"]
+    assert runs(live, project_id)[-1].ended == "stopped"
+    work = until(live, project_id, lambda w: w["run"]["state"] == "paused")
+    assert work["run"]["problem"] == {"code": "stopped"}
 
 
 def test_a_signed_out_codex_pauses_the_project_with_a_plain_reason(live, tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_CODEX_FAIL", "1")
     use_codex(tmp_path)
     project_id = started(live)
-    work = until(live, project_id, lambda w: w["agent"] == "paused")
-    assert work["messages"][-1]["notice"] == "ai_failed"
-    assert work["messages"][-1]["params"]["problem"] == "codex_signed_out"
+    work = until(live, project_id, lambda w: w["run"]["state"] == "paused")
+    assert work["run"]["problem"] == {"code": "ai_failed", "problem": "codex_signed_out"}
 
 
 def test_codex_is_added_once_signed_in_and_checked_through_tawreeds_tools(live, monkeypatch):
