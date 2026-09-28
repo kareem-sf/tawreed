@@ -25,3 +25,8 @@ export function size(bytes: number, locale: string): string {
     value,
   );
 }
+
+/** An amount Tawreed computed, grouped to read, always to the cent: "1,465,585.13". */
+export function money(value: string, locale: string): string {
+  return Number(value).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { explain, type SheetLayout, type SheetView, type SourcePage } from "../api/client";
 import { useSettings } from "../app/settings";
+import { Alert, button, field, fieldSmall, Icon, iconButton, Skeleton } from "../app/ui";
 import type { Key } from "../i18n";
 import { NoteForm } from "../work/NoteForm";
 import { useLayouts, useRedo } from "../work/queries";
@@ -27,14 +28,8 @@ export function SourcePreview({
   const source = useSource(projectId, sourceId);
   const [number, setNumber] = useState(focus?.page ?? 1);
 
-  if (source.isError) {
-    return (
-      <p role="alert" className="text-danger">
-        {explain(source.error, t)}
-      </p>
-    );
-  }
-  if (!source.data) return null;
+  if (source.isError) return <Alert onRetry={() => void source.refetch()}>{explain(source.error, t)}</Alert>;
+  if (!source.data) return <Skeleton className="h-64 w-full rounded-lg" />;
   const { pages } = source.data;
   const page = pages.find((p) => p.number === number) ?? pages[0];
   if (!page) return null;
@@ -70,28 +65,41 @@ function PageControls({ projectId, sourceId, page }: { projectId: string; source
       ? t("layout.setAside", { reason: handled.set_aside })
       : t(handled.by === "engineer" ? "layout.byYou" : "layout.byAi", { count: handled.items });
   const failed = layouts.columns.error ?? layouts.setAside.error ?? redo.error;
-  const close = () => setMode(null);
-  const button = "rounded-md border border-line px-2.5 py-0.5 hover:border-ink";
+  // Closing a form hands the keyboard back to the button that opened it.
+  const openers = useRef<Record<string, HTMLButtonElement | null>>({});
+  const close = () => {
+    const opened = mode;
+    setMode(null);
+    requestAnimationFrame(() => opened && openers.current[opened]?.focus());
+  };
+  const opener = (name: "columns" | "aside" | "again", label: string) => (
+    <button
+      ref={(element) => {
+        openers.current[name] = element;
+      }}
+      type="button"
+      onClick={() => setMode(name)}
+      className={button("secondary", "sm")}
+    >
+      {label}
+    </button>
+  );
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="flex-1 text-ink-2 [unicode-bidi:plaintext]">{state}</span>
+      <div className="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center">
+        <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-2 [unicode-bidi:plaintext]">
+          <span
+            className={`size-1.5 shrink-0 rounded-full ${!handled ? "bg-idle" : handled.by === "engineer" ? "bg-ink" : "bg-ink-2"}`}
+            aria-hidden="true"
+          />
+          {state}
+        </span>
         {mode === null && (
-          <>
-            {page.kind === "sheet" && (
-              <button type="button" onClick={() => setMode("columns")} className={button}>
-                {t("layout.columns")}
-              </button>
-            )}
-            <button type="button" onClick={() => setMode("aside")} className={button}>
-              {t("layout.aside")}
-            </button>
-            {handled && (
-              <button type="button" onClick={() => setMode("again")} className={button}>
-                {t("layout.readAgain")}
-              </button>
-            )}
-          </>
+          <span className="flex flex-wrap gap-2">
+            {page.kind === "sheet" && opener("columns", t("layout.columns"))}
+            {opener("aside", t("layout.aside"))}
+            {handled && opener("again", t("layout.readAgain"))}
+          </span>
         )}
       </div>
       {mode === "columns" && (
@@ -117,11 +125,7 @@ function PageControls({ projectId, sourceId, page }: { projectId: string; source
           onRun={(note) => redo.mutate({ step: "read", source_id: sourceId, page: page.number, note }, { onSuccess: close })}
         />
       )}
-      {failed && (
-        <p role="alert" className="text-sm text-danger">
-          {explain(failed, t)}
-        </p>
-      )}
+      {failed && <Alert>{explain(failed, t)}</Alert>}
     </div>
   );
 }
@@ -156,7 +160,6 @@ function ColumnsForm({
   }));
   const letters = Array.from({ length: Math.max(page.cols ?? 0, 1) }, (_, index) => columnName(index));
   const ready = Number(rows.first) >= 1 && columns.description && columns.quantity;
-  const field = "rounded-md border border-line bg-page px-2 py-1";
   const save = () => {
     // A description the AI read from several columns keeps the others while its first column stays.
     const more = initial && initial.description[0] === columns.description ? initial.description.slice(1) : [];
@@ -174,34 +177,41 @@ function ColumnsForm({
   };
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border border-line px-4 py-3"
+      className="flex flex-col gap-4 rounded-xl border border-line bg-soft p-4 animate-enter"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onCancel();
+        }
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         if (ready) save();
       }}
     >
-      <div className="flex flex-wrap gap-3 text-sm">
+      <div className="flex flex-wrap gap-x-5 gap-y-3 text-sm">
         {(["first", "last"] as const).map((which) => (
           <label key={which} className="flex items-center gap-2">
-            {t(which === "first" ? "layout.firstRow" : "layout.lastRow")}
+            <span className="text-ink-2">{t(which === "first" ? "layout.firstRow" : "layout.lastRow")}</span>
             <input
               type="number"
               min={1}
               value={rows[which]}
+              autoFocus={which === "first"}
               onChange={(event) => setRows({ ...rows, [which]: event.target.value })}
-              className={`${field} w-20 tabular-nums`}
+              className={`${fieldSmall} w-20`}
             />
           </label>
         ))}
       </div>
-      <div className="flex flex-wrap gap-3 text-sm">
+      <div className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:flex sm:flex-wrap">
         {ROLES.map((role) => (
-          <label key={role} className="flex items-center gap-2">
-            {t(`layout.${role}` as Key)}
+          <label key={role} className="flex items-center justify-between gap-2 sm:justify-start">
+            <span className="text-ink-2">{t(`layout.${role}` as Key)}</span>
             <select
               value={columns[role]}
               onChange={(event) => setColumns({ ...columns, [role]: event.target.value })}
-              className={field}
+              className={fieldSmall}
             >
               {!REQUIRED.has(role) && <option value="">{t("layout.none")}</option>}
               {REQUIRED.has(role) && !columns[role] && <option value="" />}
@@ -214,11 +224,11 @@ function ColumnsForm({
           </label>
         ))}
       </div>
-      <div className="flex gap-2">
-        <button type="submit" disabled={busy || !ready} className="rounded-lg bg-button px-3.5 py-1.5 text-button-ink disabled:opacity-50">
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" disabled={busy || !ready} className={button("primary", "sm")}>
           {t("layout.save")}
         </button>
-        <button type="button" onClick={onCancel} className="rounded-lg border border-line px-3.5 py-1.5 hover:border-ink">
+        <button type="button" onClick={onCancel} className={button("quiet", "sm")}>
           {t("redo.cancel")}
         </button>
       </div>
@@ -231,7 +241,7 @@ function AsideForm({ busy, onSave, onCancel }: { busy: boolean; onSave: (reason:
   const [reason, setReason] = useState("");
   return (
     <form
-      className="flex items-center gap-2"
+      className="flex flex-wrap items-center gap-2 animate-enter"
       onSubmit={(event) => {
         event.preventDefault();
         if (reason.trim()) onSave(reason.trim());
@@ -245,13 +255,18 @@ function AsideForm({ busy, onSave, onCancel }: { busy: boolean; onSave: (reason:
         maxLength={300}
         autoFocus
         onChange={(event) => setReason(event.target.value)}
-        onKeyDown={(event) => event.key === "Escape" && onCancel()}
-        className="min-w-0 flex-1 rounded-lg border border-line bg-page px-3 py-1.5 focus:border-ink focus:outline-none"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onCancel();
+          }
+        }}
+        className={`${field} min-w-0 flex-1 basis-56`}
       />
-      <button type="submit" disabled={busy || !reason.trim()} className="rounded-lg bg-button px-3.5 py-1.5 text-button-ink disabled:opacity-40">
+      <button type="submit" disabled={busy || !reason.trim()} className={button("primary", "sm")}>
         {t("layout.aside")}
       </button>
-      <button type="button" onClick={onCancel} className="rounded-lg border border-line px-3.5 py-1.5">
+      <button type="button" onClick={onCancel} className={button("quiet", "sm")}>
         {t("redo.cancel")}
       </button>
     </form>
@@ -277,7 +292,7 @@ function SheetTabs({
           type="button"
           aria-pressed={page.number === current}
           onClick={() => onChoose(page.number)}
-          className="rounded-md border border-line px-2.5 py-0.5 text-sm text-ink-2 [unicode-bidi:plaintext] aria-pressed:border-ink aria-pressed:text-ink"
+          className="min-h-8 max-w-full rounded-md border border-line-strong px-2.5 py-1 text-start text-sm text-ink-2 transition-colors duration-150 [overflow-wrap:anywhere] [unicode-bidi:plaintext] hover:border-ink/35 hover:text-ink aria-pressed:border-ink aria-pressed:bg-subtle aria-pressed:text-ink pointer-coarse:min-h-10"
         >
           {page.hidden ? t("preview.hiddenSheet", { name: page.name }) : page.name}
         </button>
@@ -289,20 +304,14 @@ function SheetTabs({
 function Pager({ count, current, onChoose }: { count: number; current: number; onChoose: (number: number) => void }) {
   const { t } = useSettings();
   if (count < 2) return null;
-  const arrow = (d: string) => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100">
-      <path d={d} />
-    </svg>
-  );
-  const button = "rounded-md border border-line p-1 text-ink-2 hover:text-ink disabled:opacity-40";
   return (
     <div className="flex items-center gap-2 text-sm text-ink-2">
-      <button type="button" aria-label={t("preview.previous")} disabled={current <= 1} onClick={() => onChoose(current - 1)} className={button}>
-        {arrow("M15 6l-6 6 6 6")}
+      <button type="button" aria-label={t("preview.previous")} disabled={current <= 1} onClick={() => onChoose(current - 1)} className={iconButton("sm")}>
+        <Icon name="back" />
       </button>
       <span>{t("preview.pageOf", { page: current, count })}</span>
-      <button type="button" aria-label={t("preview.next")} disabled={current >= count} onClick={() => onChoose(current + 1)} className={button}>
-        {arrow("M9 6l6 6-6 6")}
+      <button type="button" aria-label={t("preview.next")} disabled={current >= count} onClick={() => onChoose(current + 1)} className={iconButton("sm")}>
+        <Icon name="next" />
       </button>
     </div>
   );
@@ -335,14 +344,8 @@ function SheetGrid({
   const { t } = useSettings();
   const sheet = useSheet(projectId, sourceId, page.number, mark ? Math.max(1, mark - 5) : 1);
 
-  if (sheet.isError) {
-    return (
-      <p role="alert" className="text-danger">
-        {explain(sheet.error, t)}
-      </p>
-    );
-  }
-  if (!sheet.data) return null;
+  if (sheet.isError) return <Alert onRetry={() => void sheet.refetch()}>{explain(sheet.error, t)}</Alert>;
+  if (!sheet.data) return <Skeleton className="h-64 w-full rounded-lg" />;
   const windows = sheet.data.pages;
   const rows = windows.flatMap((w) => w.rows);
   const first = windows[0]?.first_row ?? 1;
@@ -374,7 +377,7 @@ function SheetGrid({
                   const text = cellText(row[c] ?? null);
                   return (
                     <td key={c} className="border-t border-s border-line-soft px-2 py-0.5 align-top">
-                      <div dir="auto" title={text || undefined} className="max-w-[22rem] truncate">
+                      <div dir="auto" className="max-w-[22rem] whitespace-pre-wrap break-words">
                         {text}
                       </div>
                     </td>
@@ -392,7 +395,7 @@ function SheetGrid({
             type="button"
             disabled={sheet.isFetchingNextPage}
             onClick={() => void sheet.fetchNextPage()}
-            className="rounded-md border border-line px-2.5 py-0.5 text-ink hover:border-ink disabled:opacity-50"
+            className={button("secondary", "sm")}
           >
             {t("preview.more")}
           </button>
@@ -428,9 +431,7 @@ function PageImage({
     <div className="flex flex-col gap-2">
       {!page.has_text && <p className="text-sm text-ink-2">{t("preview.fromImage")}</p>}
       {image.isError ? (
-        <p role="alert" className="text-danger">
-          {explain(image.error, t)}
-        </p>
+        <Alert onRetry={() => void image.refetch()}>{explain(image.error, t)}</Alert>
       ) : url ? (
         <div className="relative">
           <img

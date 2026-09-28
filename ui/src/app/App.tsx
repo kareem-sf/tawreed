@@ -22,32 +22,39 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-[52px] shrink-0 items-center gap-8 border-b border-line px-7">
-        <span className="flex items-center gap-2 text-[19px] font-semibold">
-          <Logo size={22} />
-          {t("app.name")}
-        </span>
-        <nav aria-label={t("tabs.label")} className="flex h-full gap-6">
-          {TABS.map((name) => (
-            <button
-              key={name}
-              type="button"
-              aria-current={tab === name ? "page" : undefined}
-              onClick={() => setTab(name)}
-              className={`h-full border-b-2 ${tab === name ? "border-ink font-semibold text-ink" : "border-transparent text-ink-2 hover:text-ink"}`}
-            >
-              {t(`tab.${name}` as Key)}
-            </button>
-          ))}
-        </nav>
-        <button
-          type="button"
-          lang={language === "en" ? "ar" : "en"}
-          onClick={() => change({ language: language === "en" ? "ar" : "en" })}
-          className="ms-auto text-ink-2 hover:text-ink"
-        >
-          {t("language.other")}
-        </button>
+      <header className="shrink-0 border-b border-line bg-page">
+        {/* The same column as the screens below, so the logo lines up with their titles. In a narrow window the
+            tabs take a row of their own under the logo, so none is ever cut off. */}
+        <div className="mx-auto flex w-full max-w-[880px] flex-wrap items-center gap-x-8 px-4 sm:h-[52px] sm:flex-nowrap sm:px-6">
+          <span className="flex h-12 shrink-0 items-center gap-2 text-[19px] font-semibold sm:h-auto">
+            <Logo size={22} />
+            {t("app.name")}
+          </span>
+          <nav
+            aria-label={t("tabs.label")}
+            className="order-last flex h-11 w-full justify-between sm:order-none sm:h-full sm:w-auto sm:justify-start sm:gap-6"
+          >
+            {TABS.map((name) => (
+              <button
+                key={name}
+                type="button"
+                aria-current={tab === name ? "page" : undefined}
+                onClick={() => setTab(name)}
+                className={`h-full border-b-2 px-1 transition-colors duration-150 focus-visible:outline-offset-[-2px] ${tab === name ? "border-ink text-ink" : "border-transparent text-ink-2 hover:border-line-strong hover:text-ink"}`}
+              >
+                {t(`tab.${name}` as Key)}
+              </button>
+            ))}
+          </nav>
+          <button
+            type="button"
+            lang={language === "en" ? "ar" : "en"}
+            onClick={() => change({ language: language === "en" ? "ar" : "en" })}
+            className="ms-auto h-9 shrink-0 rounded-lg px-2 text-ink-2 transition-colors duration-150 hover:bg-subtle hover:text-ink"
+          >
+            {t("language.other")}
+          </button>
+        </div>
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto">
         {tab === "home" && (

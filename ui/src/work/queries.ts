@@ -28,13 +28,16 @@ export function useItems(projectId: string, filter: ItemFilter, enabled = true) 
   });
 }
 
+/** After a change: ask again for what it changed. Mutations return this promise from onSuccess, so they stay
+ *  pending until the new state is on screen, and a button can't be pressed twice against the old one. */
 function useRefresh(projectId: string) {
   const client = useQueryClient();
-  return () => {
-    void client.invalidateQueries({ queryKey: ["work", projectId] });
-    void client.invalidateQueries({ queryKey: ["items", projectId] });
-    void client.invalidateQueries({ queryKey: ["source"] });
-  };
+  return () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: ["work", projectId] }),
+      client.invalidateQueries({ queryKey: ["items", projectId] }),
+      client.invalidateQueries({ queryKey: ["source"] }),
+    ]);
 }
 
 /** Stop the running step, carry on after a pause, or ask for the publish card again. */

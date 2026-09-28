@@ -153,7 +153,15 @@ test("removing a connection", async () => {
   });
   const user = await openSettings();
 
-  await user.click(within(await screen.findByRole("region", { name: "Anthropic" })).getByRole("button", { name: "Remove" }));
+  const row = await screen.findByRole("region", { name: "Anthropic" });
+  await user.click(within(row).getByRole("button", { name: "Remove" }));
+  // The key is deleted, so the engineer confirms first; nothing is removed until then.
+  const confirm = within(row).getByRole("group", { name: "Remove Anthropic? Its key is deleted from this computer." });
+  expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+  expect(within(row).queryByRole("group")).not.toBeInTheDocument();
+  await user.click(within(row).getByRole("button", { name: "Remove" }));
+  await user.click(within(within(row).getByRole("group")).getByRole("button", { name: "Remove" }));
 
   expect(await screen.findByText("Add a connection so Tawreed can start work.")).toBeInTheDocument();
   expect(calls).toContainEqual({ method: "DELETE", path: "/ai/connections/c1", body: undefined });

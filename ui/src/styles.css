@@ -11,6 +11,8 @@
   --color-subtle: var(--subtle);
   --color-line: var(--line);
   --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-edge: var(--edge);
   --color-dash: var(--dash);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
@@ -21,44 +23,78 @@
   --color-button: var(--button);
   --color-button-ink: var(--button-ink);
   --color-danger: var(--danger);
+  --shadow-float: 0 1px 2px var(--shadow-near), 0 6px 18px var(--shadow-far);
+  --shadow-panel: 0 2px 6px var(--shadow-near), 0 18px 48px var(--shadow-far);
+}
+
+/* One type scale: small 13/20, body 15/22, card titles 20/28, page titles 28/34. */
+@theme {
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-title: 1.75rem;
+  --text-title--line-height: 2.125rem;
+  --text-title--letter-spacing: -0.012em;
+  --animate-enter: enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-rise: rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+  }
 }
 
 :root {
   color-scheme: light;
   --page: #ffffff;
   --soft: #fafaf9;
-  --subtle: #f6f6f5;
+  --subtle: #f4f4f2;
   --line: #e7e7e5;
-  --line-soft: #f0f0ee;
+  --line-soft: #efefed;
+  --line-strong: #d6d6d3; /* the border of a quiet button: a hairline that still reads as a control */
+  --edge: #929290; /* the border of a field: 3:1 against the page, so its bounds can be seen */
   --dash: #c9c9c6;
   --ink: #161616;
   --ink-2: #5e5e5b;
-  --idle: #c9c9c6;
+  --idle: #939390;
   --amber: #9a4d00;
   --amber-soft: #fff4e5;
   --amber-line: #efc98f;
   --button: #161616;
   --button-ink: #ffffff;
   --danger: #b42318;
+  --shadow-near: rgb(0 0 0 / 0.05);
+  --shadow-far: rgb(0 0 0 / 0.09);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
   --page: #121212;
   --soft: #171717;
-  --subtle: #1b1b1b;
+  --subtle: #1d1d1d;
   --line: #2a2a2a;
   --line-soft: #222222;
+  --line-strong: #383836;
+  --edge: #6b6b67;
   --dash: #4a4a48;
   --ink: #ededec;
   --ink-2: #a1a19d;
-  --idle: #4a4a48;
+  --idle: #6b6b67;
   --amber: #f2b25c;
   --amber-soft: #2e2211;
   --amber-line: #6b4c1f;
   --button: #ededec;
   --button-ink: #121212;
   --danger: #f97066;
+  --shadow-near: rgb(0 0 0 / 0.4);
+  --shadow-far: rgb(0 0 0 / 0.55);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -66,19 +102,23 @@
     color-scheme: dark;
     --page: #121212;
     --soft: #171717;
-    --subtle: #1b1b1b;
+    --subtle: #1d1d1d;
     --line: #2a2a2a;
     --line-soft: #222222;
+    --line-strong: #383836;
+    --edge: #6b6b67;
     --dash: #4a4a48;
     --ink: #ededec;
     --ink-2: #a1a19d;
-    --idle: #4a4a48;
+    --idle: #6b6b67;
     --amber: #f2b25c;
     --amber-soft: #2e2211;
     --amber-line: #6b4c1f;
     --button: #ededec;
     --button-ink: #121212;
     --danger: #f97066;
+    --shadow-near: rgb(0 0 0 / 0.4);
+    --shadow-far: rgb(0 0 0 / 0.55);
   }
 }
 
@@ -89,14 +129,38 @@
     height: 100%;
   }
   body {
-    @apply bg-page font-sans text-[15px] leading-normal text-ink antialiased;
+    @apply bg-page font-sans text-[15px] leading-[1.4667] text-ink antialiased;
     font-variant-numeric: tabular-nums;
   }
   button {
     cursor: pointer;
   }
+  button:disabled {
+    cursor: default;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--ink);
+  }
   :focus-visible {
     outline: 2px solid var(--ink);
     outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--ink) 16%, transparent);
+  }
+  /* Thmanyah has no semibold: Medium reads as the same step up from its Regular. */
+  :lang(ar) .font-semibold {
+    font-weight: 500;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
