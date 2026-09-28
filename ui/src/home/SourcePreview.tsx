@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { explain, type SheetLayout, type SheetView, type SourcePage } from "../api/client";
+import { figure } from "../app/format";
 import { useSettings } from "../app/settings";
 import { Alert, button, field, fieldSmall, Icon, iconButton, Skeleton } from "../app/ui";
 import type { Key } from "../i18n";
@@ -327,7 +328,7 @@ export function columnName(index: number): string {
 function cellText(value: SheetView["rows"][number][number]): string {
   if (value === null) return "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-  return String(value); // exactly as read: no rounding or grouping
+  return String(value); // exactly as read: no rounding or grouping (float noise aside, see below)
 }
 
 function SheetGrid({
@@ -374,11 +375,12 @@ function SheetGrid({
                   {first + r}
                 </th>
                 {Array.from({ length: columns }, (_, c) => {
-                  const text = cellText(row[c] ?? null);
+                  // Excel's float noise shows to the cent, as Excel itself shows it; the exact value on hover.
+                  const { shown, exact } = figure(cellText(row[c] ?? null));
                   return (
                     <td key={c} className="border-t border-s border-line-soft px-2 py-0.5 align-top">
-                      <div dir="auto" className="max-w-[22rem] whitespace-pre-wrap break-words">
-                        {text}
+                      <div dir="auto" title={exact} className="max-w-[22rem] whitespace-pre-wrap break-words">
+                        {shown}
                       </div>
                     </td>
                   );
