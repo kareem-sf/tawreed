@@ -30,3 +30,10 @@ export function size(bytes: number, locale: string): string {
 export function money(value: string, locale: string): string {
   return Number(value).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+/** A figure as the source wrote it, except the float noise Excel leaves in computed cells ("267012.13961836405"),
+ *  which Excel itself never shows: that is shown to the cent, as the published workbooks show it. The exact value is
+ *  kept for a tooltip; nothing stored changes. */
+export function figure(text: string): { shown: string; exact?: string } {
+  return /^-?\d+\.\d{7,}$/.test(text) ? { shown: Number(text).toFixed(2), exact: text } : { shown: text };
+}

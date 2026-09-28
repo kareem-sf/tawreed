@@ -1,5 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { explain, type Item, type PackageSummary } from "../api/client";
+import { figure } from "../app/format";
 import { useSettings } from "../app/settings";
 import { Alert, Amount, button, Empty, field, fieldSmall, Icon, link, Skeleton, SkeletonRows, useNarrow } from "../app/ui";
 import { SourcePreview } from "../home/SourcePreview";
@@ -371,12 +372,12 @@ function Items({
               <th className={`${head} sticky start-0 z-20 w-9`}>
                 <span className="sr-only">{t("packages.selectColumn")}</span>
               </th>
-              <th className={`${head} text-start`}>{t("item.code")}</th>
-              <th className={`${head} min-w-64 text-start`}>{t("item.description")}</th>
-              <th className={`${head} text-start`}>{t("item.unit")}</th>
-              <th className={`${head} text-end`}>{t("item.quantity")}</th>
-              <th className={`${head} text-end`}>{t("item.rate")}</th>
-              <th className={`${head} text-end`}>{t("item.amount")}</th>
+              <th className={`${head} w-px text-start whitespace-nowrap`}>{t("item.code")}</th>
+              <th className={`${head} w-full min-w-48 text-start`}>{t("item.description")}</th>
+              <th className={`${head} w-px text-start whitespace-nowrap`}>{t("item.unit")}</th>
+              <th className={`${head} w-px text-end whitespace-nowrap`}>{t("item.quantity")}</th>
+              <th className={`${head} w-px text-end whitespace-nowrap`}>{t("item.rate")}</th>
+              <th className={`${head} w-px text-end whitespace-nowrap`}>{t("item.amount")}</th>
               <th className={`${head} text-start`}>{t("item.source")}</th>
             </tr>
           </thead>
@@ -404,10 +405,10 @@ function Items({
                   <td className="px-2 py-2 whitespace-nowrap" dir="auto">
                     {item.unit}
                   </td>
-                  <td className="px-2 py-2 text-end whitespace-nowrap">{item.quantity_text}</td>
-                  <td className="px-2 py-2 text-end whitespace-nowrap">{item.rate_text}</td>
-                  <td className="px-2 py-2 text-end whitespace-nowrap">{item.amount_text}</td>
-                  <td className="w-44 min-w-36 px-2 py-2">
+                  <Figure text={item.quantity_text} />
+                  <Figure text={item.rate_text} />
+                  <Figure text={item.amount_text} />
+                  <td className="w-40 min-w-40 px-2 py-2">
                     <button
                       type="button"
                       aria-expanded={showing === item.id}
@@ -504,8 +505,8 @@ function ItemCards({
                 item[key] ? (
                   <div key={key} className="flex min-w-0 gap-1.5">
                     <dt className="text-ink-2">{t(label)}</dt>
-                    <dd className="min-w-0 break-words" dir="auto">
-                      {item[key]}
+                    <dd className="min-w-0 break-words" dir="auto" title={figure(item[key]).exact}>
+                      {figure(item[key]).shown}
                     </dd>
                   </div>
                 ) : null,
@@ -528,6 +529,16 @@ function ItemCards({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A table cell holding a figure: as the source wrote it, float noise shown to the cent (the exact value on hover). */
+function Figure({ text }: { text: string }) {
+  const { shown, exact } = figure(text);
+  return (
+    <td className="px-2 py-2 text-end whitespace-nowrap" title={exact}>
+      {shown}
+    </td>
   );
 }
 
