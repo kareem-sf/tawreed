@@ -24,9 +24,9 @@ specification is `docs/spec.md`; the architecture is `docs/architecture.md`; the
   next action, no sidebars, dashboards or decoration. Plain construction language, English and Arabic with full
   RTL. Every number is one click from its source. No provider, model or token details outside Settings, except
   that the consent card names the service a project's content would go to.
-- **Fonts.** Figtree for English (open licence, bundled; light headings, regular body). Thmanyah Sans for Arabic:
-  its licence forbids committing, uploading or hosting the font files, so they live only in the gitignored
-  `ui/src/fonts/thmanyah/` and ship only inside the compiled app.
+- **Fonts.** Figtree for English (open licence, bundled; light headings, regular body). Thmanyah Sans for Arabic text
+  and Thmanyah Serif Display for Arabic headings: their licence forbids committing, uploading or hosting the font
+  files, so they live only in the gitignored `ui/src/fonts/thmanyah/` and ship only inside the compiled app.
 - **Data.** Everything lives under `~/.tawreed` (`TAWREED_HOME` overrides it): keys in `auth.json`, settings in
   `settings.json`, projects in the database. Never commit customer BOQs, keys, extracted content or databases.
   Use synthetic data for tests and approvals; real BOQs are read in place only with the engineer's say-so.

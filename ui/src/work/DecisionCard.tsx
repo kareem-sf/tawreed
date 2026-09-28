@@ -58,7 +58,7 @@ const primary = "rounded-lg bg-button px-4 py-1.5 text-button-ink disabled:opaci
 const secondary = "rounded-lg border border-line bg-page px-4 py-1.5 hover:border-ink disabled:opacity-50";
 
 function Title({ children }: { children: ReactNode }) {
-  return <h2 className="text-xl font-light [unicode-bidi:plaintext]">{children}</h2>;
+  return <h2 className="text-xl font-heading font-light [unicode-bidi:plaintext]">{children}</h2>;
 }
 
 function Consent({ decision, send, busy }: Props) {

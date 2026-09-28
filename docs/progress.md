@@ -289,3 +289,13 @@ machine.
   the workbooks; and a file preview showing two sheets' controls at once. Rev 04 priced in Excel with the source's
   rates matches every package to the cent, apart from the source's own rounding in eight amounts (0.30 in all).
 - **Checks:** 123 service tests, 44 interface tests, typecheck, Ruff, Clippy.
+
+## 28 September 2026: Thmanyah Serif Display for Arabic headings
+
+- **Decision (the engineer):** Arabic headings use Thmanyah Serif Display, from the same Thmanyah family; body text
+  stays in Thmanyah Sans and English stays in Figtree.
+- **Interface:** a `font-heading` style (Figtree, then Thmanyah Serif Display, then Thmanyah Sans) on the light
+  headings: the page titles, the project name, the drop title, the decision title, Packages and the published
+  revision. Its files sit beside Thmanyah Sans in the gitignored `ui/src/fonts/thmanyah/`; About credits both.
+- **Checked:** in the browser, an Arabic heading loads Serif Display Light while the text under it stays in Sans;
+  the production build embeds both families.

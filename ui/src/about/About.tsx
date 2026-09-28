@@ -9,7 +9,7 @@ export function About() {
   return (
     <div className="mx-auto flex max-w-[760px] flex-col gap-6 px-4 pt-5 pb-10">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[28px] font-light tracking-[-0.01em]">{t("about.title")}</h1>
+        <h1 className="text-[28px] font-heading font-light tracking-[-0.01em]">{t("about.title")}</h1>
         <p className="text-ink-2">{t("about.tagline")}</p>
         {about.data && <p className="text-ink-2">{t("about.version", { version: about.data.version })}</p>}
       </div>
