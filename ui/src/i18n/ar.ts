@@ -321,6 +321,9 @@ export const ar: Record<Key, Entry> = {
   "about.license": "توريد مفتوح المصدر برخصة MIT.",
   "about.figtree": "خط Figtree، برخصة SIL المفتوحة للخطوط.",
   "about.thmanyah": "خط ثمانية © ثمانية، مستخدم وفق رخصة خط ثمانية.",
+  "about.maker": "المؤسس",
+  "about.founder": "أسّسه وطوّره كريم صفوت",
+  "about.house": "توريد جزء من QS Mind.",
 
   "error.unsupported_file": "لا يستطيع توريد قراءة «{file}». استخدم إكسل أو CSV أو ODS أو PDF أو صورة.",
   "error.empty_file": "الملف «{file}» فارغ.",

@@ -258,6 +258,9 @@ export const en = {
   "about.license": "Tawreed is open source under the MIT licence.",
   "about.figtree": "Figtree, under the SIL Open Font License.",
   "about.thmanyah": "Thmanyah Sans and Thmanyah Serif Display © thmanyah, used under the thmanyah font licence.",
+  "about.maker": "Founder",
+  "about.founder": "Founded & developed by Kareem Safwat",
+  "about.house": "Tawreed is part of QS Mind.",
 
   "error.unsupported_file": "Tawreed can’t read “{file}”. Use Excel, CSV, ODS, PDF or an image.",
   "error.empty_file": "“{file}” is empty.",
