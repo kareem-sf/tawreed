@@ -21,6 +21,7 @@ from tawreed.projects import Project
 from tawreed.sources import Source
 
 NAME_LIMIT = 120
+PACKAGES_MOST = 60
 
 
 class Package(Base):
@@ -122,6 +123,18 @@ def global_rules(session: Session) -> list[Rule]:
 
 
 # The plan -----------------------------------------------------------------------------------------------------
+
+
+def check_plan(session: Session, project_id: str, proposed: list[dict[str, Any]]) -> None:
+    """A plan Tawreed can apply: 1 to PACKAGES_MOST packages, each with its own name, keeping only current ones."""
+    if not 1 <= len(proposed) <= PACKAGES_MOST:
+        raise Refused("plan_size", f"Propose between 1 and {PACKAGES_MOST} packages.")
+    names = Counter(entry["name"].strip().casefold() for entry in proposed)
+    if any(not name for name in names) or any(n > 1 for n in names.values()):
+        raise Refused("package_name_taken", "Each package needs its own name.")
+    current = {p.id for p in packages(session, project_id)}
+    if any(i not in current for entry in proposed for i in entry["keeps"]):
+        raise Refused("package_not_found", "The plan keeps a package that isn't in the project.")
 
 
 def apply_plan(session: Session, project: Project, proposed: list[dict[str, Any]]) -> list[Package]:

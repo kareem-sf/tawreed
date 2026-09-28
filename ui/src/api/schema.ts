@@ -97,6 +97,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/sources/{source_id}/pages/{number}/layout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Lay Out Sheet
+         * @description The engineer sets a sheet's columns. Its items are read again from the cells; the AI leaves it as it is.
+         */
+        put: operations["lay_out_sheet_projects__project_id__sources__source_id__pages__number__layout_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/sources/{source_id}/pages/{number}/set-aside": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Aside
+         * @description The engineer says a page lists no items.
+         */
+        post: operations["set_aside_projects__project_id__sources__source_id__pages__number__set_aside_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/sources/{source_id}/pages/{number}": {
         parameters: {
             query?: never;
@@ -154,26 +194,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{project_id}/messages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Write
-         * @description The engineer writes to the agent. A stopped or paused agent carries on.
-         */
-        post: operations["write_projects__project_id__messages_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/projects/{project_id}/stop": {
         parameters: {
             query?: never;
@@ -183,8 +203,72 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Stop */
+        /**
+         * Stop
+         * @description Stop the running step; the project waits until the engineer continues.
+         */
         post: operations["stop_projects__project_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Carry On
+         * @description A stopped or paused project carries on from where it is.
+         */
+        post: operations["carry_on_projects__project_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/redo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redo
+         * @description Run a step again with the engineer's note: read a file (or one page) again, or place again what the AI
+         *     placed (in one package, or everywhere). The engineer's own placements stay.
+         */
+        post: operations["redo_projects__project_id__redo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Again
+         * @description Show the publish card again, to publish the current work (again, for instance without rates).
+         */
+        post: operations["ask_again_projects__project_id__publish_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -300,7 +384,7 @@ export interface paths {
         put?: never;
         /**
          * Place
-         * @description The engineer puts items in a package. It settles any question the agent asked about them.
+         * @description The engineer puts items in a package. It settles any question raised about them.
          */
         post: operations["place_projects__project_id__placements_post"];
         delete?: never;
@@ -582,8 +666,8 @@ export interface components {
             package_id?: string | null;
             /** Scope */
             scope?: ("item" | "project" | "all") | null;
-            /** Choice */
-            choice?: string | null;
+            /** Packages */
+            packages?: components["schemas"]["PlanEntry"][] | null;
             /** Note */
             note?: string | null;
             /** Prices */
@@ -664,6 +748,10 @@ export interface components {
             pages_left: number;
             /** Pending Files */
             pending_files: number;
+            /** Amount */
+            amount: string;
+            /** Totals Differ */
+            totals_differ: number;
         };
         /**
          * DecisionOut
@@ -676,7 +764,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "consent" | "overlap" | "plan" | "uncertain" | "question" | "publish";
+            kind: "consent" | "overlap" | "plan" | "uncertain" | "publish";
             /**
              * Raised By
              * @enum {string}
@@ -716,17 +804,52 @@ export interface components {
             candidates?: components["schemas"]["PackageRef"][] | null;
             /** Reason */
             reason?: string | null;
-            /** Question */
-            question?: string | null;
-            /** Options */
-            options?: string[] | null;
-            /** Summary */
-            summary?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * Handled
+         * @description How a page was read: laid out (a sheet's columns, when it is a sheet) or set aside, and by whom.
+         */
+        Handled: {
+            /**
+             * By
+             * @enum {string}
+             */
+            by: "agent" | "engineer";
+            /** Set Aside */
+            set_aside: string | null;
+            sheet: components["schemas"]["SheetLayout"] | null;
+            /** Items */
+            items: number;
+        };
+        /** HandledPage */
+        HandledPage: {
+            /** Number */
+            number: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sheet" | "page" | "image";
+            /** Name */
+            name: string;
+            /** Has Text */
+            has_text: boolean;
+            /** Hidden */
+            hidden: boolean;
+            /** Rows */
+            rows: number | null;
+            /** Cols */
+            cols: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            handled: components["schemas"]["Handled"] | null;
         };
         /** ImageView */
         ImageView: {
@@ -796,34 +919,6 @@ export interface components {
             /** Package Ids */
             package_ids: string[];
         };
-        /** MessageIn */
-        MessageIn: {
-            /** Text */
-            text: string;
-        };
-        /** MessageOut */
-        MessageOut: {
-            /** Id */
-            id: number;
-            /**
-             * Sender
-             * @enum {string}
-             */
-            sender: "agent" | "engineer" | "tawreed";
-            /** Text */
-            text: string;
-            /** Notice */
-            notice: string | null;
-            /** Params */
-            params: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
         /** ModelCheck */
         ModelCheck: {
             /** Ok */
@@ -880,36 +975,32 @@ export interface components {
             /** Name */
             name: string;
         };
-        /** PageOut */
-        PageOut: {
-            /** Number */
-            number: number;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "sheet" | "page" | "image";
-            /** Name */
-            name: string;
-            /** Has Text */
-            has_text: boolean;
-            /** Hidden */
-            hidden: boolean;
-            /** Rows */
-            rows: number | null;
-            /** Cols */
-            cols: number | null;
-            /** Width */
-            width: number | null;
-            /** Height */
-            height: number | null;
-        };
         /** Placement */
         Placement: {
             /** Item Ids */
             item_ids: string[];
             /** Package Id */
             package_id: string;
+        };
+        /**
+         * PlanEntry
+         * @description One package of a plan as the engineer edited it.
+         */
+        PlanEntry: {
+            /** Name */
+            name: string;
+            /**
+             * Scope
+             * @default
+             */
+            scope: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /** Keeps */
+            keeps?: string[];
         };
         /** PlannedOut */
         PlannedOut: {
@@ -962,6 +1053,25 @@ export interface components {
             /** Revision */
             revision: string | null;
         };
+        /**
+         * Redo
+         * @description Run a step again, with the engineer's note for the AI.
+         */
+        Redo: {
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "read" | "place";
+            /** Source Id */
+            source_id?: string | null;
+            /** Page */
+            page?: number | null;
+            /** Package Id */
+            package_id?: string | null;
+            /** Note */
+            note?: string | null;
+        };
         /** RevisionFile */
         RevisionFile: {
             /** Path */
@@ -1001,6 +1111,34 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * RunOut
+         * @description What the workflow is doing on the project now.
+         */
+        RunOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "paused" | "idle" | "no_ai";
+            /** Step */
+            step?: ("read" | "plan" | "place") | null;
+            /** File */
+            file?: string | null;
+            /** Done */
+            done?: number | null;
+            /** Total */
+            total?: number | null;
+            /** Problem */
+            problem?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** SetAside */
+        SetAside: {
+            /** Reason */
+            reason: string;
+        };
         /** SettingsChange */
         SettingsChange: {
             /** Language */
@@ -1022,6 +1160,30 @@ export interface components {
              */
             theme: "system" | "light" | "dark";
             ai: components["schemas"]["AIChoice"] | null;
+        };
+        /**
+         * SheetLayout
+         * @description Which rows hold items and which column holds what. Columns are Excel letters; rows count from 1.
+         */
+        SheetLayout: {
+            /** First Row */
+            first_row: number;
+            /** Last Row */
+            last_row?: number | null;
+            /** Code */
+            code?: string | null;
+            /** Description */
+            description: string[];
+            /** Unit */
+            unit?: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Rate */
+            rate?: string | null;
+            /** Amount */
+            amount?: string | null;
+            /** Comment */
+            comment?: string | null;
         };
         /** SheetView */
         SheetView: {
@@ -1069,7 +1231,7 @@ export interface components {
             /** Page Count */
             page_count: number;
             /** Pages */
-            pages: components["schemas"]["PageOut"][];
+            pages: components["schemas"]["HandledPage"][];
         };
         /** SourceOut */
         SourceOut: {
@@ -1142,17 +1304,11 @@ export interface components {
              * @enum {string}
              */
             stage: "read" | "plan" | "place" | "check" | "publish" | "published";
-            /**
-             * Agent
-             * @enum {string}
-             */
-            agent: "working" | "idle" | "paused" | "no_ai";
+            run: components["schemas"]["RunOut"];
             /** Decisions */
             decisions: components["schemas"]["DecisionOut"][];
             /** Answered */
             answered: components["schemas"]["DecisionOut"][];
-            /** Messages */
-            messages: components["schemas"]["MessageOut"][];
             coverage: components["schemas"]["CoverageOut"];
             /** Packages */
             packages: components["schemas"]["PackageOut"][];
@@ -1396,6 +1552,80 @@ export interface operations {
             };
         };
     };
+    lay_out_sheet_projects__project_id__sources__source_id__pages__number__layout_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                source_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SheetLayout"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_aside_projects__project_id__sources__source_id__pages__number__set_aside_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+                source_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetAside"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_page_projects__project_id__sources__source_id__pages__number__get: {
         parameters: {
             query?: {
@@ -1500,7 +1730,7 @@ export interface operations {
             };
         };
     };
-    write_projects__project_id__messages_post: {
+    stop_projects__project_id__stop_post: {
         parameters: {
             query?: never;
             header?: {
@@ -1511,20 +1741,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MessageIn"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
-            201: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["MessageOut"];
-                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1537,7 +1761,73 @@ export interface operations {
             };
         };
     };
-    stop_projects__project_id__stop_post: {
+    carry_on_projects__project_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    redo_projects__project_id__redo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Redo"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_again_projects__project_id__publish_post: {
         parameters: {
             query?: never;
             header?: {

@@ -85,14 +85,14 @@ LABELS: dict[str, dict[str, str]] = {
         "how": "How it was read",
         "by": "By",
         "skipped": "Rows skipped",
-        "agent": "Tawreed's agent",
+        "agent": "Tawreed (AI)",
         "engineer": "The engineer",
         "revision_carry": "Carried over from the earlier file",
         "consent": "Consent to send the project to the AI service",
         "overlap": "How a new file relates to an earlier one",
         "plan": "Package plan",
         "uncertain": "Which package an item belongs in",
-        "question": "Question",
+        "edited": "as the engineer edited it",
         "publish": "Publish",
         "approved": "Approved",
         "declined": "Declined",
@@ -153,14 +153,14 @@ LABELS: dict[str, dict[str, str]] = {
         "how": "طريقة القراءة",
         "by": "بواسطة",
         "skipped": "الصفوف المتروكة",
-        "agent": "وكيل توريد",
+        "agent": "توريد (الذكاء الاصطناعي)",
         "engineer": "المهندس",
         "revision_carry": "منقول من الملف الأقدم",
         "consent": "الموافقة على إرسال المشروع إلى خدمة الذكاء الاصطناعي",
         "overlap": "علاقة ملف جديد بملف أقدم",
         "plan": "خطة الحزم",
         "uncertain": "الحزمة المناسبة لبند",
-        "question": "سؤال",
+        "edited": "كما عدّلها المهندس",
         "publish": "الإصدار",
         "approved": "موافقة",
         "declined": "رفض",
@@ -571,12 +571,12 @@ def _described(decision: Decision, book: Book) -> tuple[str, str]:
     if decision.kind == "overlap":
         return f"{files.get(p['source_id'], '')} / {files.get(p['earlier_id'], '')}", str(a.get("relation", ""))
     if decision.kind == "plan":
-        return "; ".join(e["name"] for e in p["packages"]) + (f" — {p['note']}" if p.get("note") else ""), yes + note
+        proposed = "; ".join(e["name"] for e in p["packages"]) + (f" — {p['note']}" if p.get("note") else "")
+        edited = f" ({labels['edited']}: {'; '.join(a['edited'])})" if a.get("edited") else ""
+        return proposed, yes + note + edited
     if decision.kind == "uncertain":
         scope = {"item": "", "project": labels["this_project"], "all": labels["all_projects"]}.get(a.get("scope"), "")
         item = next((i for items in book.items.values() for i in items if i.id == p["item_id"]), None)
         about = f"{item.code} {item.description[:120]}" if item else ""
         return f"{about} — {p.get('reason', '')}", f"{a.get('package', '')}" + (f" ({scope})" if scope else "")
-    if decision.kind == "question":
-        return p["question"], str(a.get("choice") or a.get("note") or "")
     return p.get("summary", ""), yes + note

@@ -1,14 +1,28 @@
 import { useEffect, useState } from "react";
-import { explain, type SheetView, type SourcePage } from "../api/client";
+import { explain, type SheetLayout, type SheetView, type SourcePage } from "../api/client";
 import { useSettings } from "../app/settings";
+import type { Key } from "../i18n";
+import { NoteForm } from "../work/NoteForm";
+import { useLayouts, useRedo } from "../work/queries";
 import { usePageImage, useSheet, useSource } from "./queries";
 
 /** Where an item is: its page, and its row on a sheet or its box (points from the top left) on a PDF page. */
 export type Focus = { page: number; row?: number; box?: number[] };
 
 /** A read file as Tawreed has it: each sheet as a grid of cells, each page or image as a picture. With a focus,
- *  it opens at that item and marks it. */
-export function SourcePreview({ projectId, sourceId, focus }: { projectId: string; sourceId: string; focus?: Focus }) {
+ *  it opens at that item and marks it. Editable, it says how each page was read, and the engineer can set a sheet's
+ *  columns, set a page aside, or have it read again. */
+export function SourcePreview({
+  projectId,
+  sourceId,
+  focus,
+  editable = false,
+}: {
+  projectId: string;
+  sourceId: string;
+  focus?: Focus;
+  editable?: boolean;
+}) {
   const { t } = useSettings();
   const source = useSource(projectId, sourceId);
   const [number, setNumber] = useState(focus?.page ?? 1);
@@ -33,12 +47,214 @@ export function SourcePreview({ projectId, sourceId, focus }: { projectId: strin
       ) : (
         <Pager count={pages.length} current={page.number} onChoose={setNumber} />
       )}
+      {editable && <PageControls key={page.number} projectId={projectId} sourceId={sourceId} page={page} />}
       {page.kind === "sheet" ? (
         <SheetGrid key={page.number} projectId={projectId} sourceId={sourceId} page={page} mark={focused?.row} />
       ) : (
         <PageImage key={page.number} projectId={projectId} sourceId={sourceId} page={page} box={focused?.box} />
       )}
     </div>
+  );
+}
+
+/** How a page was read, and the engineer's own say over it. */
+function PageControls({ projectId, sourceId, page }: { projectId: string; sourceId: string; page: SourcePage }) {
+  const { t } = useSettings();
+  const layouts = useLayouts(projectId, sourceId);
+  const redo = useRedo(projectId);
+  const [mode, setMode] = useState<"columns" | "aside" | "again" | null>(null);
+  const handled = page.handled;
+  const state = !handled
+    ? t("layout.notYet")
+    : handled.set_aside
+      ? t("layout.setAside", { reason: handled.set_aside })
+      : t(handled.by === "engineer" ? "layout.byYou" : "layout.byAi", { count: handled.items });
+  const failed = layouts.columns.error ?? layouts.setAside.error ?? redo.error;
+  const close = () => setMode(null);
+  const button = "rounded-md border border-line px-2.5 py-0.5 hover:border-ink";
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="flex-1 text-ink-2 [unicode-bidi:plaintext]">{state}</span>
+        {mode === null && (
+          <>
+            {page.kind === "sheet" && (
+              <button type="button" onClick={() => setMode("columns")} className={button}>
+                {t("layout.columns")}
+              </button>
+            )}
+            <button type="button" onClick={() => setMode("aside")} className={button}>
+              {t("layout.aside")}
+            </button>
+            {handled && (
+              <button type="button" onClick={() => setMode("again")} className={button}>
+                {t("layout.readAgain")}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {mode === "columns" && (
+        <ColumnsForm
+          page={page}
+          initial={handled?.sheet ?? undefined}
+          busy={layouts.columns.isPending}
+          onCancel={close}
+          onSave={(layout) => layouts.columns.mutate({ number: page.number, layout }, { onSuccess: close })}
+        />
+      )}
+      {mode === "aside" && (
+        <AsideForm
+          busy={layouts.setAside.isPending}
+          onCancel={close}
+          onSave={(reason) => layouts.setAside.mutate({ number: page.number, reason }, { onSuccess: close })}
+        />
+      )}
+      {mode === "again" && (
+        <NoteForm
+          busy={redo.isPending}
+          onCancel={close}
+          onRun={(note) => redo.mutate({ step: "read", source_id: sourceId, page: page.number, note }, { onSuccess: close })}
+        />
+      )}
+      {failed && (
+        <p role="alert" className="text-sm text-danger">
+          {explain(failed, t)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const ROLES = ["code", "description", "unit", "quantity", "rate", "amount", "comment"] as const;
+const REQUIRED = new Set(["description", "quantity"]);
+
+/** A sheet's layout, as the engineer sets it: the rows that hold items and the column for each field. */
+function ColumnsForm({
+  page,
+  initial,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  page: SourcePage;
+  initial?: SheetLayout;
+  busy: boolean;
+  onSave: (layout: SheetLayout) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useSettings();
+  const [rows, setRows] = useState({ first: String(initial?.first_row ?? 1), last: String(initial?.last_row ?? "") });
+  const [columns, setColumns] = useState<Record<string, string>>(() => ({
+    code: initial?.code ?? "",
+    description: initial?.description[0] ?? "",
+    unit: initial?.unit ?? "",
+    quantity: initial?.quantity ?? "",
+    rate: initial?.rate ?? "",
+    amount: initial?.amount ?? "",
+    comment: initial?.comment ?? "",
+  }));
+  const letters = Array.from({ length: Math.max(page.cols ?? 0, 1) }, (_, index) => columnName(index));
+  const ready = Number(rows.first) >= 1 && columns.description && columns.quantity;
+  const field = "rounded-md border border-line bg-page px-2 py-1";
+  const save = () => {
+    // A description the AI read from several columns keeps the others while its first column stays.
+    const more = initial && initial.description[0] === columns.description ? initial.description.slice(1) : [];
+    onSave({
+      first_row: Number(rows.first),
+      last_row: rows.last ? Number(rows.last) : null,
+      code: columns.code || null,
+      description: [columns.description!, ...more],
+      unit: columns.unit || null,
+      quantity: columns.quantity!,
+      rate: columns.rate || null,
+      amount: columns.amount || null,
+      comment: columns.comment || null,
+    });
+  };
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-lg border border-line px-4 py-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (ready) save();
+      }}
+    >
+      <div className="flex flex-wrap gap-3 text-sm">
+        {(["first", "last"] as const).map((which) => (
+          <label key={which} className="flex items-center gap-2">
+            {t(which === "first" ? "layout.firstRow" : "layout.lastRow")}
+            <input
+              type="number"
+              min={1}
+              value={rows[which]}
+              onChange={(event) => setRows({ ...rows, [which]: event.target.value })}
+              className={`${field} w-20 tabular-nums`}
+            />
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-3 text-sm">
+        {ROLES.map((role) => (
+          <label key={role} className="flex items-center gap-2">
+            {t(`layout.${role}` as Key)}
+            <select
+              value={columns[role]}
+              onChange={(event) => setColumns({ ...columns, [role]: event.target.value })}
+              className={field}
+            >
+              {!REQUIRED.has(role) && <option value="">{t("layout.none")}</option>}
+              {REQUIRED.has(role) && !columns[role] && <option value="" />}
+              {letters.map((letter) => (
+                <option key={letter} value={letter}>
+                  {letter}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy || !ready} className="rounded-lg bg-button px-3.5 py-1.5 text-button-ink disabled:opacity-50">
+          {t("layout.save")}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-lg border border-line px-3.5 py-1.5 hover:border-ink">
+          {t("redo.cancel")}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function AsideForm({ busy, onSave, onCancel }: { busy: boolean; onSave: (reason: string) => void; onCancel: () => void }) {
+  const { t } = useSettings();
+  const [reason, setReason] = useState("");
+  return (
+    <form
+      className="flex items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (reason.trim()) onSave(reason.trim());
+      }}
+    >
+      <input
+        aria-label={t("layout.asideReason")}
+        placeholder={t("layout.asideReason")}
+        value={reason}
+        dir="auto"
+        maxLength={300}
+        autoFocus
+        onChange={(event) => setReason(event.target.value)}
+        onKeyDown={(event) => event.key === "Escape" && onCancel()}
+        className="min-w-0 flex-1 rounded-lg border border-line bg-page px-3 py-1.5 focus:border-ink focus:outline-none"
+      />
+      <button type="submit" disabled={busy || !reason.trim()} className="rounded-lg bg-button px-3.5 py-1.5 text-button-ink disabled:opacity-40">
+        {t("layout.aside")}
+      </button>
+      <button type="button" onClick={onCancel} className="rounded-lg border border-line px-3.5 py-1.5">
+        {t("redo.cancel")}
+      </button>
+    </form>
   );
 }
 

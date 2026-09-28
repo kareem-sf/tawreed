@@ -45,15 +45,14 @@ export function fakeService(routes: Record<string, Handler>): Call[] {
   return calls;
 }
 
-/** An open project's work: nothing waiting, nothing said, no packages yet. Tests override what they need. */
+/** An open project's work: nothing running or waiting, no packages yet. Tests override what they need. */
 export function work(changes: Record<string, unknown> = {}) {
   return {
     stage: "read",
-    agent: "idle",
+    run: { state: "idle" },
     decisions: [],
     answered: [],
-    messages: [],
-    coverage: { items: 0, placed: 0, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0 },
+    coverage: { items: 0, placed: 0, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "0", totals_differ: 0 },
     packages: [],
     ...changes,
   };

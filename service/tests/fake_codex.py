@@ -5,8 +5,9 @@ the run's token in the -c options, reads the prompt from standard input, calls T
 prints Codex's JSON events. What it does depends on the prompt:
 
 - a model check: reports the code it was given (it can't read the attached image);
-- a turn: lists the files and writes to the engineer, or with FAKE_CODEX_WAIT set, waits that many seconds first
-  (for Stop), or with FAKE_CODEX_FAIL set, fails the way Codex does when it is signed out.
+- a Read step: tries a tool of another step (which Tawreed refuses), then reads the file's first sheet, but never
+  lays it out; with FAKE_CODEX_WAIT set, it waits that many seconds first (for Stop), and with FAKE_CODEX_FAIL set,
+  it fails the way Codex does when it is signed out.
 """
 
 import asyncio
@@ -48,7 +49,7 @@ async def main() -> None:
         calls = (
             [("report_code", {"code": check[1]})]
             if check
-            else [("list_files", {}), ("message_engineer", {"text": "Codex here: I read the file list."})]
+            else [("list_items", {}), ("read_sheet", {"file_id": re.search(r"file id (\w{32})", prompt)[1], "page": 1})]
         )
         for tool, arguments in calls:
             result = await session.call_tool(tool, arguments)

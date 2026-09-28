@@ -3,11 +3,11 @@ import { explain, type Project, type Source, type Work } from "../api/client";
 import { ago, size } from "../app/format";
 import { useSettings } from "../app/settings";
 import type { Key, Translate } from "../i18n";
-import { Conversation } from "../work/Conversation";
 import { DecisionCard } from "../work/DecisionCard";
 import { Packages } from "../work/Packages";
 import { Published, Revisions } from "../work/Revisions";
-import { useWork } from "../work/queries";
+import { History, Status } from "../work/Status";
+import { useRun, useWork } from "../work/queries";
 import { DropRegion, PickFiles } from "./files";
 import { isReading, useAddFiles, useProject, useRename } from "./queries";
 import { SourcePreview } from "./SourcePreview";
@@ -70,7 +70,8 @@ export function ProjectView({
             </button>
           </div>
 
-          <Steps stage={stage} working={work.data?.agent === "working"} />
+          <Steps stage={stage} working={work.data?.run.state === "running"} />
+          {work.data && <Status projectId={projectId} run={work.data.run} />}
 
           {!ai && (
             <div className="flex items-center gap-4 rounded-xl border border-amber-line bg-amber-soft px-4 py-2.5 text-amber">
@@ -96,11 +97,14 @@ export function ProjectView({
             <Packages projectId={projectId} onBack={() => setView("work")} />
           ) : (
             <>
-              {decision && <DecisionCard key={decision.id} projectId={projectId} decision={decision} more={more.length} />}
+              {decision && work.data && (
+                <DecisionCard key={decision.id} projectId={projectId} decision={decision} more={more.length} work={work.data} />
+              )}
+              {stage === "check" && !decision && work.data?.run.state !== "running" && <ReadyToPublish projectId={projectId} />}
               {stage === "published" && work.data?.published && (
                 <Published projectId={projectId} projectName={data.name} revision={work.data.published} />
               )}
-              {work.data && <Conversation projectId={projectId} work={work.data} canWrite={Boolean(ai)} />}
+              {work.data && <History answered={work.data.answered} />}
               {work.data && work.data.packages.length > 0 && (
                 <PackageSummary work={work.data} onOpen={() => setView("packages")} />
               )}
@@ -117,6 +121,32 @@ export function ProjectView({
         </div>
       )}
     </DropRegion>
+  );
+}
+
+/** Every item is placed and publishing was held back: the engineer publishes when they are ready. */
+function ReadyToPublish({ projectId }: { projectId: string }) {
+  const { t } = useSettings();
+  const { publish } = useRun(projectId);
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-3">
+        <p className="text-ink-2">{t("publish.ready")}</p>
+        <button
+          type="button"
+          disabled={publish.isPending}
+          onClick={() => publish.mutate()}
+          className="rounded-lg bg-button px-3.5 py-1 text-button-ink disabled:opacity-50"
+        >
+          {t("publish.ask")}
+        </button>
+      </div>
+      {publish.isError && (
+        <p role="alert" className="text-sm text-danger">
+          {explain(publish.error, t)}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -208,7 +238,7 @@ function Files({ projectId, project }: { projectId: string; project: Project }) 
                 <span className="w-28 text-end text-sm text-ink-2">{ago(source.added_at, locale)}</span>
               </div>
               {source.status === "failed" && <p className="text-sm text-danger">{problem(source, t)}</p>}
-              {opened && <SourcePreview projectId={projectId} sourceId={source.id} />}
+              {opened && <SourcePreview projectId={projectId} sourceId={source.id} editable />}
             </li>
           );
         })}

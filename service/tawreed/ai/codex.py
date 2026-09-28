@@ -23,12 +23,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from tawreed.agent.mcp_endpoint import Check, Runs
 from tawreed.ai.check import number_image
+from tawreed.workflow.mcp_endpoint import Check, Runs
 
 LABEL = "ChatGPT (Codex)"
 TOKEN_VARIABLE = "TAWREED_MCP_TOKEN"
-TURN_TIME = 20 * 60  # seconds a turn may run; the next turn carries on from what was saved
+RUN_TIME = 20 * 60  # seconds one run of a step may take; the next run carries on from what was saved
 FEATURES_OFF = (
     "shell_tool",
     "unified_exec",
@@ -174,7 +174,7 @@ async def run(
         process.stdin.write(prompt.encode("utf-8"))
         await process.stdin.drain()
         process.stdin.close()
-        deadline = time.monotonic() + TURN_TIME
+        deadline = time.monotonic() + RUN_TIME
         while True:
             if stop.is_set() or time.monotonic() > deadline:
                 outcome.ended = "stopped" if stop.is_set() else "out_of_time"

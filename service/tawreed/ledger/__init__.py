@@ -103,6 +103,19 @@ def skip_pages(session: Session, source: Source, pages: list[int], reason: str, 
     _replace(session, source, pages, [], {"skip": reason}, Report(), by)
 
 
+def clear_pages(session: Session, source: Source, pages: list[int]) -> list[int]:
+    """Forget how pages were read, so they are read again: the layouts that covered them go, and with them the
+    items found on every page those layouts covered. Returns the pages cleared."""
+    cleared = set(pages)
+    for layout in session.scalars(select(Layout).where(Layout.source_id == source.id)):
+        if set(layout.pages) & set(pages):
+            cleared |= set(layout.pages)
+            session.delete(layout)
+    session.execute(delete(Item).where(Item.source_id == source.id, Item.page.in_(cleared)))
+    session.flush()
+    return sorted(cleared)
+
+
 def handled_pages(session: Session, source_id: str) -> set[int]:
     """Pages a layout has covered, whether it found items on them or set them aside."""
     return {
