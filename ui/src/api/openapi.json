@@ -2025,6 +2025,17 @@
               }
             ],
             "title": "Note"
+          },
+          "prices": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prices"
           }
         },
         "type": "object",
@@ -3196,6 +3207,10 @@
             "type": "integer",
             "title": "Packages"
           },
+          "prices": {
+            "type": "boolean",
+            "title": "Prices"
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/RevisionFile"
@@ -3211,6 +3226,7 @@
           "created_at",
           "items",
           "packages",
+          "prices",
           "files"
         ],
         "title": "RevisionOut"

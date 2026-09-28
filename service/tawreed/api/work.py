@@ -333,7 +333,7 @@ def answer(
     revision = None
     try:
         if decision.kind == "publish" and body.approve and decision.status == "waiting":
-            revision = publish.publish(session, home, project)
+            revision = publish.publish(session, home, project, prices=body.prices is not False)
         decisions.answer(session, project, decision, body)
     except decisions.Unanswerable as error:
         session.rollback()
@@ -342,7 +342,7 @@ def answer(
         session.rollback()
         raise problem(409, error.code) from error
     if revision:
-        decision.answer = {**decision.answer, "revision": revision.name}
+        decision.answer = {**decision.answer, "revision": revision.name, "prices": revision.manifest["prices"]}
     session.commit()
     request.app.state.worker.resume(project_id)
     return Response(status_code=204)

@@ -45,11 +45,13 @@ class Answer(BaseModel):
     approve: bool | None = None  # consent, plan, publish
     relation: Literal["addition", "replacement", "revision"] | None = None  # overlap
     package_id: str | None = None  # uncertain
-    scope: Literal["item", "project", "all"] | None = (
-        None  # uncertain: how far the choice applies; the project if unsaid
-    )
+    # uncertain: how far the choice applies; the project if unsaid
+    scope: Literal["item", "project", "all"] | None = None
     choice: str | None = Field(default=None, max_length=500)  # question: one of the options
-    note: str | None = Field(default=None, max_length=4000)  # question: their own words; plan, publish: what to change
+    # question: their own words; plan, publish: what to change
+    note: str | None = Field(default=None, max_length=4000)
+    # publish: whether the package workbooks show rates and amounts; they do unless said
+    prices: bool | None = None
 
 
 class Unanswerable(ValueError):

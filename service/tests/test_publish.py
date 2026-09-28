@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import re
 import zipfile
 from decimal import Decimal
 
@@ -57,6 +58,35 @@ def rows(sheet, first=1):
     return [list(row) for row in sheet.iter_rows(min_row=first, values_only=True)]
 
 
+def computed(sheet, ref: str):
+    """What Excel shows in a cell: its value, or the result of one of Tawreed's simple formulas."""
+    value = sheet[ref].value
+    if not isinstance(value, str) or not value.startswith("="):
+        return value
+    formula, book = value[1:], sheet.parent
+    other = re.fullmatch(r"'((?:[^']|'')+)'!(.+)", formula)
+    if other:  # on another sheet
+        target = book[other[1].replace("''", "'")]
+        inner = other[2]
+        return computed(target, inner) if re.fullmatch(r"[A-Z]+\d+", inner) else _range_sum(target, inner)
+    if match := re.fullmatch(r"([A-Z]+\d+)\*([A-Z]+\d+)", formula):
+        return (computed(sheet, match[1]) or 0) * (computed(sheet, match[2]) or 0)
+    if match := re.fullmatch(r"([A-Z]+\d+)-([A-Z]+\d+)", formula):
+        return (computed(sheet, match[1]) or 0) - (computed(sheet, match[2]) or 0)
+    if match := re.fullmatch(r"SUM\((.+)\)", formula):
+        inner = re.fullmatch(r"'((?:[^']|'')+)'!(.+)", match[1])
+        return _range_sum(book[inner[1].replace("''", "'")], inner[2]) if inner else _range_sum(sheet, match[1])
+    raise AssertionError(f"not one of Tawreed's simple formulas: {value}")
+
+
+def _range_sum(sheet, cells: str):
+    first, last = cells.split(":")
+    column, top, bottom = re.match(r"[A-Z]+", first)[0], int(first[len(re.match(r"[A-Z]+", first)[0]) :]), None
+    bottom = int(last[len(column) :])
+    values = [computed(sheet, f"{column}{r}") for r in range(top, bottom + 1)]
+    return sum(v for v in values if isinstance(v, (int, float)))
+
+
 def test_publishing_writes_every_workbook_with_the_values_as_the_source_states_them(client):
     project_id = ready(client)
     assert approve(client, project_id).status_code == 204
@@ -82,19 +112,24 @@ def test_publishing_writes_every_workbook_with_the_values_as_the_source_states_t
     assert rows(concrete, 5)[:4] == [
         ["Item", "Description", "Unit", "Qty", "Rate", "Amount", "Source"],
         [None, "DIVISION 03 - CONCRETE › 3.1 Cast-in-place concrete", None, None, None, None, None],
-        ["3.1.1", "Plain concrete grade C15 blinding", "m3", 86, 450, 38700, "Tower BOQ.xlsx › Div.03 › row 9"],
+        ["3.1.1", "Plain concrete grade C15 blinding", "m3", 86, 450, "=D7*E7", "Tower BOQ.xlsx › Div.03 › row 9"],
         [
             "3.1.2",
             "Reinforced concrete to raft foundations",
             "m3",
             1240.5,
             1150.25,
-            1426885.13,
+            1426885.13,  # the source rounded 1,426,885.125 to the cent, so its own figure stays
             "Tower BOQ.xlsx › Div.03 › row 10",
         ],
     ]
+    assert computed(concrete, "F7") == 38700  # =86*450: the source's own amount
     total = rows(concrete, 10)[0]
-    assert total[1] == "Total of the amounts above" and total[5] == pytest.approx(1465585.13)
+    assert total[1] == "Total of the amounts above" and total[5] == "=SUM(F6:F8)"
+    assert computed(concrete, "F10") == pytest.approx(1465585.13)
+    cover, index = master["Cover"], master["Packages"]
+    assert index["E2"].value == "='01 Concrete works'!F10" and computed(index, "E2") == pytest.approx(1465585.13)
+    assert computed(cover, "B7") == pytest.approx(1465585.13)  # =SUM of the package index
     formwork = master["02 Formwork and joints"]
     quantity = formwork["D7"]
     assert (formwork["A7"].value, quantity.value, quantity.number_format) == ("3.1.3", 1250, "#,##0.00")  # "1,250.00"
@@ -119,7 +154,8 @@ def test_the_coverage_check_and_decision_log_account_for_every_item(client):
     check = openpyxl.load_workbook(revision / "Coverage check - Rev 00.xlsx")
     summary = {row[0]: row[1] for row in rows(check["Summary"]) if row[0]}
     assert summary["Items in use"] == 5 and summary["Placed in exactly one package"] == 5
-    assert summary["Not placed"] == 0 and summary["Difference"] == 0
+    assert summary["Not placed"] == 0 and summary["Difference"] == "=B4-B5"
+    assert computed(check["Summary"], "B6") == 0
     assert Decimal(str(summary["Amounts of all packages"])) == Decimal("1465585.13")
     assert [r[0] for r in rows(check["Items"], 2)] == ["3.1.1", "3.1.2", "3.1.3", "3.1.4", "1"]
 
@@ -228,3 +264,23 @@ def test_excels_float_noise_is_shown_to_the_cent_and_real_decimals_as_they_are()
     assert _number_format("1250.00") == "#,##0.00"
     assert _number_format("12.125") == "#,##0.000"
     assert _number_format("86") == "#,##0"
+
+
+def test_package_workbooks_can_leave_rates_out_for_suppliers_to_price(client):
+    project_id = ready(client)
+    work = client.get(f"/projects/{project_id}/work").json()
+    decision = next(d for d in work["decisions"] if d["kind"] == "publish")
+    body = {"approve": True, "prices": False}
+    assert client.post(f"/projects/{project_id}/decisions/{decision['id']}", json=body).status_code == 204
+    revision = folder(client, project_id)
+
+    package = openpyxl.load_workbook(revision / "Packages/01 Concrete works - Rev 00.xlsx").active
+    assert [row[3:6] for row in rows(package, 7)[:2]] == [[86, None, "=D7*E7"], [1240.5, None, "=D8*E8"]]
+    assert package["F10"].value == "=SUM(F6:F8)"  # the supplier's rates price the package
+    package["E7"].value, package["E8"].value = 10, 20  # as a supplier fills them in
+    assert computed(package, "F10") == 86 * 10 + 1240.5 * 20
+
+    master = openpyxl.load_workbook(revision / "Tower BOQ - Master - Rev 00.xlsx")
+    assert master["01 Concrete works"]["E7"].value == 450  # the master keeps the rates
+    assert json.loads((revision / "manifest.json").read_text(encoding="utf-8"))["prices"] is False
+    assert client.get(f"/projects/{project_id}/revisions").json()[0]["prices"] is False

@@ -135,6 +135,8 @@ export const ar: Record<Key, Entry> = {
   "question.own": "أو أجب بكلماتك",
   "publish.title": "جاهز للإصدار",
   "publish.approve": "إصدار",
+  "publish.prices": "إظهار الأسعار والمبالغ في مصنفات الحزم",
+  "publish.pricesNote": "بدونها تُترك الأسعار فارغة في كل حزمة ليملأها المورد، وتُحسب المبالغ والمجموع من تلك الأسعار. يُظهرها المصنف الرئيسي دائماً.",
   "publish.notYet": "ليس بعد",
   "publish.notePlaceholder": "ما الذي يجب تغييره أولاً؟",
 
@@ -158,6 +160,7 @@ export const ar: Record<Key, Entry> = {
   "revision.open": "فتح المجلد",
   "revision.export": "تصدير…",
   "revision.list": "الإصدارات",
+  "revision.noPrices": "مصنفات الحزم بدون أسعار ولا مبالغ، ليسعّرها الموردون.",
   "packages.title": "الحزم",
   "packages.view": "عرض وتعديل",
   "packages.back": "رجوع",

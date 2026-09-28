@@ -24,6 +24,7 @@ class RevisionOut(BaseModel):
     created_at: datetime
     items: int
     packages: int
+    prices: bool  # whether its package workbooks show rates and amounts
     files: list[RevisionFile]
 
 
@@ -35,6 +36,7 @@ def revision_out(revision: publish.Revision) -> RevisionOut:
         created_at=revision.created_at,
         items=manifest["items"],
         packages=len(manifest["packages"]),
+        prices=manifest.get("prices", True),
         files=[RevisionFile(path=f["path"], bytes=f["bytes"]) for f in manifest["files"]],
     )
 

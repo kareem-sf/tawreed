@@ -257,6 +257,7 @@ test("a published revision shows what was written, and opens or exports its fold
     created_at: new Date().toISOString(),
     items: 5,
     packages: 3,
+    prices: false,
     files: [
       { path: "Al Noor Tower - Master - Rev 00.xlsx", bytes: 20_480 },
       { path: "Packages/01 Concrete works - Rev 00.xlsx", bytes: 9_216 },
@@ -281,11 +282,18 @@ test("a published revision shows what was written, and opens or exports its fold
 
   const card = await screen.findByRole("region", { name: "Waiting for you" });
   expect(card).toHaveTextContent("Ready to publish");
+  const prices = within(card).getByRole("checkbox", { name: /Show rates and amounts in the package workbooks/ });
+  expect(prices).toBeChecked();
+  await user.click(prices);
   await user.click(within(card).getByRole("button", { name: "Publish" }));
+  await waitFor(() =>
+    expect(calls.find((c) => c.path === "/projects/p1/decisions/d-publish")?.body).toEqual({ approve: true, prices: false }),
+  );
 
   const done = await screen.findByRole("region", { name: "Published revision" });
   expect(done).toHaveTextContent("Rev 00 is published");
   expect(done).toHaveTextContent("Packages: 3 · Items: 5");
+  expect(done).toHaveTextContent("Package workbooks without rates and amounts, for suppliers to price.");
   expect(within(done).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
     "Al Noor Tower - Master - Rev 00.xlsx20 kB",
     "01 Concrete works - Rev 00.xlsx9 kB",

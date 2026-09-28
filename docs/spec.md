@@ -48,7 +48,11 @@ images. Any layout: there is no required template.
 ## Outputs of a revision
 
 - **Master workbook:** cover, package index with item counts and totals, one sheet per package.
-- **Package workbooks:** one standalone workbook per package, ready to send.
+- **Package workbooks:** one standalone workbook per package, ready to send. At publishing the engineer chooses
+  whether they show rates and amounts; without them the rates are left for suppliers to fill.
+- **Simple formulas:** an amount is `=Qty*Rate` wherever that gives the source's own amount (otherwise the source's
+  figure stays), package totals are `=SUM(...)`, the package index refers to each package's total and the cover adds
+  them up.
 - **Decision log:** what the agent decided and what the engineer decided, with reasons and rules applied.
 - **Coverage check:** every source item once, and source totals against output totals.
 
@@ -100,7 +104,7 @@ and revisions under each project. Supplied files are never changed.
 
 ## Not in v1
 
-Material takeoff, internal and for-pricing output variants, sending enquiries, bid comparison, other operating
+Material takeoff, sending enquiries, bid comparison, other operating
 systems, spending controls.
 
 ## Done when

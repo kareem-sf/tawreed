@@ -12,6 +12,7 @@ export function Published({ projectId, projectName, revision }: { projectId: str
       <p className="text-ink-2">
         {t("revision.holds", { packages: revision.packages, count: revision.items })} · {ago(revision.created_at, locale)}
       </p>
+      {!revision.prices && <p className="text-sm text-ink-2">{t("revision.noPrices")}</p>}
       <ul className="flex flex-col text-sm">
         {revision.files
           .filter((file) => file.path.endsWith(".xlsx"))

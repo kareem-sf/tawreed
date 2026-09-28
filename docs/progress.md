@@ -238,3 +238,21 @@ machine.
   aside and proposed two packages (one turn, 39 s); after approval it placed all 5 items and asked to publish (22 s);
   Rev 00 was published, and the agent wrote to the engineer without asking to publish again. No tool call was
   refused and no other tool was used.
+
+## 28 September 2026: the first real BOQ, formulas, and packages for pricing
+
+- **Real run** (the engineer's El Far BOQ, 15 sheets, through Codex on their subscription): 320 items read, 11
+  packages proposed and approved, every item placed, Rev 00 published; every sheet's stated totals equal its items,
+  and the packages total 56,566,112.47, the same as the file.
+- **Found and fixed:** sheets that state a total per section were reported as differing from their items; each
+  sheet's totals are now added up and compared with its items. Excel's float noise from formula cells showed as long
+  decimals; computed amounts are shown to the cent.
+- **Formulas:** at the engineer's request the workbooks now calculate in Excel: an amount is `=Qty*Rate` wherever
+  that is the source's own amount (to a hundredth of a cent; otherwise the source's figure stays), each package's
+  total is `=SUM(...)`, the index refers to each package's total, the cover adds up the index, and the coverage
+  check's differences are formulas. Checked by Excel on the El Far workbooks: the cover computes 56,566,112.47,
+  303 items are formulas, 8 keep their figure, no errors.
+- **Packages for pricing:** at publishing the engineer chooses whether package workbooks show rates and amounts.
+  Without them the rates are empty and every amount is `=Qty*Rate`, so a supplier's rates price the package; the
+  master always shows them. The revision records the choice.
+- **Checks:** 115 service tests, 42 interface tests, typecheck, Ruff, Clippy.
