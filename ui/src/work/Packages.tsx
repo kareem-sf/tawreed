@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, type RefObject } from "react";
+import { Fragment, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { explain, type Item, type PackageSummary } from "../api/client";
 import { useSettings } from "../app/settings";
 import { Alert, Amount, button, Empty, field, fieldSmall, Icon, link, Skeleton, SkeletonRows, useNarrow } from "../app/ui";
@@ -9,7 +9,7 @@ import { useEdits, useItems, useRedo, useWork, type ItemFilter } from "./queries
 
 /** The packages and their items, to look at and change directly, with the same checked operations the AI's
  *  steps use; or to have the AI place them again, with a note. */
-export function Packages({ projectId, onBack }: { projectId: string; onBack: () => void }) {
+export function Packages({ projectId, opened, onBack }: { projectId: string; opened?: string; onBack: () => void }) {
   const { t } = useSettings();
   const work = useWork(projectId);
   const edits = useEdits(projectId);
@@ -83,6 +83,7 @@ export function Packages({ projectId, onBack }: { projectId: string; onBack: () 
               edits={edits}
               redo={redo}
               filter={{ package_id: pkg.id }}
+              initiallyOpen={pkg.id === opened}
               package_={pkg}
               title={pkg.name}
               count={pkg.items}
@@ -158,6 +159,7 @@ function Group({
   title,
   count,
   packages,
+  initiallyOpen = false,
 }: {
   projectId: string;
   edits: Edits;
@@ -167,9 +169,17 @@ function Group({
   title: string;
   count: number;
   packages: PackageSummary[];
+  initiallyOpen?: boolean;
 }) {
   const { t } = useSettings();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
+  // A package opened from the project page comes into view, its heading taking the focus.
+  const heading = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!initiallyOpen) return;
+    heading.current?.scrollIntoView?.({ block: "start" });
+    heading.current?.focus({ preventScroll: true });
+  }, [initiallyOpen]);
   const [renaming, setRenaming] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [into, setInto] = useState("");
@@ -196,6 +206,7 @@ function Group({
         </div>
       ) : (
         <button
+          ref={heading}
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
@@ -205,7 +216,7 @@ function Group({
             <Icon name="next" size={14} />
           </span>
           <span className="text-sm text-ink-2">{package_?.code}</span>
-          <span className={`min-w-0 [overflow-wrap:anywhere] [unicode-bidi:plaintext] ${package_ ? "" : "font-semibold text-amber"}`}>
+          <span className={`min-w-0 [overflow-wrap:anywhere] [unicode-bidi:plaintext] rtl:text-right ${package_ ? "" : "font-semibold text-amber"}`}>
             {title}
             <span className="block text-sm font-normal text-ink-2 sm:hidden">{t("packages.items", { count })}</span>
           </span>
@@ -298,6 +309,7 @@ function Items({
   const [target, setTarget] = useState("");
   const [showing, setShowing] = useState<string | null>(null);
   const narrow = useNarrow();
+  const { frame, table, fits } = useFits();
 
   if (items.isError) return <Alert onRetry={() => void items.refetch()}>{explain(items.error, t)}</Alert>;
   if (!items.data) return <Skeleton className="h-32 w-full" />;
@@ -313,7 +325,7 @@ function Items({
   const head = "sticky top-0 z-10 bg-page px-2 py-2 font-normal shadow-[inset_0_-1px_0_var(--line)]";
 
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={frame} className="flex flex-col gap-2">
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-subtle px-3 py-2 text-sm animate-enter">
           <span className="font-semibold">{t("packages.selected", { count: selected.size })}</span>
@@ -342,7 +354,7 @@ function Items({
           </button>
         </div>
       )}
-      {narrow ? (
+      {narrow || !fits ? (
         <ItemCards
           projectId={projectId}
           list={list}
@@ -353,14 +365,14 @@ function Items({
         />
       ) : (
       <div className="max-h-[70vh] overflow-auto rounded-lg border border-line">
-        <table className="w-full border-collapse text-sm">
+        <table ref={table} className="w-full border-collapse text-sm">
           <thead className="text-ink-2">
             <tr>
               <th className={`${head} sticky start-0 z-20 w-9`}>
                 <span className="sr-only">{t("packages.selectColumn")}</span>
               </th>
               <th className={`${head} text-start`}>{t("item.code")}</th>
-              <th className={`${head} min-w-56 text-start`}>{t("item.description")}</th>
+              <th className={`${head} min-w-64 text-start`}>{t("item.description")}</th>
               <th className={`${head} text-start`}>{t("item.unit")}</th>
               <th className={`${head} text-end`}>{t("item.quantity")}</th>
               <th className={`${head} text-end`}>{t("item.rate")}</th>
@@ -395,12 +407,12 @@ function Items({
                   <td className="px-2 py-2 text-end whitespace-nowrap">{item.quantity_text}</td>
                   <td className="px-2 py-2 text-end whitespace-nowrap">{item.rate_text}</td>
                   <td className="px-2 py-2 text-end whitespace-nowrap">{item.amount_text}</td>
-                  <td className="min-w-40 px-2 py-2">
+                  <td className="w-44 min-w-36 px-2 py-2">
                     <button
                       type="button"
                       aria-expanded={showing === item.id}
                       onClick={() => setShowing(showing === item.id ? null : item.id)}
-                      className={link}
+                      className={`text-start [overflow-wrap:anywhere] ${link}`}
                     >
                       {whereIs(item, t)}
                     </button>
@@ -423,7 +435,29 @@ function Items({
   );
 }
 
-/** The items as cards, for a narrow window: nothing hidden or cut, each field on its own line if need be. */
+/** Whether the items table fits its frame. Measured while the table shows and kept while the cards do, so a window
+ *  that grows wide enough brings the table back. With no layout to measure (tests), the table shows. */
+function useFits() {
+  const [element, frame] = useState<HTMLDivElement | null>(null);
+  const table = useRef<HTMLTableElement>(null);
+  const [needed, setNeeded] = useState(0);
+  const [width, setWidth] = useState(Infinity);
+  useLayoutEffect(() => {
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      setWidth(element.clientWidth);
+      if (table.current) setNeeded(table.current.scrollWidth);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  useLayoutEffect(() => {
+    if (table.current) setNeeded(table.current.scrollWidth);
+  });
+  return { frame, table, fits: !(needed > width + 1) };
+}
+
+/** The items as cards, for a narrow window (or a table that wouldn't fit): nothing hidden or cut. */
 function ItemCards({
   projectId,
   list,
@@ -464,15 +498,16 @@ function ItemCards({
               {item.verify && <span className="ms-2 text-xs text-amber">{t("item.verify")}</span>}
               {item.decided_by === "engineer" && <span className="ms-2 text-xs text-ink-2">{t("item.byYou")}</span>}
             </p>
-            <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-sm">
+            {/* Side by side where there is room; each pair moves to the next line whole, so a figure never breaks. */}
+            <dl className="flex flex-wrap gap-x-6 gap-y-0.5 text-sm">
               {fields.map(([label, key]) =>
                 item[key] ? (
-                  <Fragment key={key}>
+                  <div key={key} className="flex min-w-0 gap-1.5">
                     <dt className="text-ink-2">{t(label)}</dt>
-                    <dd className="break-words" dir="auto">
+                    <dd className="min-w-0 break-words" dir="auto">
                       {item[key]}
                     </dd>
-                  </Fragment>
+                  </div>
                 ) : null,
               )}
             </dl>

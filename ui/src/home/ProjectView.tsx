@@ -31,6 +31,7 @@ export function ProjectView({
   const work = useWork(projectId);
   const add = useAddFiles(projectId);
   const [view, setView] = useState<"work" | "packages">("work");
+  const [opened, setOpened] = useState<string>(); // the package to show open in the Packages view
   const [tab, setTab] = useState<View>();
 
   if (project.isError) {
@@ -96,7 +97,7 @@ export function ProjectView({
           {work.isError && <Alert onRetry={() => void work.refetch()}>{explain(work.error, t)}</Alert>}
 
           {view === "packages" ? (
-            <Packages projectId={projectId} onBack={() => setView("work")} />
+            <Packages projectId={projectId} opened={opened} onBack={() => setView("work")} />
           ) : (
             <>
               {decision && work.data && (
@@ -112,7 +113,17 @@ export function ProjectView({
                 counts={{ packages: work.data?.packages.length ?? 0, files: data.sources.length }}
               >
                 {shown === "packages" ? (
-                  work.data ? <PackageSummary work={work.data} onOpen={() => setView("packages")} /> : <Skeleton className="h-40 w-full" />
+                  work.data ? (
+                    <PackageSummary
+                      work={work.data}
+                      onOpen={(packageId) => {
+                        setOpened(packageId);
+                        setView("packages");
+                      }}
+                    />
+                  ) : (
+                    <Skeleton className="h-40 w-full" />
+                  )
                 ) : (
                   <Files projectId={projectId} project={data} />
                 )}
@@ -244,7 +255,7 @@ function Steps({ stage, working }: { stage: string | null; working: boolean }) {
 }
 
 /** The packages at a glance: each one's items and amount, computed by Tawreed, and the way into editing them. */
-function PackageSummary({ work, onOpen }: { work: Work; onOpen: () => void }) {
+function PackageSummary({ work, onOpen }: { work: Work; onOpen: (packageId?: string) => void }) {
   const { t } = useSettings();
   const { coverage } = work;
   const row = "grid grid-cols-[2rem_minmax(0,1fr)_auto] items-baseline gap-x-3 sm:grid-cols-[2rem_minmax(0,1fr)_6.5rem_9rem]";
@@ -255,7 +266,7 @@ function PackageSummary({ work, onOpen }: { work: Work; onOpen: () => void }) {
           {t("coverage.summary", { placed: coverage.placed, count: coverage.items })}
           {coverage.waiting > 0 && <span className="text-amber"> · {t("coverage.waiting", { count: coverage.waiting })}</span>}
         </span>
-        <button type="button" onClick={onOpen} className={button("secondary", "sm")}>
+        <button type="button" onClick={() => onOpen()} className={button("secondary", "sm")}>
           {t("packages.view")}
         </button>
       </div>
@@ -264,16 +275,23 @@ function PackageSummary({ work, onOpen }: { work: Work; onOpen: () => void }) {
       ) : (
         <ul className="flex flex-col">
           {work.packages.map((pkg) => (
-            <li key={pkg.id} className={`${row} border-t border-line-soft py-2.5`}>
-              <span className="text-sm text-ink-2">{pkg.code}</span>
-              <span className="min-w-0 [overflow-wrap:anywhere] [unicode-bidi:plaintext]">
-                {pkg.name}
-                <span className="block text-sm text-ink-2 sm:hidden">{t("packages.items", { count: pkg.items })}</span>
-              </span>
-              <span className="hidden text-end text-sm text-ink-2 sm:block">{t("packages.items", { count: pkg.items })}</span>
-              <span className="text-end text-sm whitespace-nowrap text-ink-2">
-                {pkg.items > pkg.without_amount ? <Amount value={pkg.amount} /> : null}
-              </span>
+            <li key={pkg.id} className="border-t border-line-soft">
+              {/* A package opens with its items in the Packages view. */}
+              <button
+                type="button"
+                onClick={() => onOpen(pkg.id)}
+                className={`${row} group -mx-3 w-[calc(100%+1.5rem)] rounded-lg px-3 py-2.5 text-start transition-colors duration-150 hover:bg-soft`}
+              >
+                <span className="text-sm text-ink-2">{pkg.code}</span>
+                <span className="min-w-0 [overflow-wrap:anywhere] [unicode-bidi:plaintext] group-hover:underline group-hover:decoration-ink-2/35 group-hover:underline-offset-[3px] rtl:text-right">
+                  {pkg.name}
+                  <span className="block text-sm text-ink-2 sm:hidden">{t("packages.items", { count: pkg.items })}</span>
+                </span>
+                <span className="hidden text-end text-sm text-ink-2 sm:block">{t("packages.items", { count: pkg.items })}</span>
+                <span className="text-end text-sm whitespace-nowrap text-ink-2">
+                  {pkg.items > pkg.without_amount ? <Amount value={pkg.amount} /> : null}
+                </span>
+              </button>
             </li>
           ))}
           <li className={`${row} border-t border-line-strong py-3 font-semibold`}>
