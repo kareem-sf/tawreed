@@ -99,7 +99,7 @@ Tawreed is a tool, not a workspace. One window with four tabs: **Home**, **Histo
   files, Open folder and Export to….
 - **History** lists past projects and their revisions; opening one returns to Home for that project.
 - **Settings**: language, theme, the AI Tawreed works with, connections, and rules that apply to all projects.
-- **About**: version, data folder, logs, updates and licences.
+- **About**: version, data folder, logs, updates, licences and the founder credit.
 
 Minimal and calm: white (or near-black in dark mode), hairlines, black primary buttons, and one amber accent that
 means "needs you". No sidebars, dashboards or decoration.

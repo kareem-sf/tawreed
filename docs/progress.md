@@ -331,3 +331,23 @@ machine.
   120-character package name is enough): revision files are now written and exported through extended paths. An
   unknown service failure read "({status})"; it now gives the status.
 - **Checks:** 124 service tests, 49 interface tests, typecheck, Ruff, Clippy.
+
+## 28 September 2026: the QS Mind identity
+
+- **Request (the engineer):** apply the finished brand. Tawreed's mark is now ت (taa), the first letter of توريد, in
+  Thmanyah Serif Display Bold, outlined: a gold bowl and two diamond dots, the two packages. Tawreed is part of the
+  QS Mind house ("by QS Mind" outside the product), founded and developed by Kareem Safwat. It replaces the "T"
+  monogram brought back from the previous app.
+- **Brand folder:** `brand/` holds copies of the kit's SVG masters, icons, social image, guidelines, tokens and the
+  founder's K and signature. Only outlines ship; no Thmanyah font file was added anywhere.
+- **App:** every desktop icon is generated from the kit's 1024 px master at the same sizes as before, and
+  `desktop/app-icon.svg` and the browser tab's `favicon.svg` are the kit's. The header draws the ت in the text
+  colour, so it follows light, dark and Arabic (a gold-and-ivory tone exists for dark backgrounds). About gains a
+  Founder section: the K, "Founded & developed by Kareem Safwat" with a link to kareemsafwat.com, and "Tawreed is
+  part of QS Mind", in English and Arabic.
+- **Known gap:** WebView2 silently drops links that ask for a new window, so the kareemsafwat.com link does nothing in
+  the desktop window yet (it works in the browser build). Handing such links to the default browser is a separate
+  change to the desktop shell, kept out of this one until it has been tried in a running window.
+- **README:** the endorsed lockup (light and dark) heads it, and the founder's signature closes it.
+- **Checks:** 51 interface tests and typecheck pass; About (English and Arabic, light and dark, 380 px and wide) and
+  the mark were looked at in a browser build.

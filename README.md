@@ -1,4 +1,10 @@
-# Tawreed
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/tawreed-lockup-endorsed-on-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="brand/logo/tawreed-lockup-endorsed-on-light.svg">
+    <img alt="Tawreed, by QS Mind" src="brand/logo/tawreed-lockup-endorsed-on-light.svg" width="300">
+  </picture>
+</h1>
 
 Tawreed turns construction bills of quantities into procurement packages. Add the BOQs for a project; the Tawreed
 fixed workflow reads them, designs the packages, places every item in exactly one package and publishes a master workbook
@@ -64,3 +70,16 @@ the script says whether it does.
 ## License
 
 [MIT](LICENSE) © 2026 Kareem Safwat.
+
+## Founder
+
+<a href="https://kareemsafwat.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/founder/signature-on-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="brand/founder/signature-on-light.svg">
+    <img alt="Founded and developed by Kareem Safwat" src="brand/founder/signature-on-light.svg" width="220">
+  </picture>
+</a>
+
+Founded and developed by [Kareem Safwat](https://kareemsafwat.com). Tawreed is part of the QS Mind house; its
+identity is in [brand/](brand/README.md).

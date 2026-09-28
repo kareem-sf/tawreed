@@ -8,10 +8,14 @@ test("four tabs, one page each", async () => {
   renderApp();
   const user = userEvent.setup();
 
-  // The mark kept from the previous app sits beside the name; the name alone is what screen readers hear.
+  // The ت mark sits beside the name in the text colour; the name alone is what screen readers hear.
   const logo = screen.getByTestId("logo");
   expect(logo).toHaveAttribute("aria-hidden", "true");
-  expect(logo.querySelector("path")).toHaveAttribute("d", "M5.1 4.5H28L24.7 10.7H18.5V27.4L14.2 24.9V10.7H7.2L3.7 7.4L5.1 4.5Z");
+  const [bowl, dots] = logo.querySelectorAll("path");
+  expect(bowl).toHaveAttribute("d", expect.stringMatching(/^M681 129H665L604 271C/));
+  expect(bowl).toHaveAttribute("fill", "currentColor");
+  expect(dots).toHaveAttribute("d", expect.stringMatching(/^M505 111C/));
+  expect(dots).toHaveAttribute("fill", "currentColor");
 
   const tabs = screen.getByRole("navigation", { name: "Sections" });
   expect(tabs).toHaveTextContent("HomeHistorySettingsAbout");
@@ -27,6 +31,12 @@ test("four tabs, one page each", async () => {
   await user.click(screen.getByRole("button", { name: "About" }));
   expect(await screen.findByText("Version 0.1.0")).toBeInTheDocument();
   expect(screen.getByText("C:\\Users\\me\\.tawreed")).toBeInTheDocument();
+  expect(screen.getByText("Founded & developed by Kareem Safwat")).toBeInTheDocument();
+  const site = screen.getByRole("link", { name: "kareemsafwat.com" });
+  expect(site).toHaveAttribute("href", "https://kareemsafwat.com");
+  expect(site).toHaveAttribute("target", "_blank");
+  expect(site).toHaveAttribute("rel", "noreferrer");
+  expect(screen.getByText("Tawreed is part of QS Mind.")).toBeInTheDocument();
 });
 
 test("switching to Arabic turns the whole page right to left and saves the choice", async () => {
