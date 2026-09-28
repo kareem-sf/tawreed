@@ -120,7 +120,10 @@ def _next(coverage: packages.Coverage, package_list: list, waiting: list, publis
     if "publish" in kinds:
         return "wait for the engineer to publish."
     if published:
-        return "nothing: the published revision holds the current work. Answer the engineer if they wrote."
+        return (
+            "nothing: the published revision holds the current work. Answer the engineer if they wrote; if they "
+            "ask for the revision again (for instance with or without rates), ask to publish."
+        )
     return "check the work and ask to publish."
 
 

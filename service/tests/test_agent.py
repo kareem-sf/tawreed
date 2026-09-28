@@ -95,6 +95,8 @@ class Brain:
             ]
         elif "Next: check the work and ask to publish" in prompt:
             steps = [call("check_work"), call("request_publish", summary="Three packages; every item placed.")]
+        elif "Next: nothing" in prompt:  # tries to publish again, which only the engineer's asking allows
+            steps = [call("request_publish", summary="The same packages, again.")]
         else:
             steps = []
         return steps[len(done)] if len(done) < len(steps) else DONE
@@ -192,6 +194,15 @@ def test_the_agent_works_a_project_through_every_gate(client, agent):
     work = settle(client, project_id, lambda w: w["stage"] == "published" and "Published: Rev 00" in brain.prompts[-1])
     assert work["decisions"] == []  # the agent doesn't ask to publish what is already published
     assert "Next: nothing: the published revision holds the current work." in brain.prompts[-1]
+    with client.app.state.sessions() as session:
+        turns = session.query(TurnRecord).filter_by(project_id=project_id).all()
+    refused = [c["sent_back"] for t in turns for c in t.calls if c["tool"] == "request_publish" and c["sent_back"]]
+    assert refused and "the engineer hasn't asked for it again" in refused[-1]
+
+    # The engineer asks for it again, say without rates for suppliers: now the agent may ask.
+    client.post(f"/projects/{project_id}/messages", json={"text": "Publish it again without rates, for suppliers."})
+    work = settle(client, project_id, waiting("publish"))
+    assert work["decisions"][0]["summary"] == "The same packages, again."
 
 
 def test_the_agent_writes_to_the_engineer_in_their_language(tmp_path):
