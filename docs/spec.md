@@ -3,9 +3,10 @@
 ## What Tawreed is
 
 Tawreed turns construction bills of quantities into procurement packages. An engineer adds one or more BOQs for a
-project; the Tawreed agent reads them, designs a package structure that fits the project and the supplier market,
-places every BOQ item in exactly one package, and publishes workbooks the engineer can send to specialist suppliers
-and subcontractors for pricing. The engineer stays in the loop and approves at every gate.
+project; Tawreed reads them, designs a package structure that fits the project and the supplier market, places
+every BOQ item in exactly one package, and publishes workbooks the engineer can send to specialist suppliers and
+subcontractors for pricing. It is a fixed workflow, not a conversation: the AI does the reading, planning and placing
+as steps, and the engineer approves at every gate.
 
 Tawreed never changes what the BOQ says. Item codes, descriptions, units, quantities, rates, amounts and comments
 reach the outputs exactly as they are in the source.
@@ -18,27 +19,36 @@ or both. They know construction; they should not need to know anything about AI 
 ## The work
 
 1. **Project.** The engineer creates a project and adds BOQ files. A project can hold several BOQs.
-2. **Reading.** Tawreed keeps an unchanged copy of each file and reads it. The agent works out each file's layout
+2. **Reading.** Tawreed keeps an unchanged copy of each file and reads it. The AI works out each file's layout
    (which sheet, which header row, which column is the quantity, where a PDF's columns fall); Tawreed extracts the
    exact values into the project's item ledger, each item linked to its cell or page. Scanned pages are read by the
    AI from the page image; those rows are marked "read from image — verify" and shown beside the page.
 3. **Overlap.** When a new file overlaps the project's existing sources, the engineer decides whether it is an
    addition, a replacement or a revision. *(Gate)*
-4. **Package plan.** The agent proposes the packages: a name, the scope each covers and why. It balances clear
+4. **Package plan.** The AI proposes the packages: a name, the scope each covers and why. It balances clear
    specialist scope, how suppliers and subcontractors actually trade, practical package size and no needless
    fragmentation. It uses the project's rules and any rules the engineer promoted to all projects. The engineer
-   approves the plan, edits it directly, or asks the agent to change it. *(Gate)*
-5. **Assignment.** The agent places every item in one package. Items it cannot place with confidence are shown
+   approves the plan, edits it first (rename, scope, remove, merge, add), or has it proposed again with a note.
+   *(Gate)*
+5. **Assignment.** The AI places every item in one package. Items it cannot place with confidence are shown
    with the candidate packages and its reasoning; the engineer picks, and chooses whether the choice applies to
    this item, the project (default) or all future projects. *(Gate)*
 6. **Checks.** Tawreed verifies that every active item appears exactly once and that package totals reconcile with
    the source totals.
-7. **Publish.** The engineer previews the result and approves. *(Gate)* Tawreed writes the whole revision at once:
-   either all of it appears, or none of it does.
+7. **Publish.** When every item is placed, Tawreed shows what the revision holds, computed, and the engineer
+   approves. *(Gate)* Tawreed writes the whole revision at once: either all of it appears, or none of it does. The
+   same work can be published again, for instance once with rates and once for suppliers to price.
 
-The four gates always stop for the engineer. Between them the agent works on its own. At any time the engineer can
-write to the agent ("split MEP into electrical and plumbing", "why is this item in finishes?") or change packages
-directly: move items, rename, merge, split. Both routes run the same checked operations.
+The steps run on their own from the dropped BOQ to each gate, and the gates always stop for the engineer. There is
+no conversation. The engineer corrects the work in two ways, both through the same checked operations:
+
+- **Directly:** move items between packages, rename, merge, remove or add packages, set a sheet's columns, or set a
+  page aside. The AI leaves the engineer's own layouts and placements as they are.
+- **Run a step again, with an optional note for the AI:** read a file or a page again, or place a package's items
+  (or everything the AI placed) again. A page read again the same way keeps its placements.
+
+A status line says what runs (with Stop) or why the work paused (with Continue): an AI failure, a step that got
+nowhere twice, or a declined consent.
 
 ## Inputs
 
@@ -54,7 +64,7 @@ images. Any layout: there is no required template.
 - **Simple formulas:** an amount is `=Qty*Rate` wherever that gives the source's own amount (otherwise the source's
   figure stays), package totals are `=SUM(...)`, the package index refers to each package's total and the cover adds
   them up.
-- **Decision log:** what the agent decided and what the engineer decided, with reasons and rules applied.
+- **Decision log:** what the AI proposed and what the engineer decided, with reasons and rules applied.
 - **Coverage check:** every source item once, and source totals against output totals.
 
 Revisions are numbered `Rev 00`, `Rev 01`, … and kept under the project in `~/.tawreed`, with Open folder and
@@ -70,9 +80,9 @@ Export to… actions. Arabic projects get right-to-left sheets.
 - The first time a project's content would go to a connection, Tawreed shows what is sent and where, and asks.
   The answer is remembered for that project and connection.
 - Without a working connection, projects, sources and past revisions stay open and files can still be read;
-  package planning waits for the agent.
-- No spending controls in v1. Each agent turn has a step limit, and the agent pauses after a run of turns without
-  hearing from the engineer.
+  the AI steps wait for one.
+- No spending controls in v1. Each run of a step has a step limit, and the work pauses when a step gets nowhere
+  twice.
 
 ## Interface
 
@@ -80,9 +90,10 @@ Tawreed is a tool, not a workspace. One window with four tabs: **Home**, **Histo
 
 - **Home** starts as a drop zone ("Drop BOQ files here", or Choose files) with the recent projects below it.
   Dropping files starts the work; dropping more files onto a running project adds them to it.
-- While the agent works, Home shows the project name, a five-step line (Read · Plan · Place · Check · Publish), the
-  one thing waiting for the engineer (a decision card, when there is one), the agent's messages, and a box to write
-  to the agent. Packages and items open from a link when the engineer wants to look or edit.
+- While the work runs, Home shows the project name, a five-step line (Read · Plan · Place · Check · Publish), a
+  status line, the one thing waiting for the engineer (a decision card, when there is one) and what they decided so
+  far. Packages and items open from a link when the engineer wants to look or edit; each file shows how each of its
+  pages was read.
 - When a revision is published, Home shows what was written and Open folder / Export to….
 - **History** lists past projects and their revisions; opening one returns to Home for that project.
 - **Settings**: language, theme, the AI Tawreed works with, connections, and rules that apply to all projects.
@@ -93,7 +104,8 @@ means "needs you". No sidebars, dashboards or decoration.
 
 ## Language and platform
 
-English and Arabic interface with full right-to-left layout; the agent answers in the interface language. English
+English and Arabic interface with full right-to-left layout; the AI writes package names, scopes and reasons in
+the interface language. English
 text uses Figtree and Arabic text uses Thmanyah Sans: light headings, regular body text. Light and dark themes, following the system. A desktop app on
 Windows first.
 
