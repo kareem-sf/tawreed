@@ -7,6 +7,7 @@ from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -18,6 +19,7 @@ from tawreed import decisions, ledger, packages, publish
 from tawreed.agent import records
 from tawreed.ledger import Item, Layout
 from tawreed.ledger.extract import PdfLayout, SheetLayout, TranscribedRow
+from tawreed.ledger.numbers import parse_number
 from tawreed.projects import Project
 from tawreed.sources import Source, page_image
 
@@ -285,7 +287,12 @@ def _report(session: Session, source: Source, summary: dict, pages: list[int]) -
         found += [f"{i.ref} · {i.code} · {i.description[:80]} · {i.unit} · {i.quantity_text}" for i in items]
     lines = [head, data("\n".join(found))] if found else [head]
     if summary["totals"]:
-        lines.append(f"The items' own amounts add up to {summary['amount_sum'] or 'nothing (they have no amounts)'}.")
+        stated = sum((parse_number(t.get("amount")) or Decimal(0) for t in summary["totals"]), Decimal(0))
+        own = Decimal(summary["amount_sum"]) if summary["amount_sum"] else Decimal(0)
+        lines.append(
+            f"The totals the page states add up to {packages.money(stated)}; the items' own amounts add up to "
+            f"{packages.money(own)}" + (": they agree." if packages.money(stated - own) == 0 else ".")
+        )
     lines.append("If this isn't right, lay the page out again: the new layout replaces this one.")
     return "\n".join(lines)
 
@@ -549,14 +556,20 @@ def check_work(ctx: RunContext[Turn]) -> str:
         f"Files waiting for an overlap decision: {coverage.pending_files}.",
     ]
     lines += [
-        f"- {packages.code(c.package)} {c.package.name}: {c.items} items, amounts {c.amount}"
+        f"- {packages.code(c.package)} {c.package.name}: {c.items} items, amounts {packages.money(c.amount)}"
         + (f" ({c.without_amount} without an amount)" if c.without_amount else "")
         for c in coverage.packages
     ]
-    lines += [
-        f"- {t['file']} states “{t['text']}” {t.get('amount') or ''}; its items add up to {t['items_sum']}"
-        for t in coverage.totals
-    ]
+    for t in coverage.totals:
+        verdict = (
+            "they agree"
+            if packages.money(t["difference"]) == 0
+            else f"they differ by {packages.money(t['difference'])}"
+        )
+        lines.append(
+            f"- {t['file']}, {t['where']}: the {plural(t['count'], 'total')} it states add up to "
+            f"{packages.money(t['stated_sum'])}; its items add up to {packages.money(t['items_sum'])}: {verdict}."
+        )
     lines.append("Ready to publish." if coverage.complete and coverage.packages else "Not ready to publish yet.")
     return "\n".join(lines)
 

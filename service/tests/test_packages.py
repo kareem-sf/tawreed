@@ -2,6 +2,7 @@
 
 import io
 import sqlite3
+from decimal import Decimal
 
 import openpyxl
 import pytest
@@ -128,7 +129,9 @@ def test_coverage_counts_from_the_ledger(client):
         assert coverage.pages_left == 2  # the Arabic sheet and the rates sheet aren't handled yet
         assert not coverage.complete
         assert (coverage.packages[0].items, str(coverage.packages[0].amount)) == (2, "1465585.13")
-        assert coverage.totals[0]["text"] == "Total carried to summary"
+        [total] = coverage.totals  # the sheet's one stated total against all its items
+        assert (total["where"], total["count"], str(total["stated_sum"])) == ("Div.03", 1, "1465585.13")
+        assert total["difference"] == 0
 
 
 def revised() -> bytes:
@@ -291,3 +294,29 @@ def test_existing_items_are_numbered_by_the_migration(tmp_path):
     with sqlite3.connect(database) as db:
         assert db.execute("SELECT id, ref FROM items ORDER BY id").fetchall() == [("i1", 1), ("i2", 1), ("i3", 2)]
         assert db.execute("SELECT active, relation FROM sources").fetchall() == [(1, None), (1, None)]
+
+
+def test_a_sheet_with_a_total_per_section_reconciles_when_the_sections_add_up(client):
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Mechanical"
+    rows = [
+        ("1", "Split unit 2 TR", "No.", 4, 1000.1, 4000.4),
+        ("", "TOTAL", "", "", "", 4000.4),
+        ("2", "Exhaust fan", "No.", 3, 86.99999999999999, 260.99999999999997),  # Excel's float noise
+        ("", "TOTAL", "", "", "", 260.99999999999997),
+    ]
+    for row in rows:
+        sheet.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    project = read_all(client, start(client, {"Sections.xlsx": buffer.getvalue()})["id"])
+    layout = SheetLayout(first_row=1, code="A", description=["B"], unit="C", quantity="D", rate="E", amount="F")
+    with client.app.state.sessions() as session:
+        ledger.lay_out_sheet(
+            session, client.app.state.home, session.get(Source, project["sources"][0]["id"]), 1, layout, "agent"
+        )
+        session.commit()
+        [total] = packages.coverage(session, project["id"], set()).totals
+    assert total["count"] == 2 and packages.money(total["stated_sum"]) == Decimal("4261.40")
+    assert packages.money(total["difference"]) == 0  # each section total, added up, equals the items

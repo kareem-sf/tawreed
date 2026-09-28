@@ -219,3 +219,12 @@ def test_revisions_are_opened_and_exported(client, monkeypatch):
     assert "Tower%20BOQ%20-%20Rev%2000.zip" in export.headers["content-disposition"]
     names = zipfile.ZipFile(io.BytesIO(export.content)).namelist()
     assert "Rev 00/manifest.json" in names and "Rev 00/Packages/03 Earthworks - Rev 00.xlsx" in names
+
+
+def test_excels_float_noise_is_shown_to_the_cent_and_real_decimals_as_they_are():
+    from tawreed.publish.workbooks import _number_format
+
+    assert _number_format("261016.92999999993") == "#,##0.00"  # a formula's float: the value stays, the display is tidy
+    assert _number_format("1250.00") == "#,##0.00"
+    assert _number_format("12.125") == "#,##0.000"
+    assert _number_format("86") == "#,##0"

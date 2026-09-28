@@ -16,6 +16,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from tawreed.core.db import Base, UTCDateTime, now
 from tawreed.ledger import Item, Layout, handled_pages
+from tawreed.ledger.numbers import parse_number
 from tawreed.projects import Project
 from tawreed.sources import Source
 
@@ -294,7 +295,7 @@ class Coverage:
     pages_left: int = 0  # read pages no layout has covered yet
     pending_files: int = 0  # files waiting for the engineer's overlap decision
     packages: list[PackageCount] = field(default_factory=list)
-    totals: list[dict[str, Any]] = field(default_factory=list)  # totals a file states, beside the items' own sum
+    totals: list[dict[str, Any]] = field(default_factory=list)  # per layout: its stated totals added up, its items' sum
 
     @property
     def complete(self) -> bool:
@@ -329,7 +330,31 @@ def coverage(session: Session, project_id: str, waiting_items: set[str]) -> Cove
         if source.status != "read":
             continue
         result.pages_left += len({p.number for p in source.pages} - handled_pages(session, source.id))
+        names = {p.number: p.name for p in source.pages}
         for layout in session.scalars(select(Layout).where(Layout.source_id == source.id)):
-            for total in layout.report.get("totals", []):
-                result.totals.append({"file": source.filename, **total, "items_sum": layout.report.get("amount_sum")})
+            if layout.report.get("totals"):
+                result.totals.append(reconcile(source.filename, layout, names))
     return result
+
+
+def money(amount: Decimal) -> Decimal:
+    """A computed amount as it is shown: to the cent. Excel's float noise (261016.92999999993) doesn't show."""
+    return amount.quantize(Decimal("0.01"))
+
+
+def reconcile(file: str, layout: Layout, names: dict[int, str]) -> dict[str, Any]:
+    """The totals one layout's pages state, added up, beside its items' own sum. A sheet with a total per section
+    reconciles when the section totals together equal its items."""
+    stated = [parse_number(t.get("amount")) for t in layout.report["totals"]]
+    stated_sum = sum((s for s in stated if s is not None), Decimal(0))
+    items_sum = Decimal(layout.report["amount_sum"]) if layout.report.get("amount_sum") else Decimal(0)
+    pages = layout.pages
+    where = ", ".join(names.get(p) or str(p) for p in pages) if any(names.get(p) for p in pages) else f"pages {pages}"
+    return {
+        "file": file,
+        "where": where,
+        "count": len(stated),
+        "stated_sum": stated_sum,
+        "items_sum": items_sum,
+        "difference": stated_sum - items_sum,
+    }
