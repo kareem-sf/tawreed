@@ -332,7 +332,9 @@ def test_a_revision_with_long_package_names_is_written_past_the_windows_path_lim
 
     from tawreed.api.app import create_app
 
-    home = tmp_path / ".tawreed"  # an ordinary data folder: the project and revision folders make the rest
+    # The data folder is padded to 110 characters wherever the test runs: deep enough that a package's path passes
+    # the limit, and no deeper, so the stored sources still fit under it.
+    home = tmp_path / "data".ljust(100 - len(str(tmp_path)), "-") / ".tawreed"
     with TestClient(create_app(home, TOKEN), headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         project_id = ready(client)
         concrete = client.get(f"/projects/{project_id}/work").json()["packages"][0]["id"]

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import uuid
 import zipfile
 from datetime import datetime
@@ -52,7 +53,7 @@ def revisions_folder(home: Path, project_id: str) -> Path:
 def _long(path: Path) -> Path:
     """The path in Windows' extended form, which has no 260-character limit: a long data folder, project name or
     package name can pass it (package names alone may run to 120 characters). Elsewhere the path as it is."""
-    if os.name != "nt":
+    if sys.platform != "win32":
         return path
     text = str(path.resolve())
     prefix = "\\\\?\\"
