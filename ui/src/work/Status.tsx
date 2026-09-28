@@ -1,5 +1,6 @@
 import { explain, type Run } from "../api/client";
 import { useSettings } from "../app/settings";
+import { Alert, button } from "../app/ui";
 import type { Key, Translate } from "../i18n";
 import { useRun } from "./queries";
 
@@ -9,36 +10,39 @@ export function Status({ projectId, run }: { projectId: string; run: Run }) {
   const { stop, carryOn } = useRun(projectId);
   if (run.state !== "running" && run.state !== "paused") return null;
   const failed = stop.error ?? carryOn.error;
-  const button = "shrink-0 rounded-md border border-line px-2 py-0.5 text-ink hover:border-ink disabled:opacity-50";
+  const share = run.total ? Math.min(1, (run.done ?? 0) / run.total) : null;
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-3 text-sm text-ink-2">
-        {run.state === "running" ? (
-          <>
-            <span className="size-[7px] shrink-0 animate-pulse rounded-full bg-ink" aria-hidden="true" />
-            <span role="status" className="[unicode-bidi:plaintext]">
-              {running(run, t)}
+    <div className="flex flex-col gap-1.5 animate-enter">
+      {run.state === "running" ? (
+        <div className="flex flex-col gap-2 rounded-lg bg-subtle px-3 py-2">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="size-[7px] shrink-0 rounded-full bg-ink motion-safe:animate-pulse" aria-hidden="true" />
+            {/* Read out once per step; the counts beside it change every second, so they stay visual. */}
+            <span role="status" className="min-w-0 flex-1 [unicode-bidi:plaintext]">
+              <span className="sr-only">{t(`step.${run.step ?? "read"}` as Key)}</span>
+              <span aria-hidden="true">{running(run, t)}</span>
             </span>
-            <button type="button" disabled={stop.isPending} onClick={() => stop.mutate()} className={button}>
-              {t("run.stop")}
+            <button type="button" disabled={stop.isPending} onClick={() => stop.mutate()} className={button("secondary", "sm")}>
+              {stop.isPending ? t("run.stopping") : t("run.stop")}
             </button>
-          </>
-        ) : (
-          <>
-            <span role="status" className="flex-1 text-amber">
-              {pausedBecause(run, t)}
-            </span>
-            <button type="button" disabled={carryOn.isPending} onClick={() => carryOn.mutate()} className={button}>
-              {t("run.continue")}
-            </button>
-          </>
-        )}
-      </div>
-      {failed && (
-        <p role="alert" className="text-sm text-danger">
-          {explain(failed, t)}
-        </p>
+          </div>
+          {share !== null && (
+            <div className="h-1 overflow-hidden rounded-full bg-line" aria-hidden="true">
+              <div className="h-full rounded-full bg-ink transition-[width] duration-700 ease-out" style={{ width: `${share * 100}%` }} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-amber-line bg-amber-soft px-3 py-2 text-sm">
+          <span role="status" className="min-w-0 flex-1 text-amber">
+            {pausedBecause(run, t)}
+          </span>
+          <button type="button" disabled={carryOn.isPending} onClick={() => carryOn.mutate()} className={button("secondary", "sm")}>
+            {t("run.continue")}
+          </button>
+        </div>
       )}
+      {failed && <Alert>{explain(failed, t)}</Alert>}
     </div>
   );
 }

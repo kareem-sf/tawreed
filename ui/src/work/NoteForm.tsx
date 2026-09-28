@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSettings } from "../app/settings";
+import { button, textArea } from "../app/ui";
 
 /** A one-off note for the AI when a step runs again. It's optional, and nothing answers it: the step just runs. */
 export function NoteForm({
@@ -15,7 +16,7 @@ export function NoteForm({
   const [note, setNote] = useState("");
   return (
     <form
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-2 animate-enter"
       onSubmit={(event) => {
         event.preventDefault();
         onRun(note.trim() || undefined);
@@ -30,14 +31,21 @@ export function NoteForm({
         maxLength={4000}
         autoFocus
         onChange={(event) => setNote(event.target.value)}
-        onKeyDown={(event) => event.key === "Escape" && onCancel()}
-        className="rounded-lg border border-line bg-page px-3 py-2 focus:border-ink focus:outline-none"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onCancel();
+          }
+          // Ctrl+Enter (or ⌘+Enter) runs it, as in most note boxes.
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) event.currentTarget.form?.requestSubmit();
+        }}
+        className={textArea}
       />
-      <div className="flex gap-2">
-        <button type="submit" disabled={busy} className="rounded-lg bg-button px-3.5 py-1.5 text-button-ink disabled:opacity-50">
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" disabled={busy} className={button("primary", "sm")}>
           {t("redo.run")}
         </button>
-        <button type="button" onClick={onCancel} className="rounded-lg border border-line px-3.5 py-1.5 hover:border-ink">
+        <button type="button" onClick={onCancel} className={button("quiet", "sm")}>
           {t("redo.cancel")}
         </button>
       </div>

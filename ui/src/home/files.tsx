@@ -54,17 +54,26 @@ export function PickFiles({
   onFiles,
   className,
   disabled,
+  label,
   children,
 }: {
   onFiles: (files: File[]) => void;
   className?: string;
   disabled?: boolean;
+  label?: string; // the button's name when its text can be hidden (a narrow window)
   children: ReactNode;
 }) {
   const input = useRef<HTMLInputElement>(null);
   return (
     <>
-      <button type="button" className={className} disabled={disabled} onClick={() => input.current?.click()}>
+      <button
+        type="button"
+        className={className}
+        disabled={disabled}
+        aria-label={label}
+        title={label}
+        onClick={() => input.current?.click()}
+      >
         {children}
       </button>
       <input

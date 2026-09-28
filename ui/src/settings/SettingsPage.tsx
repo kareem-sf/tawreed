@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, explain, type Connection, type Provider } from "../api/client";
 import { useSettings } from "../app/settings";
+import { Alert, button, Empty, field, link, Page, PageTitle, SectionLabel, Skeleton, SkeletonRows } from "../app/ui";
 import type { Key } from "../i18n";
 import {
   PROVIDERS,
@@ -15,45 +16,49 @@ import {
   useRules,
 } from "./queries";
 
-const field = "h-9 rounded-lg border border-line bg-page px-3 outline-none focus:border-ink";
-const quiet = "h-9 rounded-lg border border-line px-3.5 disabled:opacity-50";
-const primary = "h-9 rounded-lg bg-button px-4 font-semibold text-button-ink disabled:opacity-40";
-
 export function SettingsPage() {
   const { t, language, theme, change } = useSettings();
 
   return (
-    <div className="mx-auto flex max-w-[760px] flex-col px-4 pt-5 pb-10">
-      <h1 className="mb-2 text-[28px] font-heading font-light tracking-[-0.01em]">{t("settings.title")}</h1>
-      <Row label={t("settings.language")}>
-        <Choice
-          label={t("settings.language")}
-          value={language}
-          options={[
-            { value: "en", label: "English", lang: "en" },
-            { value: "ar", label: "العربية", lang: "ar" },
-          ]}
-          onChange={(value) => void change({ language: value })}
-        />
-      </Row>
-      <Row label={t("settings.theme")}>
-        <Choice
-          label={t("settings.theme")}
-          value={theme}
-          options={(["system", "light", "dark"] as const).map((value) => ({ value, label: t(`theme.${value}` as Key) }))}
-          onChange={(value) => void change({ theme: value })}
-        />
-      </Row>
-      <Row label={t("settings.ai")}>
-        <TawreedsAI />
-      </Row>
+    <Page className="gap-10">
+      <div className="flex flex-col gap-4">
+        <PageTitle>{t("settings.title")}</PageTitle>
+        <div className="flex flex-col">
+          <Row label={t("settings.language")}>
+            <Choice
+              label={t("settings.language")}
+              value={language}
+              options={[
+                { value: "en", label: "English", lang: "en" },
+                { value: "ar", label: "العربية", lang: "ar" },
+              ]}
+              onChange={(value) => void change({ language: value })}
+            />
+          </Row>
+          <Row label={t("settings.theme")}>
+            <Choice
+              label={t("settings.theme")}
+              value={theme}
+              options={(["system", "light", "dark"] as const).map((value) => ({ value, label: t(`theme.${value}` as Key) }))}
+              onChange={(value) => void change({ theme: value })}
+            />
+          </Row>
+          <Row label={t("settings.ai")}>
+            <TawreedsAI />
+          </Row>
+        </div>
+      </div>
 
-      <h2 className="mt-6 mb-1 text-[13px] font-normal text-ink-2">{t("settings.connections")}</h2>
-      <Connections />
+      <section className="flex flex-col">
+        <SectionLabel>{t("settings.connections")}</SectionLabel>
+        <Connections />
+      </section>
 
-      <h2 className="mt-6 mb-1 text-[13px] font-normal text-ink-2">{t("settings.rules")}</h2>
-      <Rules />
-    </div>
+      <section className="flex flex-col">
+        <SectionLabel>{t("settings.rules")}</SectionLabel>
+        <Rules />
+      </section>
+    </Page>
   );
 }
 
@@ -61,18 +66,19 @@ function Rules() {
   const { t } = useSettings();
   const rules = useRules();
   const forget = useForgetRule();
-  if (!rules.data) return null;
-  if (rules.data.length === 0) return <p className="py-2 text-ink-2">{t("settings.noRules")}</p>;
+  if (rules.isPending) return <SkeletonRows rows={2} />;
+  if (rules.isError) return <Alert onRetry={() => void rules.refetch()}>{explain(rules.error, t)}</Alert>;
+  if (rules.data.length === 0) return <Empty>{t("settings.noRules")}</Empty>;
   return (
     <ul className="flex flex-col">
       {rules.data.map((rule) => (
-        <li key={rule.id} className="flex items-center gap-4 border-b border-line-soft py-2.5">
+        <li key={rule.id} className="flex items-center gap-4 border-t border-line-soft py-3 first:border-t-0">
           <span className="flex-1 [unicode-bidi:plaintext]">{rule.text}</span>
           <button
             type="button"
             disabled={forget.isPending}
             onClick={() => forget.mutate(rule.id)}
-            className="shrink-0 text-sm text-ink-2 underline hover:text-ink disabled:opacity-50"
+            className={`shrink-0 text-sm ${link}`}
           >
             {t("rules.remove")}
           </button>
@@ -82,10 +88,11 @@ function Rules() {
   );
 }
 
+/** A setting: its name, and the control that changes it. Side by side, or stacked in a narrow window. */
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-center gap-4 border-b border-line-soft py-2.5">
-      <span className="w-40 shrink-0 font-semibold">{label}</span>
+    <div className="flex flex-col gap-2 border-t border-line-soft py-3 first:border-t-0 sm:flex-row sm:items-center sm:gap-4">
+      <span className="shrink-0 font-semibold sm:w-40">{label}</span>
       {children}
     </div>
   );
@@ -104,7 +111,7 @@ function Choice<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex overflow-hidden rounded-lg border border-line">
+    <div role="group" aria-label={label} className="inline-flex gap-0.5 self-start rounded-lg bg-subtle p-0.5">
       {options.map((option) => (
         <button
           key={option.value}
@@ -112,7 +119,7 @@ function Choice<T extends string>({
           lang={option.lang}
           aria-pressed={option.value === value}
           onClick={() => onChange(option.value)}
-          className={`px-3.5 py-0.5 ${option.value === value ? "bg-subtle font-semibold text-ink" : "text-ink-2 hover:text-ink"}`}
+          className={`h-8 rounded-md px-3.5 transition-[color,background-color,box-shadow] duration-150 pointer-coarse:h-10 ${option.value === value ? "bg-page text-ink shadow-[0_1px_2px_var(--shadow-far)]" : "text-ink-2 hover:text-ink"}`}
         >
           {option.label}
         </button>
@@ -130,6 +137,8 @@ function TawreedsAI() {
   const { t, ai, change } = useSettings();
   const connections = useConnections();
   const [error, setError] = useState<unknown>(null);
+  const [saving, setSaving] = useState(false);
+  if (connections.isPending) return <Skeleton className="h-9 w-full max-w-md" />;
   const choices = (connections.data ?? []).flatMap((connection) =>
     Object.entries(connection.checks)
       .filter(([, check]) => check.ok)
@@ -143,11 +152,14 @@ function TawreedsAI() {
       <select
         aria-label={t("settings.ai")}
         value={current}
+        disabled={saving}
         onChange={async (event) => {
           const [connection_id, model] = JSON.parse(event.target.value) as [string, string];
+          setSaving(true);
           setError(await change({ ai: { connection_id, model } }));
+          setSaving(false);
         }}
-        className={field}
+        className={`${field} w-full`}
       >
         <option value="" disabled>
           {t("settings.aiChoose")}
@@ -158,11 +170,7 @@ function TawreedsAI() {
           </option>
         ))}
       </select>
-      {error ? (
-        <p role="alert" className="text-danger">
-          {explain(error, t)}
-        </p>
-      ) : null}
+      {error ? <Alert>{explain(error, t)}</Alert> : null}
     </div>
   );
 }
@@ -171,17 +179,14 @@ function Connections() {
   const { t } = useSettings();
   const connections = useConnections();
   return (
-    <>
-      {connections.isError && (
-        <p role="alert" className="text-danger">
-          {explain(connections.error, t)}
-        </p>
-      )}
-      {connections.data?.length === 0 && <p className="py-2 text-ink-2">{t("settings.noConnections")}</p>}
+    <div className="flex flex-col gap-3">
+      {connections.isError && <Alert onRetry={() => void connections.refetch()}>{explain(connections.error, t)}</Alert>}
+      {connections.isPending && <Skeleton className="h-28 w-full rounded-xl" />}
+      {connections.data?.length === 0 && <Empty>{t("settings.noConnections")}</Empty>}
       {connections.data?.map((connection) => <ConnectionRow key={connection.id} connection={connection} />)}
       <AddConnection />
-      <p className="mt-3 text-[13px] text-ink-2">{t("settings.keysNote")}</p>
-    </>
+      <p className="text-sm text-ink-2">{t("settings.keysNote")}</p>
+    </div>
   );
 }
 
@@ -191,21 +196,41 @@ function ConnectionRow({ connection }: { connection: Connection }) {
   const check = useCheckModel(connection.id);
   const remove = useRemoveConnection();
   const [model, setModel] = useState("");
+  const [removing, setRemoving] = useState(false);
   const result = model ? connection.checks[model] : undefined;
   const name = connectionName(connection, t);
 
   return (
-    <section aria-label={name} className="flex flex-col gap-2 border-b border-line-soft py-3">
-      <div className="flex items-center gap-4">
-        <span className="w-40 shrink-0 font-semibold">{name}</span>
-        <span className="flex-1 text-sm text-ink-2">
+    <section aria-label={name} className="flex flex-col gap-3 rounded-xl border border-line p-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-semibold">{name}</span>
+        <span className="order-last w-full text-sm text-ink-2 sm:order-none sm:w-auto sm:min-w-0 sm:flex-1">
           {connection.provider === "codex" ? t("connection.codex") : t("connection.key", { hint: connection.key_hint })}
         </span>
-        <button type="button" onClick={() => remove.mutate(connection.id)} disabled={remove.isPending} className={quiet}>
-          {t("connection.remove")}
-        </button>
+        {!removing && (
+          <button type="button" onClick={() => setRemoving(true)} className={`${button("quiet", "sm")} ms-auto sm:ms-0`}>
+            {t("connection.remove")}
+          </button>
+        )}
       </div>
-      <div className="flex items-center gap-2 ps-44">
+      {removing && (
+        <div role="group" aria-label={t("connection.removeConfirm", { name })} className="flex flex-wrap items-center gap-3 rounded-lg bg-subtle px-3 py-2.5 text-sm animate-enter">
+          <span className="min-w-0 flex-1">{t("connection.removeConfirm", { name })}</span>
+          <button
+            type="button"
+            autoFocus
+            onClick={() => remove.mutate(connection.id)}
+            disabled={remove.isPending}
+            className={button("danger", "sm")}
+          >
+            {t("connection.remove")}
+          </button>
+          <button type="button" onClick={() => setRemoving(false)} className={button("quiet", "sm")}>
+            {t("ui.cancel")}
+          </button>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
         {models.data && models.data.length > 0 ? (
           <select aria-label={t("connection.model")} value={model} onChange={(e) => setModel(e.target.value)} className={`${field} min-w-0 flex-1`}>
             <option value="">{t("connection.chooseModel")}</option>
@@ -225,26 +250,26 @@ function ConnectionRow({ connection }: { connection: Connection }) {
             className={`${field} min-w-0 flex-1`}
           />
         )}
-        <button type="button" disabled={!model || check.isPending} onClick={() => check.mutate(model)} className={quiet}>
+        <button type="button" disabled={!model || check.isPending} onClick={() => check.mutate(model)} className={button("secondary")}>
           {check.isPending ? t("connection.checking") : t("connection.check")}
         </button>
       </div>
-      <div className="flex flex-col gap-1 ps-44 text-sm">
-        {check.isPending && <p className="text-ink-2">{t("connection.checkingNote")}</p>}
-        {(models.isError || check.isError || remove.isError) && (
-          <p role="alert" className="text-danger">
-            {explain(models.error ?? check.error ?? remove.error, t)}
-          </p>
-        )}
-        {result && !check.isPending && (
-          <p className={`flex items-start gap-1.5 ${result.ok ? "text-ink-2" : "text-danger"}`}>
-            <span className={`mt-[7px] size-1.5 shrink-0 rounded-full ${result.ok ? "bg-ink" : "bg-danger"}`} aria-hidden="true" />
-            {result.ok
-              ? `${t("check.works")} ${result.sees_images ? t("check.sees") : t("check.blind")}`
-              : explain(new ApiError(result.problem ?? "unknown"), t)}
-          </p>
-        )}
-      </div>
+      {(check.isPending || models.isError || check.isError || remove.isError || (result && !check.isPending)) && (
+        <div className="flex flex-col gap-1 text-sm">
+          {check.isPending && <p className="text-ink-2">{t("connection.checkingNote")}</p>}
+          {(models.isError || check.isError || remove.isError) && (
+            <Alert>{explain(models.error ?? check.error ?? remove.error, t)}</Alert>
+          )}
+          {result && !check.isPending && (
+            <p className={`flex items-start gap-1.5 ${result.ok ? "text-ink-2" : "text-danger"}`}>
+              <span className={`mt-[7px] size-1.5 shrink-0 rounded-full ${result.ok ? "bg-ink" : "bg-danger"}`} aria-hidden="true" />
+              {result.ok
+                ? `${t("check.works")} ${result.sees_images ? t("check.sees") : t("check.blind")}`
+                : explain(new ApiError(result.problem ?? "unknown"), t)}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -275,14 +300,14 @@ function AddConnection() {
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2.5 pt-4">
-      <h3 className="text-[13px] font-normal text-ink-2">{t("add.title")}</h3>
+    <form onSubmit={submit} className="flex flex-col gap-3 rounded-xl border border-dashed border-line-strong p-4">
+      <h3 className="font-semibold">{t("add.title")}</h3>
       <fieldset className="flex flex-wrap gap-1.5">
         <legend className="sr-only">{t("add.service")}</legend>
         {PROVIDERS.map((id) => (
           <label
             key={id}
-            className="flex h-9 cursor-pointer items-center rounded-lg border border-line px-3 text-ink-2 hover:text-ink has-checked:border-ink has-checked:bg-subtle has-checked:font-semibold has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-ink"
+            className="flex h-9 cursor-pointer items-center rounded-lg border border-line-strong px-3 text-ink-2 transition-colors duration-150 hover:border-ink/35 hover:text-ink has-checked:border-ink has-checked:bg-subtle has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ink pointer-coarse:h-11"
           >
             <input
               type="radio"
@@ -312,10 +337,10 @@ function AddConnection() {
           />
           <button
             type="button"
-            aria-label={showKey ? t("add.hide") : t("add.show")}
+            aria-label={t("add.show")}
             aria-pressed={showKey}
             onClick={() => setShowKey(!showKey)}
-            className="absolute inset-y-0 end-0 flex w-10 items-center justify-center text-ink-2 hover:text-ink"
+            className="absolute inset-y-0 end-0 flex w-10 items-center justify-center rounded-e-lg text-ink-2 transition-colors hover:text-ink"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
@@ -335,15 +360,11 @@ function AddConnection() {
           className={field}
         />
       )}
-      {add.isError && (
-        <p role="alert" className="text-danger">
-          {explain(add.error, t)}
-        </p>
-      )}
+      {add.isError && <Alert>{explain(add.error, t)}</Alert>}
       <button
         type="submit"
         disabled={(isCodex ? !codex.data?.signed_in : !key.trim()) || (needsAddress && !address.trim()) || add.isPending}
-        className={`${primary} self-start`}
+        className={`${button("primary")} self-start font-semibold`}
       >
         {add.isPending ? t("add.checking") : t("add.submit")}
       </button>
@@ -363,23 +384,14 @@ function CodexState({ state }: { state: { installed: boolean; version: string | 
       {state.installed && !state.signed_in && (
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-amber">{t("codex.signedOut", { version: state.version ?? "" })}</p>
-          <button
-            type="button"
-            disabled={signIn.isPending}
-            onClick={() => signIn.mutate()}
-            className="rounded-lg border border-line px-3 py-1 hover:border-ink disabled:opacity-50"
-          >
+          <button type="button" disabled={signIn.isPending} onClick={() => signIn.mutate()} className={button("secondary", "sm")}>
             {t("codex.signIn")}
           </button>
         </div>
       )}
       {state.installed && !state.signed_in && <p className="text-ink-2">{t("codex.signInNote")}</p>}
       <p className="text-ink-2">{t("codex.lockdown")}</p>
-      {signIn.isError && (
-        <p role="alert" className="text-danger">
-          {explain(signIn.error, t)}
-        </p>
-      )}
+      {signIn.isError && <Alert>{explain(signIn.error, t)}</Alert>}
     </div>
   );
 }

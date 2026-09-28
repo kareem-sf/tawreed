@@ -1,6 +1,7 @@
 import { explain } from "../api/client";
 import { ago } from "../app/format";
 import { useSettings } from "../app/settings";
+import { Alert, Empty, Page, PageTitle, SkeletonRows } from "../app/ui";
 import { useProjects } from "../home/queries";
 
 export function History({ onOpen }: { onOpen: (id: string) => void }) {
@@ -8,29 +9,32 @@ export function History({ onOpen }: { onOpen: (id: string) => void }) {
   const projects = useProjects();
 
   return (
-    <div className="mx-auto flex max-w-[880px] flex-col px-4 pt-6 pb-10">
-      <h1 className="mb-3 text-[28px] font-heading font-light tracking-[-0.01em]">{t("history.title")}</h1>
-      {projects.isError && (
-        <p role="alert" className="text-danger">
-          {explain(projects.error, t)}
-        </p>
+    <Page className="gap-4">
+      <PageTitle>{t("history.title")}</PageTitle>
+      {projects.isError && <Alert onRetry={() => void projects.refetch()}>{explain(projects.error, t)}</Alert>}
+      {projects.isPending && <SkeletonRows rows={4} />}
+      {projects.data?.length === 0 && <Empty>{t("history.empty")}</Empty>}
+      {projects.data && projects.data.length > 0 && (
+        <div className="flex flex-col">
+          {projects.data.map((project) => (
+            <button
+              key={project.id}
+              type="button"
+              onClick={() => onOpen(project.id)}
+              className="-mx-3 flex flex-col gap-0.5 rounded-lg border-t border-line-soft px-3 py-3 text-start transition-colors duration-150 hover:border-transparent hover:bg-soft sm:flex-row sm:items-baseline sm:gap-4 [&+button]:hover:border-transparent first:border-t-0"
+            >
+              <span className="min-w-0 flex-1 font-semibold [overflow-wrap:anywhere] [unicode-bidi:plaintext] rtl:text-right">
+                {project.name}
+              </span>
+              <span className="flex shrink-0 flex-wrap gap-x-3 text-sm text-ink-2 sm:text-[15px]">
+                {project.revision && <span>{project.revision}</span>}
+                <span>{t("project.files", { count: project.files })}</span>
+                <span className="sm:w-28 sm:text-end">{ago(project.updated_at, locale)}</span>
+              </span>
+            </button>
+          ))}
+        </div>
       )}
-      {projects.data?.length === 0 && <p className="text-ink-2">{t("history.empty")}</p>}
-      {projects.data?.map((project) => (
-        <button
-          key={project.id}
-          type="button"
-          onClick={() => onOpen(project.id)}
-          className="flex items-center gap-4 border-t border-line-soft px-0.5 py-3 text-start hover:bg-soft"
-        >
-          <span className="min-w-0 flex-1 truncate font-semibold [unicode-bidi:plaintext] rtl:text-right">
-            {project.name}
-          </span>
-          {project.revision && <span className="text-ink-2">{project.revision}</span>}
-          <span className="text-ink-2">{t("project.files", { count: project.files })}</span>
-          <span className="w-28 text-end text-ink-2">{ago(project.updated_at, locale)}</span>
-        </button>
-      ))}
-    </div>
+    </Page>
   );
 }

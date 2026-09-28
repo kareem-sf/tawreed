@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { fakeService, project, renderApp, work, type Call } from "../testing";
 
 const recent = () => [{ id: "p1", name: "Al Noor Tower", updated_at: new Date().toISOString(), files: 2 }];
@@ -320,7 +320,19 @@ test("the engineer moves, renames, merges and removes packages directly", async 
 
   const summary = await screen.findByRole("region", { name: "Packages" });
   expect(summary).toHaveTextContent("3 of 3 items placed");
-  await user.click(within(summary).getByRole("button", { name: "View and edit" }));
+
+  // Packages | Files is a tab list: the arrow keys move between the two, and the one shown takes the focus.
+  const packagesTab = screen.getByRole("tab", { name: /Packages/ });
+  expect(packagesTab).toHaveAttribute("aria-selected", "true");
+  packagesTab.focus();
+  await user.keyboard("{ArrowRight}");
+  const filesTab = screen.getByRole("tab", { name: /Files/ });
+  expect(filesTab).toHaveAttribute("aria-selected", "true");
+  expect(filesTab).toHaveFocus();
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", filesTab.id);
+  await user.keyboard("{ArrowLeft}");
+  expect(packagesTab).toHaveFocus();
+  await user.click(within(await screen.findByRole("region", { name: "Packages" })).getByRole("button", { name: "View and edit" }));
 
   await user.click(await screen.findByRole("button", { name: /Concrete works/ }));
   const row = await screen.findByRole("row", { name: /3\.1\.1/ });
@@ -423,8 +435,11 @@ test("a published revision shows what was written, and opens or exports its fold
 
   // Revisions float in a corner: a button with how many there are, opening a panel with each one's files.
   expect(screen.queryByRole("dialog", { name: "Revisions" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "1 revision" }));
+  const opener = screen.getByRole("button", { name: "1 revision" });
+  await user.click(opener);
   const panel = screen.getByRole("dialog", { name: "Revisions" });
+  expect(panel).toHaveFocus(); // the keyboard carries on in the panel
+  expect(opener).toHaveAttribute("aria-controls", panel.id);
   await user.click(within(panel).getByRole("button", { name: "Rev 00" }));
   expect(within(panel).getAllByRole("listitem").slice(1).map((li) => li.textContent)).toEqual([
     "Al Noor Tower - Master - Rev 00.xlsx20 kB",
@@ -432,6 +447,7 @@ test("a published revision shows what was written, and opens or exports its fold
   ]);
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog", { name: "Revisions" })).not.toBeInTheDocument();
+  expect(opener).toHaveFocus(); // and comes back to the button when it closes
   const steps = screen.getByRole("list", { name: "Progress" });
   expect(steps.querySelectorAll("[data-done]")).toHaveLength(5);
 
@@ -444,4 +460,41 @@ test("a published revision shows what was written, and opens or exports its fold
   );
   await user.click(within(done).getByRole("button", { name: "Publish again…" }));
   await waitFor(() => expect(calls.some((c) => c.path === "/projects/p1/publish")).toBe(true));
+});
+
+test("in a narrow window each item is a card, with every field shown", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
+  const item = {
+    id: "i1",
+    ref: 1,
+    code: "3.1.1",
+    description: "Plain concrete grade C15 blinding",
+    unit: "m3",
+    quantity_text: "86",
+    rate_text: "450",
+    amount_text: "38700",
+    comment: "",
+    headings: [],
+    source_id: "s1",
+    file: "Architectural.xlsx",
+    page: 1,
+    provenance: { sheet: "Div.03", row: 9 },
+    origin: "cell",
+    verify: false,
+    package_id: "k1",
+    decided_by: "agent",
+  };
+  const { user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "check", packages }),
+    "GET /projects/p1/items": () => ({ items: [item], total: 1 }),
+  });
+
+  await user.click(within(await screen.findByRole("region", { name: "Packages" })).getByRole("button", { name: "View and edit" }));
+  await user.click(await screen.findByRole("button", { name: /Concrete works/ }));
+  expect(await screen.findByText("Plain concrete grade C15 blinding")).toBeInTheDocument();
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  const card = screen.getByRole("checkbox", { name: "Select 3.1.1" }).closest("li")!;
+  const fields = [...card.querySelectorAll("dt")].map((dt) => `${dt.textContent} ${dt.nextElementSibling?.textContent}`);
+  expect(fields).toEqual(["Unit m3", "Qty 86", "Rate 450", "Amount 38700"]);
+  expect(within(card).getByRole("button", { name: "Architectural.xlsx, Div.03 row 9" })).toBeInTheDocument();
 });
