@@ -12,6 +12,7 @@ import pytest
 from reading import read_all, start, workbook
 
 from tawreed import decisions, ledger, packages, publish
+from tawreed.ledger import Item
 from tawreed.ledger.extract import SheetLayout
 from tawreed.projects import Project
 from tawreed.sources import Source
@@ -284,3 +285,40 @@ def test_package_workbooks_can_leave_rates_out_for_suppliers_to_price(client):
     assert master["01 Concrete works"]["E7"].value == 450  # the master keeps the rates
     assert json.loads((revision / "manifest.json").read_text(encoding="utf-8"))["prices"] is False
     assert client.get(f"/projects/{project_id}/revisions").json()[0]["prices"] is False
+
+
+def test_without_rates_an_item_the_source_leaves_out_of_its_amounts_stays_out(client):
+    project_id = ready(client)
+    with client.app.state.sessions() as session:  # as a BOQ states a rate for supply by others, but no amount
+        blinding = session.query(Item).filter_by(code="3.1.1").one()
+        blinding.amount, blinding.amount_text = None, ""
+        session.commit()
+    work = client.get(f"/projects/{project_id}/work").json()
+    decision = next(d for d in work["decisions"] if d["kind"] == "publish")
+    body = {"approve": True, "prices": False}
+    assert client.post(f"/projects/{project_id}/decisions/{decision['id']}", json=body).status_code == 204
+    revision = folder(client, project_id)
+
+    concrete = openpyxl.load_workbook(revision / "Packages/01 Concrete works - Rev 00.xlsx").active
+    assert [row[3:6] for row in rows(concrete, 7)[:2]] == [[86, None, None], [1240.5, None, "=D8*E8"]]
+    formwork = openpyxl.load_workbook(revision / "Packages/02 Formwork and joints - Rev 00.xlsx").active
+    by_code = {row[0]: row[3:6] for row in rows(formwork, 7) if row[0]}
+    assert by_code["3.1.3"][:2] == [1250, None] and by_code["3.1.3"][2].startswith("=D")  # unpriced: for the supplier
+    assert by_code["3.1.4"] == [None, None, None]  # no quantity to price
+
+
+def test_totals_of_float_noise_are_recorded_to_the_cent(client):
+    project_id = ready(client)
+    with client.app.state.sessions() as session:  # as Excel stores a formula's result
+        raft = session.query(Item).filter_by(code="3.1.2").one()
+        raft.amount = "1426885.1299999999"
+        session.commit()
+    work = client.get(f"/projects/{project_id}/work").json()
+    decision = next(d for d in work["decisions"] if d["kind"] == "publish")
+    assert client.post(f"/projects/{project_id}/decisions/{decision['id']}", json={"approve": True}).status_code == 204
+    revision = folder(client, project_id)
+
+    manifest = json.loads((revision / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["packages"][0]["amount"] == "1465585.13"
+    check = openpyxl.load_workbook(revision / "Coverage check - Rev 00.xlsx")["Summary"]
+    assert check["B4"].value == check["B5"].value == pytest.approx(1465585.13, abs=0)

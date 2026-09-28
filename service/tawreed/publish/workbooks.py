@@ -284,11 +284,18 @@ def _reproduces(item: Item) -> bool:
     return abs(Decimal(item.quantity) * Decimal(item.rate) - Decimal(item.amount)) < Decimal("0.0001")
 
 
+def _for_supplier(item: Item) -> bool:
+    """Whether a package sent without rates gets =Qty*Rate for this item: it has a quantity, and the source doesn't
+    leave its amount out on purpose (a rate with no amount, such as supply by others or an alternative)."""
+    return item.quantity is not None and not (item.rate is not None and item.amount is None)
+
+
 def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool = True) -> tuple[int, str | None]:
     """A package's items under their headings, and the total of their amounts, as simple formulas: an amount is
     =Qty*Rate wherever that gives the source's own amount to the cent (otherwise the source's figure stays), and the
-    total is =SUM(...). Without prices, the rates are left empty for a supplier to fill and every amount is =Qty*Rate.
-    Returns the items written and the cell with the total, if there is one."""
+    total is =SUM(...). Without prices, the rates are left empty for a supplier to fill and every amount is =Qty*Rate,
+    except where the source states a rate but leaves the amount out: that item stays out of the total, as in the
+    source. Returns the items written and the cell with the total, if there is one."""
     labels = book.labels
     columns = ["item", "description", "unit", "quantity", "rate", "amount"] + (["comment"] if book.comments else [])
     columns.append("source")
@@ -326,7 +333,7 @@ def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool =
                 else:
                     cell.number_format = "#,##0.00"  # for the supplier's rate
             elif key == "amount":
-                if (not prices and item.quantity is not None) or (prices and _reproduces(item)):
+                if (not prices and _for_supplier(item)) or (prices and _reproduces(item)):
                     cell.value = f"={quantity}{row}*{rate}{row}"
                     cell.number_format = _number_format(item.amount) if prices and item.amount else "#,##0.00"
                 elif prices:
@@ -437,8 +444,8 @@ def coverage_check(book: Book) -> Workbook:
         (labels["in_use"], coverage.items),
         (labels["placed"], coverage.placed),
         (labels["not_placed"], coverage.unplaced + coverage.waiting),
-        (labels["amounts_files"], in_files),
-        (labels["amounts_packages"], in_packages),
+        (labels["amounts_files"], money(in_files)),
+        (labels["amounts_packages"], money(in_packages)),
         (labels["difference"], "=B4-B5"),
         ("", labels["all_placed"]),
     ]
