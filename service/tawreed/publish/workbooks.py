@@ -187,6 +187,7 @@ class Book:
     decisions: list[Decision] = field(default_factory=list)
     rules: list[Rule] = field(default_factory=list)
     layouts: list[Layout] = field(default_factory=list)
+    prices: bool = True  # whether the package workbooks show rates and amounts; the master always does
 
     @property
     def labels(self) -> dict[str, str]:
@@ -275,8 +276,19 @@ def source_column(book: Book) -> int:
     return 8 if book.comments else 7
 
 
-def write_package(sheet: Worksheet, book: Book, package: Package) -> int:
-    """A package's items under their headings, with the total of their amounts. Returns the items written."""
+def _reproduces(item: Item) -> bool:
+    """Whether Qty × Rate is the item's own amount, so =Qty*Rate can stand in for the figure. Within a hundredth of
+    a cent, which covers Excel's own float products; a source that rounded its amount keeps its figure."""
+    if item.quantity is None or item.rate is None or item.amount is None:
+        return False
+    return abs(Decimal(item.quantity) * Decimal(item.rate) - Decimal(item.amount)) < Decimal("0.0001")
+
+
+def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool = True) -> tuple[int, str | None]:
+    """A package's items under their headings, and the total of their amounts, as simple formulas: an amount is
+    =Qty*Rate wherever that gives the source's own amount to the cent (otherwise the source's figure stays), and the
+    total is =SUM(...). Without prices, the rates are left empty for a supplier to fill and every amount is =Qty*Rate.
+    Returns the items written and the cell with the total, if there is one."""
     labels = book.labels
     columns = ["item", "description", "unit", "quantity", "rate", "amount"] + (["comment"] if book.comments else [])
     columns.append("source")
@@ -289,7 +301,8 @@ def write_package(sheet: Worksheet, book: Book, package: Package) -> int:
     numbers = tuple(columns.index(c) + 1 for c in ("quantity", "rate", "amount"))
     _header(sheet, HEADER_ROW, [labels[c] for c in columns], numbers)
     sheet.freeze_panes = sheet.cell(row=FIRST_ITEM_ROW, column=1)
-    row, under, written, total = FIRST_ITEM_ROW, None, 0, None
+    quantity, rate, amount = (get_column_letter(columns.index(c) + 1) for c in ("quantity", "rate", "amount"))
+    row, under, written, last, priced = FIRST_ITEM_ROW, None, 0, FIRST_ITEM_ROW, False
     for item in book.items.get(package.id, []):
         heading = " › ".join(item.headings)
         if heading and heading != under:
@@ -308,22 +321,36 @@ def write_package(sheet: Worksheet, book: Book, package: Package) -> int:
             if key == "quantity":
                 _value(cell, item.quantity, item.quantity_text)
             elif key == "rate":
-                _value(cell, item.rate, item.rate_text)
+                if prices:
+                    _value(cell, item.rate, item.rate_text)
+                else:
+                    cell.number_format = "#,##0.00"  # for the supplier's rate
             elif key == "amount":
-                _value(cell, item.amount, item.amount_text)
+                if (not prices and item.quantity is not None) or (prices and _reproduces(item)):
+                    cell.value = f"={quantity}{row}*{rate}{row}"
+                    cell.number_format = _number_format(item.amount) if prices and item.amount else "#,##0.00"
+                elif prices:
+                    _value(cell, item.amount, item.amount_text)
+                priced = priced or cell.value is not None
             else:
                 cell.value = values[key]
             cell.alignment = WRAP if key in ("description", "comment", "source") else TOP
-        if item.amount is not None:
-            total = (total or Decimal(0)) + Decimal(item.amount)
+        last = row
         row += 1
         written += 1
-    if total is not None:  # no total for items the source leaves unpriced: 0.00 would read as priced at nothing
-        sheet.cell(row=row + 1, column=2, value=labels["total"]).font = BOLD
-        cell = sheet.cell(row=row + 1, column=columns.index("amount") + 1, value=total)
-        cell.font = BOLD
-        cell.number_format = "#,##0.00"
-    return written
+    if not priced:  # no total for items the source leaves unpriced: 0.00 would read as priced at nothing
+        return written, None
+    sheet.cell(row=row + 1, column=2, value=labels["total"]).font = BOLD
+    total = sheet.cell(row=row + 1, column=columns.index("amount") + 1)
+    total.value = f"=SUM({amount}{FIRST_ITEM_ROW}:{amount}{last})"
+    total.font = BOLD
+    total.number_format = "#,##0.00"
+    return written, f"{amount}{row + 1}"
+
+
+def _sheet_ref(name: str) -> str:
+    """A sheet's name as a formula refers to it."""
+    return "'" + name.replace("'", "''") + "'"
 
 
 def master(book: Book) -> Workbook:
@@ -340,14 +367,11 @@ def master(book: Book) -> Workbook:
         (labels["published"], book.published.strftime("%Y-%m-%d %H:%M UTC")),
         (labels["packages"], len(book.packages)),
         (labels["items"], book.coverage.items),
-        *(
-            [(labels["amounts_packages"], sum((c.amount for c in book.coverage.packages), Decimal(0)))]
-            if priced
-            else []
-        ),
+        *([(labels["amounts_packages"], None)] if priced else []),  # =SUM of the package index, below
         ("", labels["all_placed"]),
         (labels["files"], ""),
     ]
+    total_row = 3 + [label for label, _ in rows].index(labels["amounts_packages"]) if priced else 0
     for offset, (label, value) in enumerate(rows, start=3):
         cover.cell(row=offset, column=1, value=label).font = BOLD
         cell = cover.cell(row=offset, column=2, value=value)
@@ -365,16 +389,19 @@ def master(book: Book) -> Workbook:
     _header(index, 1, [labels["package"], "", labels["scope"], labels["items"], labels["amount"], labels["workbook"]])
     counts = {c.package.id: c for c in book.coverage.packages}
     for row, package in enumerate(book.packages, start=2):
-        count = counts[package.id]
+        name = sheet_name(package_title(package))
+        _, total = write_package(workbook.create_sheet(name), book, package)
         index.cell(row=row, column=1, value=code(package))
         index.cell(row=row, column=2, value=package.name)
         index.cell(row=row, column=3, value=package.scope or None).alignment = WRAP
-        index.cell(row=row, column=4, value=count.items)
-        index.cell(row=row, column=5, value=count.amount).number_format = "#,##0.00"
+        index.cell(row=row, column=4, value=counts[package.id].items)
+        if total:  # the package sheet's own total
+            index.cell(row=row, column=5, value=f"={_sheet_ref(name)}!{total}").number_format = "#,##0.00"
         index.cell(row=row, column=6, value=package_file(book, package))
-
-    for package in book.packages:
-        write_package(workbook.create_sheet(sheet_name(package_title(package))), book, package)
+    if priced:
+        amounts = f"=SUM({_sheet_ref(index.title)}!E2:E{len(book.packages) + 1})"
+        cover.cell(row=total_row, column=2, value=amounts).number_format = "#,##0.00"
+    workbook.calculation.fullCalcOnLoad = True
     return workbook
 
 
@@ -388,10 +415,12 @@ def file_name(text: str) -> str:
 
 
 def package_workbook(book: Book, package: Package) -> Workbook:
+    """A package on its own, to send out: with rates and amounts, or without them for suppliers to price."""
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = sheet_name(package_title(package))
-    write_package(sheet, book, package)
+    write_package(sheet, book, package, book.prices)
+    workbook.calculation.fullCalcOnLoad = True
     return workbook
 
 
@@ -410,21 +439,21 @@ def coverage_check(book: Book) -> Workbook:
         (labels["not_placed"], coverage.unplaced + coverage.waiting),
         (labels["amounts_files"], in_files),
         (labels["amounts_packages"], in_packages),
-        (labels["difference"], in_files - in_packages),
+        (labels["difference"], "=B4-B5"),
         ("", labels["all_placed"]),
     ]
     for row, (label, value) in enumerate(rows, start=1):
         summary.cell(row=row, column=1, value=label).font = BOLD
         cell = summary.cell(row=row, column=2, value=value)
-        if isinstance(value, Decimal):
+        if isinstance(value, Decimal) or str(value).startswith("="):
             cell.number_format = "#,##0.00"
     row = len(rows) + 2
     _header(summary, row, [labels["file"], labels["stated"], labels["items_sum"], labels["difference"]], (2, 3, 4))
     for total in coverage.totals:
         row += 1
         summary.cell(row=row, column=1, value=f"{total['file']} › {total['where']}")
-        for column, key in ((2, "stated_sum"), (3, "items_sum"), (4, "difference")):
-            summary.cell(row=row, column=column, value=money(total[key])).number_format = "#,##0.00"
+        for column, value in ((2, money(total["stated_sum"])), (3, money(total["items_sum"])), (4, f"=B{row}-C{row}")):
+            summary.cell(row=row, column=column, value=value).number_format = "#,##0.00"
 
     items = workbook.create_sheet(sheet_name(labels["items"]))
     _prepare(items, book, [12, 60, 9, 13, 16, 8, 34, 40])

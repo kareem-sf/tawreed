@@ -70,7 +70,7 @@ def current(session: Session, project: Project) -> Revision | None:
     return revision if revision and revision.created_at >= project.updated_at else None
 
 
-def gather(session: Session, project: Project, name: str, published: datetime) -> workbooks.Book:
+def gather(session: Session, project: Project, name: str, published: datetime, prices: bool = True) -> workbooks.Book:
     """Everything the revision is written from, read once from the ledger."""
     coverage = packages.coverage(session, project.id, decisions.waiting_items(session, project.id))
     if not coverage.complete or not coverage.packages:
@@ -97,6 +97,7 @@ def gather(session: Session, project: Project, name: str, published: datetime) -
         decisions=decisions.answered(session, project.id),
         rules=packages.rules(session, project.id),
         layouts=list(layouts),
+        prices=prices,
     )
 
 
@@ -107,14 +108,15 @@ def _next_number(session: Session, root: Path, project_id: str) -> int:
     return max([n for n in (recorded, *on_disk) if n is not None], default=-1) + 1
 
 
-def publish(session: Session, home: Path, project: Project) -> Revision:
-    """Write the revision's workbooks, check them, and put the revision in place in one step."""
+def publish(session: Session, home: Path, project: Project, prices: bool = True) -> Revision:
+    """Write the revision's workbooks, check them, and put the revision in place in one step. Without prices, the
+    package workbooks leave the rates empty for suppliers to fill; the master always shows them."""
     root = revisions_folder(home, project.id)
     root.mkdir(parents=True, exist_ok=True)
     number = _next_number(session, root, project.id)
     name = f"Rev {number:02d}"
     published = now()
-    book = gather(session, project, name, published)
+    book = gather(session, project, name, published, prices)
     staging = root / f".staging-{uuid.uuid4().hex}"
     try:
         staging.mkdir()
@@ -133,6 +135,7 @@ def publish(session: Session, home: Path, project: Project) -> Revision:
         manifest = {
             "project": project.name,
             "revision": name,
+            "prices": prices,
             "published": published.isoformat(),
             "items": book.coverage.items,
             "packages": [

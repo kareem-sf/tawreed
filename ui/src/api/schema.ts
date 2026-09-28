@@ -586,6 +586,8 @@ export interface components {
             choice?: string | null;
             /** Note */
             note?: string | null;
+            /** Prices */
+            prices?: boolean | null;
         };
         /** Body_add_sources_projects__project_id__sources_post */
         Body_add_sources_projects__project_id__sources_post: {
@@ -982,6 +984,8 @@ export interface components {
             items: number;
             /** Packages */
             packages: number;
+            /** Prices */
+            prices: boolean;
             /** Files */
             files: components["schemas"]["RevisionFile"][];
         };

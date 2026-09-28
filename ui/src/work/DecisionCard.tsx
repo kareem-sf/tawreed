@@ -284,12 +284,20 @@ function Question({ decision, send, busy }: Props) {
 function Publish({ decision, send, busy }: Props) {
   const { t } = useSettings();
   const [holding, setHolding] = useState(false);
+  const [prices, setPrices] = useState(true);
   return (
     <>
       <Title>{t("publish.title")}</Title>
       {decision.summary && <p className="whitespace-pre-line text-ink-2 [unicode-bidi:plaintext]">{decision.summary}</p>}
+      <label className="flex items-start gap-2">
+        <input type="checkbox" checked={prices} onChange={(e) => setPrices(e.target.checked)} className="mt-1" />
+        <span className="flex flex-col">
+          <span>{t("publish.prices")}</span>
+          <span className="text-sm text-ink-2">{t("publish.pricesNote")}</span>
+        </span>
+      </label>
       <div className="flex gap-2">
-        <button type="button" disabled={busy} onClick={() => send({ approve: true })} className={primary}>
+        <button type="button" disabled={busy} onClick={() => send({ approve: true, prices })} className={primary}>
           {t("publish.approve")}
         </button>
         {!holding && (

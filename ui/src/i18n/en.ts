@@ -104,6 +104,8 @@ export const en = {
   "question.own": "Or answer in your own words",
   "publish.title": "Ready to publish",
   "publish.approve": "Publish",
+  "publish.prices": "Show rates and amounts in the package workbooks",
+  "publish.pricesNote": "Without them, each package leaves the rates empty for a supplier to fill, and its amounts and total work themselves out from those rates. The master workbook always shows them.",
   "publish.notYet": "Not yet",
   "publish.notePlaceholder": "What should change first?",
 
@@ -127,6 +129,7 @@ export const en = {
   "revision.open": "Open folder",
   "revision.export": "Export…",
   "revision.list": "Revisions",
+  "revision.noPrices": "Package workbooks without rates and amounts, for suppliers to price.",
   "packages.title": "Packages",
   "packages.view": "View and edit",
   "packages.back": "Back",
