@@ -299,3 +299,13 @@ machine.
   revision. Its files sit beside Thmanyah Sans in the gitignored `ui/src/fonts/thmanyah/`; About credits both.
 - **Checked:** in the browser, an Arabic heading loads Serif Display Light while the text under it stays in Sans;
   the production build embeds both families.
+
+## 28 September 2026: a shorter project page
+
+- **Request (the engineer):** the project page was long and unstructured, the list of decisions wasn't useful, and
+  revisions belong behind a floating button.
+- **Change:** steps and status, the one card that needs the engineer (or the published revision on one line), then
+  Packages | Files tabs; packages show amounts and a total. The decisions list is gone (the decision log keeps them),
+  and the work API no longer returns it. Revisions open from a round button in the bottom corner (bottom-left in
+  Arabic) into a panel with each revision's files, Open folder and Export; Escape or a click elsewhere closes it.
+- **Checked** in the running app on El Far, English and Arabic; 123 service tests, 44 interface tests.

@@ -90,11 +90,13 @@ Tawreed is a tool, not a workspace. One window with four tabs: **Home**, **Histo
 
 - **Home** starts as a drop zone ("Drop BOQ files here", or Choose files) with the recent projects below it.
   Dropping files starts the work; dropping more files onto a running project adds them to it.
-- While the work runs, Home shows the project name, a five-step line (Read · Plan · Place · Check · Publish), a
-  status line, the one thing waiting for the engineer (a decision card, when there is one) and what they decided so
-  far. Packages and items open from a link when the engineer wants to look or edit; each file shows how each of its
-  pages was read.
-- When a revision is published, Home shows what was written and Open folder / Export to….
+- An open project shows, in this order: its name, a five-step line (Read · Plan · Place · Check · Publish) and a
+  status line; the one thing waiting for the engineer (a decision card), or else the published revision on one line
+  with Open folder, Export to… and Publish again; then two tabs, **Packages** (each package's items and amount, and
+  the total, with View and edit) and **Files** (each file shows how each of its pages was read). What the engineer
+  decided is not listed on the page; it is in each revision's decision log.
+- A round button in the page's bottom corner shows how many revisions there are and opens them: each with its
+  files, Open folder and Export to….
 - **History** lists past projects and their revisions; opening one returns to Home for that project.
 - **Settings**: language, theme, the AI Tawreed works with, connections, and rules that apply to all projects.
 - **About**: version, data folder, logs, updates and licences.
