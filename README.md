@@ -1,7 +1,7 @@
 # Tawreed
 
 Tawreed turns construction bills of quantities into procurement packages. Add the BOQs for a project; the Tawreed
-agent reads them, designs the packages, places every item in exactly one package and publishes a master workbook
+fixed workflow reads them, designs the packages, places every item in exactly one package and publishes a master workbook
 and one workbook per package. You approve at every gate, and nothing in your BOQ is ever changed. See
 [the specification](docs/spec.md) and [architecture](docs/architecture.md).
 

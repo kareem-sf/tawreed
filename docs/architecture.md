@@ -15,10 +15,10 @@ service/   Python 3.12, FastAPI, SQLAlchemy 2 + Alembic (SQLite), Pydantic AI
     ai/          connections and keys, the five API providers, the model check, subscription clients
     projects/    projects and consent records
     sources/     import, hashing, readers (Excel, CSV, ODS, PDF text with positions, page images), overlap
-    ledger/      the immutable item ledger and the extractor that applies an agent-proposed layout
+    ledger/      the immutable item ledger and the extractor that applies a proposed layout
     packages/    package plans, packages, assignments, checked operations, rule memory
-    decisions/   gates: overlap, plan, uncertain assignment, publish, consent, questions to the engineer
-    agent/       the agent runtime, its tools and instructions, the MCP endpoint the Codex client uses
+    decisions/   gates: consent, overlap, plan, uncertain assignment, publish
+    workflow/    the fixed steps: runner, step tools and prompts, the MCP endpoint the Codex client uses
     publish/     workbook builders, coverage and totals checks, atomic revisions with a manifest
     api/         HTTP routes per module
   tests/
@@ -32,7 +32,7 @@ docs/
 - Python has the strongest Excel, PDF and Arabic text tooling.
 - SQLite through SQLAlchemy keeps the data in one local file with real transactions.
 
-Each domain module owns its models, its service functions and the agent tools that call them.
+Each domain module owns its models and its service functions; the workflow's step tools call them.
 
 ## Boundaries
 
@@ -42,36 +42,40 @@ Each domain module owns its models, its service functions and the agent tools th
 - AI connections and keys are in `~/.tawreed/auth.json`, locked to the current user. The service never returns a
   key, and keys are redacted from logs and prompts.
 - `TAWREED_HOME` points the service at another data folder, for tests and scratch runs.
-- Long work runs on background threads from records in the database: files waiting to be read, and the agent's
-  turns, each recorded as it starts and ends. After a restart, a file left half-read is read again and a turn cut
-  short is picked up again. The interface asks for the project's state every second or so while the agent works;
+- Long work runs on background threads from records in the database: files waiting to be read, and the runs of
+  the workflow's steps, each recorded as it starts and ends. After a restart, a file left half-read is read again
+  and the next step follows from the records. The interface asks for the project's state every second or so while a
+  step runs;
   it is a local service, so polling is simpler than a push channel and costs nothing noticeable.
 - Database migrations run with SQLite's foreign keys off (SQLite changes a table by rebuilding it, and dropping
   the old table would otherwise delete every row that refers to it), then the references are checked before the
   migration is kept.
 
-## The agent
+## The workflow
 
-- **One agent per project.** A background worker runs one turn at a time: a tool loop with a step limit. Each
-  turn's context is rebuilt from the project's records, not carried as chat history.
-- **Structure from AI, values from Tawreed.** The agent proposes layouts, plans and assignments. Tawreed extracts
-  values, validates proposals and computes every count and total. The agent never writes an item field or a number.
+- **Fixed steps.** A background worker moves each project through Read (one run per file), Plan and Place, then
+  Tawreed asks to publish. The next step always follows from the project's records (`workflow.runner.next_step`);
+  nothing is carried as chat history.
+- **Scoped runs.** Each run of a step gets a short fixed prompt and only that step's tools (`STEP_TOOLS`): a Read
+  run only its own file. The AI can't write to the engineer, ask questions or publish.
+- **Structure from AI, values from Tawreed.** The AI proposes layouts, plans and assignments. Tawreed extracts
+  values, validates proposals and computes every count and total. The AI never writes an item field or a number.
 - **Gates.** Nothing that changes the project's commitments happens until the engineer answers through the API.
-  Tawreed itself raises consent (before a project's content first goes to a service) and overlap (when a new
-  file repeats an earlier one); the agent's tools raise the plan, uncertain items, questions and publishing.
-- **Real conversation.** The agent talks only through its message and question tools; the conversation shows
-  exactly those records.
+  Tawreed raises consent, overlap and publish; the AI's step tools raise the plan and uncertain items.
+- **The engineer's word.** Their own layouts and placements are final: the AI's tools refuse to change them. A Redo
+  keeps the engineer's note on the project until that step has run; the note reaches the model fenced as their words.
 - **Untrusted documents.** BOQ text is passed to the model as delimited data and is never treated as instructions.
-- **Stop** takes effect between steps. An AI failure pauses the agent with a plain reason.
+- **Stop** ends the running step. An AI failure, a step that gets nowhere twice, or a declined consent pauses the
+  project with a reason, as a code; Continue carries on.
 
 ### Providers
 
 - API keys: Pydantic AI runs the tool loop against the chosen model.
-- ChatGPT subscription: Tawreed runs the official Codex client (`codex exec`) for each turn, in an empty folder with
+- ChatGPT subscription: Tawreed runs the official Codex client (`codex exec`) for each run of a step, in an empty folder with
   a read-only sandbox, without the engineer's Codex settings, rules or MCP servers, and with its own shell, command,
   file, image, sub-agent, app, plugin, browser and web tools off. The service serves the same tool functions over
   MCP at `/mcp`; each run gets a one-time token, passed to Codex in an environment variable, and the endpoint
-  answers nothing else. The endpoint is marked required (Codex waits for it, so its tools are searchable from the
+  answers nothing else and refuses any tool outside the run's step. The endpoint is marked required (Codex waits for it, so its tools are searchable from the
   start) and its tools approved (so they run without a prompt no one would answer). The prompt goes in on
   standard input. A model check runs the same way against `/mcp-check`.
 
@@ -103,7 +107,7 @@ and re-opened, then the folder is renamed into place as `Rev NN` with a manifest
 
 ## Testing
 
-Service tests use pytest; agent behaviour is tested with a scripted model at the provider boundary (Pydantic AI
-`FunctionModel`), so the real runtime, tools, gates and database are exercised. Generated workbooks are re-opened
+Service tests use pytest; the workflow is tested with a scripted model at the provider boundary (Pydantic AI
+`FunctionModel`), so the real runner, step tools, gates and database are exercised. Generated workbooks are re-opened
 and asserted. UI tests use Vitest and Testing Library. CI runs tests, typecheck, Ruff and Clippy on every pull
 request and fails if the API types drift from the service.

@@ -265,3 +265,27 @@ machine.
   price would count. Fixed: such items keep an empty amount. Package amounts in the manifest and the coverage
   check's totals are now recorded to the cent rather than with Excel's float noise.
 - **Checks:** 115 service tests, 42 interface tests, typecheck, Ruff, Clippy.
+
+## 28 September 2026: a fixed workflow instead of a conversation
+
+- **Decision (the engineer):** no talking to an agent. Tawreed is a static workflow: the AI does the reading,
+  planning and placing as fixed steps with no conversation, runs on its own to each gate, and the engineer corrects
+  by editing directly or by running a step again with a note.
+- **Service:** `tawreed/agent/` became `tawreed/workflow/`. `next_step` picks Read (per file), Plan or Place from the
+  records; each run gets only its step's tools (Codex too: a run's token refuses other steps' tools). The chat tools,
+  the agent's questions and `request_publish` are gone: Tawreed raises the publish card itself and shows what the
+  revision holds, computed. New routes: Continue, Redo (read a file or page again, place a package or everything
+  again, with a note), Publish again, and a sheet's columns or a page set aside by the engineer. A plan can be
+  approved as the engineer edited it. Migration 0005 keeps a stopped project stopped and drops the messages and the
+  agent's questions.
+- **Interface:** the conversation and message box are gone. A status line says what runs, with Stop, or why the
+  work paused, with Continue; below the decision card, what the engineer decided so far. The plan card edits the
+  plan; Packages has Place again; a file's preview says how each page was read, with Columns…, Set aside and Read
+  again….
+- **Checked on the El Far BOQ, through Codex:** Place again on one package with a note (the run used only
+  `list_items` and `place_items`); the Columns editor on the Facade sheet; Rev 03 and Rev 04 published without rates.
+  This found and fixed: a publish card left up after the work changed; a page read again losing its placements
+  (three Facade items came back in another package, since put back); items read again moving out of file order in
+  the workbooks; and a file preview showing two sheets' controls at once. Rev 04 priced in Excel with the source's
+  rates matches every package to the cent, apart from the source's own rounding in eight amounts (0.30 in all).
+- **Checks:** 123 service tests, 44 interface tests, typecheck, Ruff, Clippy.
