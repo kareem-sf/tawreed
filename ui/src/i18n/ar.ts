@@ -204,7 +204,8 @@ export const ar: Record<Key, Entry> = {
   "answered.uncertain.item": "وضعت {code} في {package}.",
   "answered.uncertain.project": "وضعت {code} في {package} قاعدةً لهذا المشروع.",
   "answered.uncertain.all": "وضعت {code} في {package} قاعدةً لكل المشاريع.",
-  "answered.publish": "وافقت على الإصدار.",
+  "answered.publish": "أصدرت {name}.",
+  "answered.publishNoPrices": "أصدرت {name}، ومصنفات الحزم فيه ليسعّرها الموردون.",
   "answered.publishNo": "أجّلت الإصدار",
 
   "revision.label": "الإصدار المنشور",

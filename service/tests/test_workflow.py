@@ -15,7 +15,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolRetu
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from reading import read_all, start, workbook
 
-from tawreed import settings
+from tawreed import decisions, settings
 from tawreed.ai import connections
 from tawreed.ledger.extract import SheetLayout
 from tawreed.projects import Project
@@ -422,3 +422,17 @@ def test_the_migration_ends_the_conversation(tmp_path):
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert "messages" not in tables
         assert "step" in {r[1] for r in db.execute("PRAGMA table_info(turns)")}
+
+
+def test_a_publish_card_goes_when_the_work_is_no_longer_complete(client, ai):
+    project_id = allowed(client)
+    answer(client, project_id, settle(client, project_id, waiting("plan")), "plan", approve=True)
+    work = settle(client, project_id, waiting("uncertain"))
+    answer(client, project_id, work, "uncertain", package_id=work["decisions"][0]["recommended"], scope="item")
+    card = settle(client, project_id, waiting("publish"))["decisions"][0]
+
+    assert client.post(f"/projects/{project_id}/redo", json={"step": "place"}).status_code == 204
+    work = settle(client, project_id, lambda w: waiting("publish")(w) and w["decisions"][0]["id"] != card["id"])
+    with client.app.state.sessions() as session:  # the card left up while items waited to be placed again
+        assert session.get(decisions.Decision, card["id"]).status == "withdrawn"
+    assert placed(client, project_id)["3.1.4"][1] == "engineer"  # the engineer's own placement stayed

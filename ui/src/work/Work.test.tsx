@@ -374,7 +374,12 @@ test("a published revision shows what was written, and opens or exports its fold
   const { calls, user } = await openProject({
     "GET /projects/p1/work": () =>
       published
-        ? work({ stage: "published", published: revision, packages })
+        ? work({
+            stage: "published",
+            published: revision,
+            packages,
+            answered: [{ ...publishAsked, answer: { approve: true, revision: "Rev 00", prices: false }, answered_at: revision.created_at }],
+          })
         : work({ stage: "publish", decisions: [publishAsked], packages, coverage }),
     "POST /projects/p1/decisions/d-publish": () => {
       published = true;
@@ -406,6 +411,9 @@ test("a published revision shows what was written, and opens or exports its fold
     "Al Noor Tower - Master - Rev 00.xlsx20 kB",
     "01 Concrete works - Rev 00.xlsx9 kB",
   ]);
+  expect(screen.getByRole("region", { name: "Done so far" })).toHaveTextContent(
+    "You published Rev 00, with the package workbooks for suppliers to price.",
+  );
   const steps = screen.getByRole("list", { name: "Progress" });
   expect(steps.querySelectorAll("[data-done]")).toHaveLength(5);
 
