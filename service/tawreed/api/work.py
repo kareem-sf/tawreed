@@ -295,7 +295,7 @@ def get_work(project_id: str, request: Request, session: DB, home: Home) -> Work
                 scope=c.package.scope,
                 reason=c.package.reason,
                 items=c.items,
-                amount=str(c.amount),
+                amount=str(packages.money(c.amount)),
                 without_amount=c.without_amount,
             )
             for c in coverage.packages

@@ -18,7 +18,6 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from tawreed.decisions import Decision
 from tawreed.ledger import Item, Layout
-from tawreed.ledger.numbers import parse_number
 from tawreed.packages import Assignment, Coverage, Package, Rule, code
 from tawreed.projects import Project
 from tawreed.sources import Source
@@ -64,8 +63,7 @@ LABELS: dict[str, dict[str, str]] = {
         "amounts_files": "Amounts of all items, as the files state them",
         "amounts_packages": "Amounts of all packages",
         "difference": "Difference",
-        "stated": "Total the file states",
-        "stated_text": "As written",
+        "stated": "Totals the sheet or pages state, added up",
         "items_sum": "Its items' amounts add up to",
         "row": "row",
         "page": "page",
@@ -133,8 +131,7 @@ LABELS: dict[str, dict[str, str]] = {
         "amounts_files": "مبالغ كل البنود كما في الملفات",
         "amounts_packages": "مبالغ كل الحزم",
         "difference": "الفرق",
-        "stated": "المجموع المذكور في الملف",
-        "stated_text": "كما كُتب",
+        "stated": "مجاميع الورقة أو الصفحات مجتمعة",
         "items_sum": "مجموع مبالغ بنوده",
         "row": "الصف",
         "page": "الصفحة",
@@ -219,6 +216,8 @@ def _number_format(parsed: str) -> str:
     gave, so the display never rounds and a column reads the same way whatever file its items came from."""
     exponent = Decimal(parsed).as_tuple().exponent
     decimals = -exponent if isinstance(exponent, int) and exponent < 0 else 0
+    if decimals > 6:  # Excel's float noise from a formula (261016.92999999993): shown to the cent, value unchanged
+        decimals = 2
     return "#,##0" + ("." + "0" * decimals if decimals else "")
 
 
@@ -420,15 +419,12 @@ def coverage_check(book: Book) -> Workbook:
         if isinstance(value, Decimal):
             cell.number_format = "#,##0.00"
     row = len(rows) + 2
-    _header(summary, row, [labels["file"], labels["stated"], labels["stated_text"], labels["items_sum"]])
+    _header(summary, row, [labels["file"], labels["stated"], labels["items_sum"], labels["difference"]], (2, 3, 4))
     for total in coverage.totals:
         row += 1
-        summary.cell(row=row, column=1, value=total["file"])
-        stated = parse_number(total.get("amount"))
-        summary.cell(row=row, column=2, value=stated).number_format = "#,##0.00"
-        summary.cell(row=row, column=3, value=total["text"])
-        items_sum = Decimal(total["items_sum"]) if total["items_sum"] else None
-        summary.cell(row=row, column=4, value=items_sum).number_format = "#,##0.00"
+        summary.cell(row=row, column=1, value=f"{total['file']} › {total['where']}")
+        for column, key in ((2, "stated_sum"), (3, "items_sum"), (4, "difference")):
+            summary.cell(row=row, column=column, value=total[key]).number_format = "#,##0.00"
 
     items = workbook.create_sheet(sheet_name(labels["items"]))
     _prepare(items, book, [12, 60, 9, 13, 16, 8, 34, 40])
