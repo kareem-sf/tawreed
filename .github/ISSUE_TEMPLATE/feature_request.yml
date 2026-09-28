@@ -1,0 +1,48 @@
+name: Feature request
+description: Suggest a change to how Tawreed works.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tawreed deliberately stays small: it turns bills of quantities into procurement packages and little else.
+        The most useful requests describe the procurement problem you are stuck on, not a specific screen change.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task, and where Tawreed gets in the way today.
+      placeholder: When a BOQ is split across several sheets, I have to…
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What would a good outcome look like?
+      description: The result you want, not how to build it.
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How do you handle it now?
+      description: Your current workaround, inside or outside Tawreed.
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does this come up?
+      options:
+        - On most projects
+        - On some projects
+        - Rarely, but it costs a lot of time when it does
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and discussions.
+          required: true
+        - label: I have not included a real BOQ, client data or an API key.
+          required: true

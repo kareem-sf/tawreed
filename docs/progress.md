@@ -331,3 +331,22 @@ machine.
   120-character package name is enough): revision files are now written and exported through extended paths. An
   unknown service failure read "({status})"; it now gives the status.
 - **Checks:** 124 service tests, 49 interface tests, typecheck, Ruff, Clippy.
+
+## 28 September 2026: open source on GitHub
+
+- **Request (the engineer):** configure the GitHub repository as a senior developer would, and open-source it.
+- **Merged:** the rebuild reached `main` on GitHub (rebase, history kept). CI had caught two tests that only held on
+  Windows: the extended-path helper now asks `sys.platform`, and the long-path test pads its data folder to a fixed
+  depth.
+- **Community files:** CONTRIBUTING, SECURITY (private vulnerability reporting, now on, and how Tawreed protects a
+  project), a code of conduct, bug and feature forms that ask for no customer data, a pull request template and
+  CODEOWNERS. The README says what Tawreed does, where the data lives and when it leaves the computer.
+- **CI and security:** CodeQL runs through GitHub's default setup; superseded pull request runs are cancelled, jobs
+  have timeouts, checkouts keep no credentials, and the only third-party action is gone. Workflows can no longer
+  approve pull requests. The old app's 21 leftover workflows are disabled. Dependabot uses conventional prefixes.
+- **Settings:** a new description and topics; Projects off; "update branch" offered on pull requests. Secret
+  scanning's extra patterns and validity checks need GitHub's paid Secret Protection, so they stay off.
+- **A fresh start for releases (the engineer's call):** the old app's twelve releases and thirteen `v*` tags were
+  deleted (the tag ruleset was lifted for that and is back on), and the rebuild is version 0.0.1. A Dependabot alert
+  for `glib` was dismissed as a tolerable risk: it comes only with Tauri's Linux GTK stack, which the Windows build
+  does not include.

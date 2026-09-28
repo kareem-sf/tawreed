@@ -1,16 +1,32 @@
 # Tawreed
 
-Tawreed turns construction bills of quantities into procurement packages. Add the BOQs for a project; the Tawreed
-fixed workflow reads them, designs the packages, places every item in exactly one package and publishes a master workbook
-and one workbook per package. You approve at every gate, and nothing in your BOQ is ever changed. See
+[![CI](https://github.com/kareem-sf/tawreed/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kareem-sf/tawreed/actions/workflows/ci.yml)
+[![MIT licence](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+
+Tawreed turns construction bills of quantities into procurement packages. Add the BOQs for a project; Tawreed's
+fixed workflow reads them, designs the packages, places every item in exactly one package and publishes a master
+workbook and one workbook per package. You approve at every gate, and nothing in your BOQ is ever changed. See
 [the specification](docs/spec.md) and [architecture](docs/architecture.md).
 
-Tawreed keeps its data in `~/.tawreed`.
+- **The AI proposes, Tawreed computes.** An AI model reads the sheets, suggests the packages and places the items;
+  Tawreed checks every proposal and computes every count and total itself.
+- **Four gates.** Overlapping files, the package plan, items the AI is unsure of, and publishing all wait for you.
+- **Every number traces back** to the cell or page it came from, one click away.
+- **English and Arabic**, with full right-to-left layout.
+
+## Your data
+
+Tawreed runs on your computer and keeps everything in `~/.tawreed` (set `TAWREED_HOME` to use another folder):
+projects in a local database, settings in `settings.json`, and AI keys in `auth.json`, which only your user account
+can read. A project's content goes to an AI service only after you approve the consent card that names the service.
+Tawreed works with an API key for Anthropic, OpenAI, Google, xAI or an OpenAI-compatible endpoint, or with a ChatGPT
+subscription through the official Codex client.
 
 ## Status
 
-Tawreed is being rebuilt from scratch. Progress is recorded in [docs/progress.md](docs/progress.md). The previous
-version is in git history at tag `legacy-final`.
+Tawreed has been rebuilt from scratch and has not been released yet; its first release will be v0.0.1. Until then,
+run it from source as described below. Progress is recorded in [docs/progress.md](docs/progress.md); the previous
+Tawreed remains in the history before the rebuild.
 
 ## Open Tawreed
 
@@ -60,6 +76,11 @@ is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.tawreed.desktop\lo
 `npm run release` then writes `SHA256SUMS.txt` beside the installer and prints the `gh release create` command for
 a draft release. Make release builds on a machine with the Thmanyah files in place, so the installer carries them;
 the script says whether it does.
+
+## Contributing
+
+Contributions are welcome: please read [CONTRIBUTING.md](CONTRIBUTING.md) first. Report security problems privately,
+as [SECURITY.md](SECURITY.md) describes. Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
