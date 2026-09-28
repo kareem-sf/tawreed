@@ -255,4 +255,7 @@ machine.
 - **Packages for pricing:** at publishing the engineer chooses whether package workbooks show rates and amounts.
   Without them the rates are empty and every amount is `=Qty*Rate`, so a supplier's rates price the package; the
   master always shows them. The revision records the choice.
+- **Publishing again:** the agent still won't ask to publish what the latest revision already holds, unless the
+  engineer has written since, so the same work can go out once with rates and once for pricing. Seen in the
+  app: asked in the El Far project, the agent (through Codex) raised the publish card with the rates choice.
 - **Checks:** 115 service tests, 42 interface tests, typecheck, Ruff, Clippy.
