@@ -498,3 +498,16 @@ test("in a narrow window each item is a card, with every field shown", async () 
   expect(fields).toEqual(["Unit m3", "Qty 86", "Rate 450", "Amount 38700"]);
   expect(within(card).getByRole("button", { name: "Architectural.xlsx, Div.03 row 9" })).toBeInTheDocument();
 });
+
+test("a package on the project page opens straight to its items", async () => {
+  const { user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "check", packages }),
+    "GET /projects/p1/items": () => ({ items: [], total: 0 }),
+  });
+
+  await user.click(await screen.findByRole("button", { name: /Formwork and joints/ }));
+  const group = await screen.findByRole("button", { name: /Formwork and joints/, expanded: true });
+  expect(group).toHaveFocus();
+  expect(screen.getByRole("button", { name: /Concrete works/, expanded: false })).toBeInTheDocument();
+  expect(await screen.findByText("No items in this package.")).toBeInTheDocument();
+});
