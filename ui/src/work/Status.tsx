@@ -98,6 +98,7 @@ export function decided(decision: Decision, t: Translate): string {
         package: String(a.package ?? ""),
       });
     default:
-      return a.approve ? t("answered.publish") : t("answered.publishNo") + ".";
+      if (!a.approve) return t("answered.publishNo") + ".";
+      return t(a.prices === false ? "answered.publishNoPrices" : "answered.publish", { name: String(a.revision ?? "") });
   }
 }

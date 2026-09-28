@@ -155,7 +155,8 @@ export const en = {
   "answered.uncertain.item": "You placed {code} in {package}.",
   "answered.uncertain.project": "You placed {code} in {package}, as a rule for this project.",
   "answered.uncertain.all": "You placed {code} in {package}, as a rule for all projects.",
-  "answered.publish": "You approved publishing.",
+  "answered.publish": "You published {name}.",
+  "answered.publishNoPrices": "You published {name}, with the package workbooks for suppliers to price.",
   "answered.publishNo": "You held publishing back",
 
   "revision.label": "Published revision",

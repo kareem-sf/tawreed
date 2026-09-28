@@ -104,6 +104,16 @@ def ask_to_publish(session: Session, project: Project) -> decisions.Decision:
     return decisions.raise_decision(session, project.id, "publish", {}, "tawreed")
 
 
+def withdraw_stale_publish(session: Session, project: Project) -> bool:
+    """A publish card left up while the work changed so that it can't be published (an item to place again): it
+    is withdrawn, and Tawreed asks again once the work is complete."""
+    coverage = packages.coverage(session, project.id, decisions.waiting_items(session, project.id))
+    stale = [] if coverage.complete and coverage.packages else decisions.waiting(session, project.id, "publish")
+    for decision in stale:
+        decisions.withdraw(decision)
+    return bool(stale)
+
+
 def remaining(session: Session, project: Project, step: Next) -> int:
     """What is left of a step's job, to tell whether a run got anywhere."""
     if step.name == "read":
@@ -216,6 +226,8 @@ class Worker:
         found = chosen(self.home)
         with self.sessions() as session:
             project = session.get(Project, project_id)
+            if project and withdraw_stale_publish(session, project):
+                session.commit()
             step = project and next_step(session, project)
             if step is None:
                 return False
