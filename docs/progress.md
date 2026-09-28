@@ -258,4 +258,10 @@ machine.
 - **Publishing again:** the agent still won't ask to publish what the latest revision already holds, unless the
   engineer has written since, so the same work can go out once with rates and once for pricing. Seen in the
   app: asked in the El Far project, the agent (through Codex) raised the publish card with the rates choice.
+- **Both ways on El Far, checked in Excel:** Rev 01 with rates (every one of the 311 amounts equals Rev 00's source
+  figure, the cover computes 56,566,112.47, no errors); Rev 02 without rates, then priced as a supplier would with
+  the source's rates. That found two items the BOQ prices but leaves out of its amounts (supply-only panels, an
+  additional cable), which the without-rates workbooks had turned into =Qty*Rate, adding 7.8 million a supplier's
+  price would count. Fixed: such items keep an empty amount. Package amounts in the manifest and the coverage
+  check's totals are now recorded to the cent rather than with Excel's float noise.
 - **Checks:** 115 service tests, 42 interface tests, typecheck, Ruff, Clippy.

@@ -139,7 +139,12 @@ def publish(session: Session, home: Path, project: Project, prices: bool = True)
             "published": published.isoformat(),
             "items": book.coverage.items,
             "packages": [
-                {"code": packages.code(c.package), "name": c.package.name, "items": c.items, "amount": str(c.amount)}
+                {
+                    "code": packages.code(c.package),
+                    "name": c.package.name,
+                    "items": c.items,
+                    "amount": str(packages.money(c.amount)),
+                }
                 for c in book.coverage.packages
             ],
             "files": [_entry(staging, relative) for relative in written],

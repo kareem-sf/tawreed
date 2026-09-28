@@ -49,7 +49,8 @@ images. Any layout: there is no required template.
 
 - **Master workbook:** cover, package index with item counts and totals, one sheet per package.
 - **Package workbooks:** one standalone workbook per package, ready to send. At publishing the engineer chooses
-  whether they show rates and amounts; without them the rates are left for suppliers to fill.
+  whether they show rates and amounts; without them the rates are left for suppliers to fill, and an item the source
+  prices but leaves out of its amounts (a rate with no amount) stays out of the package total.
 - **Simple formulas:** an amount is `=Qty*Rate` wherever that gives the source's own amount (otherwise the source's
   figure stays), package totals are `=SUM(...)`, the package index refers to each package's total and the cover adds
   them up.
