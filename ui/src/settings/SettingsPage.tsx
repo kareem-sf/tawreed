@@ -301,7 +301,7 @@ function AddConnection() {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3 rounded-xl border border-dashed border-line-strong p-4">
-      <h3 className="font-semibold">{t("add.title")}</h3>
+      <h3 className="font-heading font-semibold">{t("add.title")}</h3>
       <fieldset className="flex flex-wrap gap-1.5">
         <legend className="sr-only">{t("add.service")}</legend>
         {PROVIDERS.map((id) => (

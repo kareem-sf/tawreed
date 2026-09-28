@@ -142,10 +142,10 @@ export function RevisionsButton({ projectId, projectName, latest }: { projectId:
           role="dialog"
           aria-label={t("revision.list")}
           tabIndex={-1}
-          className="flex max-h-[min(70vh,560px)] w-[min(460px,calc(100vw-2rem))] origin-bottom-right flex-col overflow-hidden rounded-xl border border-line bg-page shadow-panel animate-rise focus:outline-none rtl:origin-bottom-left"
+          className="flex max-h-[min(70vh,560px)] w-[min(460px,calc(100vw-2rem))] origin-bottom-right flex-col overflow-hidden rounded-xl border border-line bg-page shadow-panel animate-rise focus:outline-hidden rtl:origin-bottom-left"
         >
           <div className="flex items-center gap-3 border-b border-line px-4 py-2">
-            <h2 className="flex-1 font-semibold">{t("revision.list")}</h2>
+            <h2 className="flex-1 font-heading font-semibold">{t("revision.list")}</h2>
             <button type="button" aria-label={t("revision.close")} onClick={() => close(true)} className={iconButton("sm")}>
               <Icon name="close" />
             </button>

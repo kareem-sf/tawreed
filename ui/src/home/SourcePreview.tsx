@@ -369,7 +369,7 @@ function SheetGrid({
           </thead>
           <tbody>
             {rows.map((row, r) => (
-              <tr key={first + r} aria-current={first + r === mark ? "true" : undefined} className="aria-[current]:bg-amber-soft">
+              <tr key={first + r} aria-current={first + r === mark ? "true" : undefined} className="aria-[current]:bg-subtle aria-[current]:shadow-[inset_3px_0_0_var(--ink)]">
                 <th scope="row" className="sticky left-0 z-10 border-e border-t border-line bg-subtle px-2 py-0.5 text-end font-normal text-ink-2 tabular-nums">
                   {first + r}
                 </th>
@@ -443,7 +443,7 @@ function PageImage({
             <div
               data-testid="item-box"
               aria-hidden="true"
-              className="absolute rounded-sm outline-2 outline-offset-2 outline-amber"
+              className="absolute rounded-sm outline-2 outline-offset-2 outline-ink"
               style={{
                 left: `${(box[0]! / page.width) * 100}%`,
                 top: `${(box[1]! / page.height) * 100}%`,

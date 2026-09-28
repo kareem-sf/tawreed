@@ -51,3 +51,20 @@ test("the saved language is used from the start", async () => {
   expect(document.documentElement).toHaveAttribute("dir", "rtl");
   expect(document.documentElement.dataset.theme).toBe("dark");
 });
+
+test("the language and theme from last time are there from the first paint, before the service answers", async () => {
+  localStorage.setItem("tawreed.look", JSON.stringify({ language: "ar", theme: "dark" }));
+  let answer: ((value: unknown) => void) | undefined;
+  fakeService({ "GET /settings": () => new Promise((resolve) => (answer = resolve)) });
+  renderApp();
+
+  // Still waiting for the service, and already in Arabic, right to left and dark.
+  expect(screen.getByRole("button", { name: "English" })).toBeInTheDocument();
+  expect(document.documentElement).toHaveAttribute("dir", "rtl");
+  expect(document.documentElement.dataset.theme).toBe("dark");
+
+  await waitFor(() => expect(answer).toBeDefined());
+  answer!({ language: "en", theme: "light", ai: null }); // the service's record wins, and is remembered
+  expect(await screen.findByRole("button", { name: "العربية" })).toBeInTheDocument();
+  expect(JSON.parse(localStorage.getItem("tawreed.look")!)).toEqual({ language: "en", theme: "light" });
+});

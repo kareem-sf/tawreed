@@ -323,3 +323,34 @@ def test_totals_of_float_noise_are_recorded_to_the_cent(client):
     assert manifest["packages"][0]["amount"] == "1465585.13"
     check = openpyxl.load_workbook(revision / "Coverage check - Rev 00.xlsx")["Summary"]
     assert check["B4"].value == check["B5"].value == pytest.approx(1465585.13, abs=0)
+
+
+def test_a_revision_with_long_package_names_is_written_past_the_windows_path_limit(tmp_path):
+    """Windows limits an ordinary path to 260 characters; a package name alone may be 120."""
+    from conftest import TOKEN
+    from fastapi.testclient import TestClient
+
+    from tawreed.api.app import create_app
+
+    home = tmp_path / ".tawreed"  # an ordinary data folder: the project and revision folders make the rest
+    with TestClient(create_app(home, TOKEN), headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        project_id = ready(client)
+        concrete = client.get(f"/projects/{project_id}/work").json()["packages"][0]["id"]
+        words = "Reinforced concrete works to foundations, columns, beams, slabs and stairs, with formwork "
+        long_name = (words * 2)[:120].strip()
+        response = client.patch(f"/projects/{project_id}/packages/{concrete}", json={"name": long_name})
+        assert response.status_code == 200, response.text
+        with client.app.state.sessions() as session:  # renaming changed the work, so the publish card is asked again
+            decisions.raise_decision(session, project_id, "publish", {}, "tawreed")
+            session.commit()
+        work = client.get(f"/projects/{project_id}/work").json()
+        card = next(d for d in work["decisions"] if d["kind"] == "publish")
+        answered = client.post(f"/projects/{project_id}/decisions/{card['id']}", json={"approve": True})
+        assert answered.status_code == 204, answered.text
+
+        manifest = json.loads(client.get(f"/projects/{project_id}/revisions").text)[0]
+        package = next(f["path"] for f in manifest["files"] if f["path"].startswith("Packages/01 Reinforced"))
+        written = publish.revisions_folder(home, project_id) / "Rev 00" / package
+        assert len(str(written)) > 260  # past the limit, and written all the same
+        archive = zipfile.ZipFile(io.BytesIO(client.get(f"/projects/{project_id}/revisions/0/export").content))
+        assert f"Rev 00/{package}" in archive.namelist()

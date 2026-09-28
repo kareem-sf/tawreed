@@ -74,7 +74,7 @@ const TitleContext = createContext<RefObject<HTMLHeadingElement | null> | null>(
 function Title({ children }: { children: ReactNode }) {
   const ref = useContext(TitleContext);
   return (
-    <h2 ref={ref} tabIndex={-1} className="font-heading text-xl leading-7 font-light [unicode-bidi:plaintext] focus:outline-none focus-visible:outline-2">
+    <h2 ref={ref} tabIndex={-1} className="font-heading text-xl leading-7 font-light [unicode-bidi:plaintext] focus:outline-hidden focus-visible:outline-2">
       {children}
     </h2>
   );
@@ -213,7 +213,7 @@ function Plan({ decision, send, busy }: Props) {
                       aria-label={t("plan.mergeInto", { number: index + 1 })}
                       value=""
                       onChange={(event) => event.target.value && merge(entry, Number(event.target.value))}
-                      className={fieldSmall}
+                      className={`${fieldSmall} w-40 max-w-full`}
                     >
                       <option value="">{t("packages.mergeInto")}</option>
                       {entries

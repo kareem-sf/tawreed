@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, must, type Settings } from "../api/client";
 import { direction, locale, translator, type Language, type Translate } from "../i18n";
 
@@ -15,11 +15,27 @@ type Context = {
 
 const SettingsContext = createContext<Context | null>(null);
 const DEFAULTS: Settings = { language: "en", theme: "system", ai: null };
+const REMEMBERED = "tawreed.look"; // read by public/look.js before the first paint
+
+/** The language and theme from last time, so the first paint is already in them. The service stays the record. */
+function remembered(): Settings {
+  try {
+    const look = JSON.parse(localStorage.getItem(REMEMBERED) ?? "{}") as Partial<Settings>;
+    return {
+      ...DEFAULTS,
+      language: look.language === "ar" ? "ar" : "en",
+      theme: look.theme === "light" || look.theme === "dark" ? look.theme : "system",
+    };
+  } catch {
+    return DEFAULTS;
+  }
+}
 
 /** Language, theme and AI choice, kept by the service so they survive a restart, applied to the whole page. */
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
-  const { data = DEFAULTS } = useQuery({ queryKey: ["settings"], queryFn: () => must(api.GET("/settings")) });
+  const [first] = useState(remembered);
+  const { data = first } = useQuery({ queryKey: ["settings"], queryFn: () => must(api.GET("/settings")) });
   const { mutateAsync } = useMutation({
     mutationFn: (values: Partial<Settings>) => must(api.PATCH("/settings", { body: values })),
     onMutate: (values) => {
@@ -36,6 +52,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     root.lang = data.language;
     root.dir = direction(data.language);
     root.dataset.theme = data.theme;
+    try {
+      localStorage.setItem(REMEMBERED, JSON.stringify({ language: data.language, theme: data.theme }));
+    } catch {
+      // storage blocked: the next launch just starts from the defaults
+    }
   }, [data.language, data.theme]);
 
   const value = useMemo<Context>(
