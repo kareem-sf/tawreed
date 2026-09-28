@@ -309,3 +309,25 @@ machine.
   and the work API no longer returns it. Revisions open from a round button in the bottom corner (bottom-left in
   Arabic) into a panel with each revision's files, Open folder and Export; Escape or a click elsewhere closes it.
 - **Checked** in the running app on El Far, English and Arabic; 123 service tests, 44 interface tests.
+
+## 28 September 2026: UI/UX polish (branch `ui-polish`)
+
+- **Request (the engineer):** run the ui-ux-polish skill: Stripe-level craft, desktop and narrow windows considered
+  separately, passes until nothing big is left; later, "no truncation: fully responsive". Kept to the approved
+  minimal look and the rules. On a branch, merged only if the engineer likes it.
+- **Foundations:** one set of building blocks (`ui/src/app/ui.tsx`): buttons with hover, pressed, disabled and
+  pending states, fields with a visible 3:1 edge and one focus ring, cards, pills, the page frame, alerts with Try
+  again, skeletons, empty states, icons, amounts. One type scale, shadows that read in dark mode, short enter
+  motion, reduced motion respected.
+- **Responsive, nothing cut:** no text ends in "…" and no row scrolls sideways at any width down to 380px (the
+  desktop window's new minimum). Names wrap; rows put details on a second line; the app tabs take their own row;
+  items are a table where it fits and cards where it doesn't (measured); Excel's float noise shows to the cent with
+  the exact value on hover. Checked at 375/380/480/640/1024/1280px in English and Arabic, light and dark.
+- **Behaviour:** the language and theme apply before the first paint; buttons stay pending until the new state
+  arrives; Packages | Files is a real tab list; the revisions panel takes and returns focus; focus moves to the next
+  decision card; a package on the project page opens straight to its items; a confirm before a connection's key is
+  deleted; amber only for "needs you".
+- **Found and fixed on the way:** publishing failed when a revision's path passed Windows' 260 characters (a
+  120-character package name is enough): revision files are now written and exported through extended paths. An
+  unknown service failure read "({status})"; it now gives the status.
+- **Checks:** 124 service tests, 49 interface tests, typecheck, Ruff, Clippy.
