@@ -48,3 +48,15 @@ jobs:
         with:
           components: clippy
       - run: cargo clippy --manifest-path desktop/Cargo.toml -- -D warnings
+
+  # The check main's branch protection requires. It runs whatever happened above and passes only when every job
+  # passed: a failed, cancelled or skipped job fails it (a skipped required check would otherwise count as passing).
+  release-gate:
+    name: Release gate
+    if: always()
+    needs: [service, interface, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
+      - run: echo "Every check passed."
