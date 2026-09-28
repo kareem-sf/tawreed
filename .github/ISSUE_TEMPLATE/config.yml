@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/kareem-sf/tawreed/security/advisories/new
+    about: Report it privately, never in a public issue.
+  - name: Ask a question
+    url: https://github.com/kareem-sf/tawreed/discussions/categories/q-a
+    about: Questions about how Tawreed works.
