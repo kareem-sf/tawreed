@@ -47,7 +47,7 @@ export function SourcePreview({
       ) : (
         <Pager count={pages.length} current={page.number} onChoose={setNumber} />
       )}
-      {editable && <PageControls key={page.number} projectId={projectId} sourceId={sourceId} page={page} />}
+      {editable && <PageControls key={`controls-${page.number}`} projectId={projectId} sourceId={sourceId} page={page} />}
       {page.kind === "sheet" ? (
         <SheetGrid key={page.number} projectId={projectId} sourceId={sourceId} page={page} mark={focused?.row} />
       ) : (

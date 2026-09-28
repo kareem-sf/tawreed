@@ -222,8 +222,21 @@ test("a file's page says how it was read, and the engineer sets its columns or h
             sheet: { first_row: 4, last_row: null, code: "A", description: ["B"], unit: "C", quantity: "D", rate: "E", amount: "F", comment: null },
           },
         },
+        {
+          number: 2,
+          kind: "sheet",
+          name: "Rates",
+          has_text: true,
+          hidden: false,
+          rows: 5,
+          cols: 2,
+          width: null,
+          height: null,
+          handled: { by: "agent", set_aside: "Internal rates", items: 0, sheet: null },
+        },
       ],
     }),
+    "GET /projects/p1/sources/s1/pages/2": () => ({ kind: "sheet", name: "Rates", first_row: 1, rows: [["y"]], total_rows: 1, merged: [] }),
     "GET /projects/p1/sources/s1/pages/1": () => ({ kind: "sheet", name: "Div.03", first_row: 1, rows: [["x"]], total_rows: 1, merged: [] }),
     "PUT /projects/p1/sources/s1/pages/1/layout": ok,
     "POST /projects/p1/redo": ok,
@@ -231,7 +244,12 @@ test("a file's page says how it was read, and the engineer sets its columns or h
 
   await user.click(await screen.findByRole("button", { name: "Architectural.xlsx" }));
   expect(await screen.findByText("Read by Tawreed (AI): 5 items")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Columns…" }));
+  await user.click(screen.getByRole("button", { name: "Rates" })); // each sheet says how it was read, and only it
+  expect(await screen.findByText("Set aside: Internal rates")).toBeInTheDocument();
+  expect(screen.queryByText("Read by Tawreed (AI): 5 items")).not.toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Columns…" })).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "Div.03" }));
+  await user.click(await screen.findByRole("button", { name: "Columns…" }));
   await user.clear(screen.getByRole("spinbutton", { name: "First row" }));
   await user.type(screen.getByRole("spinbutton", { name: "First row" }), "6");
   await user.selectOptions(screen.getByRole("combobox", { name: "Rate" }), "");
