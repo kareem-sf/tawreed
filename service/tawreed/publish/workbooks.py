@@ -18,7 +18,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from tawreed.decisions import Decision
 from tawreed.ledger import Item, Layout
-from tawreed.packages import Assignment, Coverage, Package, Rule, code
+from tawreed.packages import Assignment, Coverage, Package, Rule, code, money
 from tawreed.projects import Project
 from tawreed.sources import Source
 
@@ -424,7 +424,7 @@ def coverage_check(book: Book) -> Workbook:
         row += 1
         summary.cell(row=row, column=1, value=f"{total['file']} › {total['where']}")
         for column, key in ((2, "stated_sum"), (3, "items_sum"), (4, "difference")):
-            summary.cell(row=row, column=column, value=total[key]).number_format = "#,##0.00"
+            summary.cell(row=row, column=column, value=money(total[key])).number_format = "#,##0.00"
 
     items = workbook.create_sheet(sheet_name(labels["items"]))
     _prepare(items, book, [12, 60, 9, 13, 16, 8, 34, 40])

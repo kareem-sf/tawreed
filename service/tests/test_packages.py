@@ -319,4 +319,4 @@ def test_a_sheet_with_a_total_per_section_reconciles_when_the_sections_add_up(cl
         session.commit()
         [total] = packages.coverage(session, project["id"], set()).totals
     assert total["count"] == 2 and packages.money(total["stated_sum"]) == Decimal("4261.40")
-    assert packages.money(total["difference"]) == 0  # each section total, added up, equals the items
+    assert str(packages.money(total["difference"])) == "0.00"  # each section total, added up, equals the items
