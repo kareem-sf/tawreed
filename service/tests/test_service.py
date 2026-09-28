@@ -47,7 +47,7 @@ def test_settings_refuse_unknown_values(client, body):
 
 def test_about_names_the_version_and_data_folder(client, tmp_path):
     about = client.get("/about").json()
-    assert about["version"] == "0.1.0"
+    assert about["version"] == "0.0.1"
     assert about["data_folder"] == str(tmp_path)
 
 

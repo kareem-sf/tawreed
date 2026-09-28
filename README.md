@@ -24,9 +24,9 @@ subscription through the official Codex client.
 
 ## Status
 
-The rebuilt Tawreed has not been released yet; run it from source as described below. Progress is recorded in
-[docs/progress.md](docs/progress.md). Releases v0.2.0 to v0.5.6, and v0.0.1, are the previous Tawreed, whose code
-remains in the history before the rebuild.
+Tawreed has been rebuilt from scratch and has not been released yet; its first release will be v0.0.1. Until then,
+run it from source as described below. Progress is recorded in [docs/progress.md](docs/progress.md); the previous
+Tawreed remains in the history before the rebuild.
 
 ## Open Tawreed
 

@@ -2,8 +2,7 @@
 
 ## Supported versions
 
-Security fixes go into the latest release of Tawreed. Releases made before the rebuild (v0.2.0 to v0.5.6, and v0.0.1)
-are no longer maintained.
+Security fixes go into the latest release of Tawreed.
 
 ## Reporting a vulnerability
 

@@ -346,3 +346,7 @@ machine.
   approve pull requests. The old app's 21 leftover workflows are disabled. Dependabot uses conventional prefixes.
 - **Settings:** a new description and topics; Projects off; "update branch" offered on pull requests. Secret
   scanning's extra patterns and validity checks need GitHub's paid Secret Protection, so they stay off.
+- **A fresh start for releases (the engineer's call):** the old app's twelve releases and thirteen `v*` tags were
+  deleted (the tag ruleset was lifted for that and is back on), and the rebuild is version 0.0.1. A Dependabot alert
+  for `glib` was dismissed as a tolerable risk: it comes only with Tauri's Linux GTK stack, which the Windows build
+  does not include.

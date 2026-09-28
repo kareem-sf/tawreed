@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { fakeService, renderApp } from "../testing";
 
 test("four tabs, one page each", async () => {
-  fakeService({ "GET /about": () => ({ version: "0.1.0", data_folder: "C:\\Users\\me\\.tawreed" }) });
+  fakeService({ "GET /about": () => ({ version: "0.0.1", data_folder: "C:\\Users\\me\\.tawreed" }) });
   renderApp();
   const user = userEvent.setup();
 
@@ -25,7 +25,7 @@ test("four tabs, one page each", async () => {
   expect(await screen.findByText("No projects yet. Drop a BOQ on Home to start.")).toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "About" }));
-  expect(await screen.findByText("Version 0.1.0")).toBeInTheDocument();
+  expect(await screen.findByText("Version 0.0.1")).toBeInTheDocument();
   expect(screen.getByText("C:\\Users\\me\\.tawreed")).toBeInTheDocument();
 });
 

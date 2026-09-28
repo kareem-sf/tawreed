@@ -12,7 +12,7 @@ body:
     attributes:
       label: Tawreed version
       description: Shown in About.
-      placeholder: 0.1.0
+      placeholder: 0.0.1
     validations:
       required: true
   - type: input
