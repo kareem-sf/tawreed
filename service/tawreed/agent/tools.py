@@ -574,6 +574,17 @@ def check_work(ctx: RunContext[Turn]) -> str:
     return "\n".join(lines)
 
 
+def _engineer_wrote_since(session: Session, project_id: str, moment) -> bool:
+    """Whether the engineer has written since then: the one reason to publish unchanged work again, for instance
+    once with rates and once without."""
+    query = select(records.Message.id).where(
+        records.Message.project_id == project_id,
+        records.Message.sender == "engineer",
+        records.Message.created_at > moment,
+    )
+    return session.scalars(query.limit(1)).first() is not None
+
+
 def request_publish(ctx: RunContext[Turn], summary: str) -> str:
     """Ask the engineer to publish the revision, once every item is placed. They see the result before they approve.
 
@@ -588,8 +599,11 @@ def request_publish(ctx: RunContext[Turn], summary: str) -> str:
         if decisions.waiting(session, project_id):
             raise ValueError("Something is still waiting for the engineer; ask to publish once it is settled.")
         published = publish.current(session, _project(session, ctx))
-        if published:
-            raise ValueError(f"{published.name} already holds the current work: nothing has changed since.")
+        if published and not _engineer_wrote_since(session, project_id, published.created_at):
+            raise ValueError(
+                f"{published.name} already holds the current work: nothing has changed since, and the engineer "
+                "hasn't asked for it again."
+            )
         decisions.raise_decision(session, project_id, "publish", {"summary": summary[:2000]}, "agent")
         return "The engineer has been asked to publish. Wait for their answer."
 
