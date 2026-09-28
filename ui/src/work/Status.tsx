@@ -1,7 +1,6 @@
-import { explain, type Decision, type Run } from "../api/client";
+import { explain, type Run } from "../api/client";
 import { useSettings } from "../app/settings";
 import type { Key, Translate } from "../i18n";
-import { serviceOf } from "./DecisionCard";
 import { useRun } from "./queries";
 
 /** What runs on the project now, with Stop; or why it paused, with Continue. Always Tawreed's own words. */
@@ -61,44 +60,4 @@ export function pausedBecause(run: Run, t: Translate): string {
   }
   const key = (problem.code === "no_progress" ? `paused.no_progress.${problem.step}` : `paused.${problem.code}`) as Key;
   return t(key) !== key ? t(key) : t("paused.step_failed");
-}
-
-/** What the engineer decided so far, one sentence each, oldest first. */
-export function History({ answered }: { answered: Decision[] }) {
-  const { t } = useSettings();
-  if (answered.length === 0) return null;
-  return (
-    <section aria-label={t("history.label")}>
-      <ol className="flex flex-col gap-1.5">
-        {answered.map((decision) => (
-          <li key={decision.id} className="text-sm text-ink-2 [unicode-bidi:plaintext]">
-            {decided(decision, t)}
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-/** The engineer's answer, in a sentence. */
-export function decided(decision: Decision, t: Translate): string {
-  const a = (decision.answer ?? {}) as Record<string, unknown>;
-  const note = a.note ? `: ${String(a.note)}` : ".";
-  switch (decision.kind) {
-    case "consent":
-      return a.approve ? t("answered.consent", { service: serviceOf(decision, t) }) : t("answered.consentNo");
-    case "overlap":
-      return t(`answered.${String(a.relation)}` as Key, { file: decision.file ?? "", earlier: decision.earlier ?? "" });
-    case "plan":
-      if (!a.approve) return t("answered.planNo") + note;
-      return t(a.edited ? "answered.planEdited" : "answered.plan");
-    case "uncertain":
-      return t(`answered.uncertain.${String(a.scope ?? "item")}` as Key, {
-        code: decision.item?.code || String(decision.item?.ref ?? ""),
-        package: String(a.package ?? ""),
-      });
-    default:
-      if (!a.approve) return t("answered.publishNo") + ".";
-      return t(a.prices === false ? "answered.publishNoPrices" : "answered.publish", { name: String(a.revision ?? "") });
-  }
 }

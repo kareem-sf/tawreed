@@ -5,8 +5,8 @@ import { useSettings } from "../app/settings";
 import type { Key, Translate } from "../i18n";
 import { DecisionCard } from "../work/DecisionCard";
 import { Packages } from "../work/Packages";
-import { Published, Revisions } from "../work/Revisions";
-import { History, Status } from "../work/Status";
+import { Published, RevisionsButton } from "../work/Revisions";
+import { Status } from "../work/Status";
 import { useRun, useWork } from "../work/queries";
 import { DropRegion, PickFiles } from "./files";
 import { isReading, useAddFiles, useProject, useRename } from "./queries";
@@ -28,6 +28,7 @@ export function ProjectView({
   const work = useWork(projectId);
   const add = useAddFiles(projectId);
   const [view, setView] = useState<"work" | "packages">("work");
+  const [tab, setTab] = useState<"packages" | "files">();
 
   if (project.isError) {
     return (
@@ -40,11 +41,12 @@ export function ProjectView({
   const { data } = project;
   const stage = work.data?.stage ?? (isReading(data) ? "read" : null);
   const [decision, ...more] = work.data?.decisions ?? [];
+  const shown = tab ?? (work.data?.packages.length ? "packages" : "files");
 
   return (
     <DropRegion onFiles={(files) => add.mutate(files)} className="min-h-full">
       {(over) => (
-        <div className={`mx-auto flex max-w-[880px] flex-col gap-5 px-4 pt-6 pb-10 ${over ? "opacity-60" : ""}`}>
+        <div className={`mx-auto flex max-w-[880px] flex-col gap-5 px-4 pt-6 pb-24 ${over ? "opacity-60" : ""}`}>
           <div className="flex items-center gap-3">
             <ProjectName project={data} />
             <span className="shrink-0 rounded-full border border-line px-2.5 text-[13px] text-ink-2">
@@ -104,20 +106,37 @@ export function ProjectView({
               {stage === "published" && work.data?.published && (
                 <Published projectId={projectId} projectName={data.name} revision={work.data.published} />
               )}
-              {work.data && <History answered={work.data.answered} />}
-              {work.data && work.data.packages.length > 0 && (
-                <PackageSummary work={work.data} onOpen={() => setView("packages")} />
+              {work.data && (
+              <div className="flex flex-col">
+                <div role="tablist" aria-label={t("project.views")} className="flex gap-5 border-b border-line">
+                  {(["packages", "files"] as const).map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      role="tab"
+                      aria-selected={shown === name}
+                      onClick={() => setTab(name)}
+                      className="-mb-px border-b-2 border-transparent pb-2 text-ink-2 hover:text-ink aria-selected:border-ink aria-selected:text-ink"
+                    >
+                      {t(name === "packages" ? "packages.title" : "files.title")}
+                      <span className="ms-1.5 text-sm text-ink-2 tabular-nums">
+                        {name === "packages" ? (work.data?.packages.length ?? 0) : data.sources.length}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div role="tabpanel" className="pt-3">
+                  {shown === "packages" ? (
+                    work.data && <PackageSummary work={work.data} onOpen={() => setView("packages")} />
+                  ) : (
+                    <Files projectId={projectId} project={data} />
+                  )}
+                </div>
+              </div>
               )}
-              {work.data?.published && (
-                <Revisions
-                  projectId={projectId}
-                  projectName={data.name}
-                  latest={stage === "published" ? work.data.published.name : ""}
-                />
-              )}
-              <Files projectId={projectId} project={data} />
             </>
           )}
+          <RevisionsButton projectId={projectId} projectName={data.name} latest={work.data?.published?.name} />
         </div>
       )}
     </DropRegion>
@@ -177,13 +196,13 @@ function Steps({ stage, working }: { stage: string | null; working: boolean }) {
   );
 }
 
+/** The packages at a glance: each one's items and amount, computed by Tawreed, and the way into editing them. */
 function PackageSummary({ work, onOpen }: { work: Work; onOpen: () => void }) {
   const { t } = useSettings();
   const { coverage } = work;
   return (
     <section aria-label={t("packages.title")} className="flex flex-col">
       <div className="flex items-baseline gap-3 pb-1.5">
-        <h2 className="font-semibold">{t("packages.title")}</h2>
         <span className="text-sm text-ink-2">
           {t("coverage.summary", { placed: coverage.placed, count: coverage.items })}
           {coverage.waiting > 0 && ` · ${t("coverage.waiting", { count: coverage.waiting })}`}
@@ -193,17 +212,37 @@ function PackageSummary({ work, onOpen }: { work: Work; onOpen: () => void }) {
           {t("packages.view")}
         </button>
       </div>
-      <ul className="flex flex-col">
-        {work.packages.map((pkg) => (
-          <li key={pkg.id} className="flex items-baseline gap-3 border-t border-line-soft py-2">
-            <span className="text-sm tabular-nums text-ink-2">{pkg.code}</span>
-            <span className="flex-1 [unicode-bidi:plaintext]">{pkg.name}</span>
-            <span className="text-sm text-ink-2">{t("packages.items", { count: pkg.items })}</span>
+      {work.packages.length === 0 ? (
+        <p className="border-t border-line-soft py-2 text-sm text-ink-2">{t("packages.none")}</p>
+      ) : (
+        <ul className="flex flex-col">
+          {work.packages.map((pkg) => (
+            <li key={pkg.id} className="flex items-baseline gap-3 border-t border-line-soft py-2">
+              <span className="text-sm tabular-nums text-ink-2">{pkg.code}</span>
+              <span className="flex-1 [unicode-bidi:plaintext]">{pkg.name}</span>
+              <span className="text-sm text-ink-2">{t("packages.items", { count: pkg.items })}</span>
+              <span className="w-32 text-end text-sm tabular-nums text-ink-2">
+                {pkg.items > pkg.without_amount ? <Amount value={pkg.amount} /> : null}
+              </span>
+            </li>
+          ))}
+          <li className="flex items-baseline gap-3 border-t border-line py-2 font-semibold">
+            <span className="flex-1">{t("packages.total")}</span>
+            <span className="text-sm">{t("packages.items", { count: coverage.placed })}</span>
+            <span className="w-32 text-end text-sm tabular-nums">
+              <Amount value={coverage.amount} />
+            </span>
           </li>
-        ))}
-      </ul>
+        </ul>
+      )}
     </section>
   );
+}
+
+/** A money amount computed by Tawreed, grouped to read. */
+function Amount({ value }: { value: string }) {
+  const { locale } = useSettings();
+  return <>{Number(value).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
 }
 
 function Files({ projectId, project }: { projectId: string; project: Project }) {
@@ -211,7 +250,6 @@ function Files({ projectId, project }: { projectId: string; project: Project }) 
   const [open, setOpen] = useState<string | null>(null); // the file being previewed
   return (
     <section aria-label={t("files.title")} className="flex flex-col">
-      <h2 className="pb-1.5 font-semibold">{t("files.title")}</h2>
       <ul className="flex flex-col">
         {project.sources.map((source) => {
           const opened = open === source.id && source.status === "read";
@@ -300,7 +338,7 @@ function ProjectName({ project }: { project: Project }) {
           event.currentTarget.blur();
         }
       }}
-      className="field-sizing-content min-w-0 max-w-full -mx-1 rounded-md border border-transparent bg-transparent px-1 text-[28px] font-light tracking-[-0.01em] hover:border-line focus:border-line focus:outline-none"
+      className="field-sizing-content min-w-0 max-w-full -mx-1 rounded-md border border-transparent bg-transparent px-1 text-[28px] font-heading font-light tracking-[-0.01em] hover:border-line focus:border-line focus:outline-none"
     />
   );
 }

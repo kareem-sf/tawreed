@@ -19,7 +19,7 @@ test("dropping files starts a project and opens it", async () => {
 
   expect(await screen.findByDisplayValue("Al Noor Tower")).toBeInTheDocument();
   expect(screen.getByText("2 files")).toBeInTheDocument();
-  expect(screen.getByText("Architectural.xlsx")).toBeInTheDocument();
+  expect(await screen.findByText("Architectural.xlsx")).toBeInTheDocument(); // under Files, once the work is known
   expect(screen.getByText("Spreadsheet")).toBeInTheDocument();
   expect(screen.getByText("1.4 MB")).toBeInTheDocument();
   expect(screen.getByRole("list", { name: "Progress" })).toHaveTextContent("ReadPlanPlaceCheckPublish");

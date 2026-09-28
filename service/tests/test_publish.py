@@ -143,7 +143,8 @@ def test_publishing_writes_every_workbook_with_the_values_as_the_source_states_t
 
     work = client.get(f"/projects/{project_id}/work").json()
     assert work["stage"] == "published" and work["published"]["name"] == "Rev 00"
-    assert work["answered"][-1]["answer"]["revision"] == "Rev 00"
+    with client.app.state.sessions() as session:  # the answer records which revision it wrote
+        assert decisions.answered(session, project_id)[-1].answer["revision"] == "Rev 00"
     assert client.get("/projects").json()[0]["revision"] == "Rev 00"
 
 

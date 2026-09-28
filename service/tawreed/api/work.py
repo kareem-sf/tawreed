@@ -76,8 +76,6 @@ class DecisionOut(BaseModel):
     kind: Literal["consent", "overlap", "plan", "uncertain", "publish"]
     raised_by: Literal["agent", "tawreed"]
     created_at: datetime
-    answered_at: datetime | None = None
-    answer: dict[str, Any] | None = None
     provider: str | None = None  # consent: where the project would go
     host: str | None = None  # consent: the address of an OpenAI-compatible service
     file: str | None = None  # overlap: the new file
@@ -118,7 +116,6 @@ class WorkOut(BaseModel):
     stage: Stage
     run: RunOut
     decisions: list[DecisionOut]  # waiting, oldest first
-    answered: list[DecisionOut]  # the latest the engineer answered, oldest first
     coverage: CoverageOut
     packages: list[PackageOut]
     published: RevisionOut | None  # the latest revision
@@ -208,8 +205,6 @@ def _decision(session: Session, decision: decisions.Decision) -> DecisionOut:
         kind=decision.kind,
         raised_by=decision.raised_by,
         created_at=decision.created_at,
-        answered_at=decision.answered_at,
-        answer=decision.answer,
     )
     current = {pk.id: pk for pk in packages.packages(session, decision.project_id)}
     if decision.kind == "consent":
@@ -293,7 +288,6 @@ def get_work(project_id: str, request: Request, session: DB, home: Home) -> Work
         run=_run(session, request, home, project, coverage),
         published=revision_out(latest) if latest else None,
         decisions=[_decision(session, d) for d in waiting],
-        answered=[_decision(session, d) for d in decisions.answered(session, project_id)[-30:]],
         coverage=CoverageOut(
             items=coverage.items,
             placed=coverage.placed,

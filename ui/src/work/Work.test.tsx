@@ -177,10 +177,9 @@ test("an uncertain item shows where it is in its file, and the choice can become
 });
 
 test("the status line says what runs, with Stop, or why it paused, with Continue; there is no chat", async () => {
-  const plan = decision("plan", { packages: [], answer: { approve: true, edited: ["Concrete"] }, answered_at: "2026-09-27T09:01:00Z" });
   let run: Record<string, unknown> = { state: "running", step: "place", done: 150, total: 320 };
   const { calls, user } = await openProject({
-    "GET /projects/p1/work": () => work({ stage: "place", run, answered: [plan], packages }),
+    "GET /projects/p1/work": () => work({ stage: "place", run, packages }),
     "POST /projects/p1/stop": () => {
       run = { state: "paused", problem: { code: "ai_failed", problem: "rate_limited" } };
       return ok();
@@ -190,7 +189,6 @@ test("the status line says what runs, with Stop, or why it paused, with Continue
 
   expect(await screen.findByRole("status")).toHaveTextContent("Placing items: 150 of 320 placed");
   expect(screen.getByRole("list", { name: "Progress" }).querySelector("[aria-current]")).toHaveTextContent("Place");
-  expect(screen.getByRole("region", { name: "Done so far" })).toHaveTextContent("You approved the package plan, as you edited it.");
   expect(screen.queryByRole("textbox")).not.toHaveAttribute("aria-label", "Write to Tawreed");
 
   await user.click(screen.getByRole("button", { name: "Stop" }));
@@ -242,6 +240,7 @@ test("a file's page says how it was read, and the engineer sets its columns or h
     "POST /projects/p1/redo": ok,
   });
 
+  await user.click(await screen.findByRole("tab", { name: /Files/ })); // packages show first when there are some
   await user.click(await screen.findByRole("button", { name: "Architectural.xlsx" }));
   expect(await screen.findByText("Read by Tawreed (AI): 5 items")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Rates" })); // each sheet says how it was read, and only it
@@ -392,12 +391,7 @@ test("a published revision shows what was written, and opens or exports its fold
   const { calls, user } = await openProject({
     "GET /projects/p1/work": () =>
       published
-        ? work({
-            stage: "published",
-            published: revision,
-            packages,
-            answered: [{ ...publishAsked, answer: { approve: true, revision: "Rev 00", prices: false }, answered_at: revision.created_at }],
-          })
+        ? work({ stage: "published", published: revision, packages })
         : work({ stage: "publish", decisions: [publishAsked], packages, coverage }),
     "POST /projects/p1/decisions/d-publish": () => {
       published = true;
@@ -424,14 +418,20 @@ test("a published revision shows what was written, and opens or exports its fold
   const done = await screen.findByRole("region", { name: "Published revision" });
   expect(done).toHaveTextContent("Rev 00 is published");
   expect(done).toHaveTextContent("Packages: 3 · Items: 5");
-  expect(done).toHaveTextContent("Package workbooks without rates and amounts, for suppliers to price.");
-  expect(within(done).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+  expect(done).toHaveTextContent("for suppliers to price");
+  expect(screen.queryByRole("region", { name: "Done so far" })).not.toBeInTheDocument(); // no list of decisions
+
+  // Revisions float in a corner: a button with how many there are, opening a panel with each one's files.
+  expect(screen.queryByRole("dialog", { name: "Revisions" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "1 revision" }));
+  const panel = screen.getByRole("dialog", { name: "Revisions" });
+  await user.click(within(panel).getByRole("button", { name: "Rev 00" }));
+  expect(within(panel).getAllByRole("listitem").slice(1).map((li) => li.textContent)).toEqual([
     "Al Noor Tower - Master - Rev 00.xlsx20 kB",
     "01 Concrete works - Rev 00.xlsx9 kB",
   ]);
-  expect(screen.getByRole("region", { name: "Done so far" })).toHaveTextContent(
-    "You published Rev 00, with the package workbooks for suppliers to price.",
-  );
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Revisions" })).not.toBeInTheDocument();
   const steps = screen.getByRole("list", { name: "Progress" });
   expect(steps.querySelectorAll("[data-done]")).toHaveLength(5);
 
