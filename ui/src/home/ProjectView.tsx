@@ -57,6 +57,7 @@ export function ProjectView({
           )}
 
           <div className="flex flex-col gap-4">
+            <h1 className="sr-only">{data.name}</h1>
             <div className="flex items-start gap-2">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
                 <ProjectName project={data} />
@@ -399,6 +400,7 @@ function ProjectName({ project }: { project: Project }) {
           title={t("project.rename")}
           value={name}
           rows={1}
+          cols={1} // its width comes from the name, not a default of twenty characters
           dir="auto"
           maxLength={200}
           spellCheck={false}

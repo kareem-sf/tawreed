@@ -49,6 +49,16 @@ def revisions_folder(home: Path, project_id: str) -> Path:
     return folder(home, project_id) / "revisions"
 
 
+def _long(path: Path) -> Path:
+    """The path in Windows' extended form, which has no 260-character limit: a long data folder, project name or
+    package name can pass it (package names alone may run to 120 characters). Elsewhere the path as it is."""
+    if os.name != "nt":
+        return path
+    text = str(path.resolve())
+    prefix = "\\\\?\\"
+    return Path(text if text.startswith(prefix) else prefix + text)
+
+
 def revisions(session: Session, project_id: str) -> list[Revision]:
     query = select(Revision).where(Revision.project_id == project_id).order_by(Revision.number)
     return list(session.scalars(query))
@@ -111,7 +121,7 @@ def _next_number(session: Session, root: Path, project_id: str) -> int:
 def publish(session: Session, home: Path, project: Project, prices: bool = True) -> Revision:
     """Write the revision's workbooks, check them, and put the revision in place in one step. Without prices, the
     package workbooks leave the rates empty for suppliers to fill; the master always shows them."""
-    root = revisions_folder(home, project.id)
+    root = _long(revisions_folder(home, project.id))
     root.mkdir(parents=True, exist_ok=True)
     number = _next_number(session, root, project.id)
     name = f"Rev {number:02d}"
@@ -198,7 +208,7 @@ def open_folder(home: Path, revision: Revision) -> None:
 
 def zipped(home: Path, revision: Revision) -> bytes:
     """The revision's files in one zip, as its folder holds them."""
-    path = revisions_folder(home, revision.project_id) / revision.name
+    path = _long(revisions_folder(home, revision.project_id) / revision.name)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for file in sorted(p for p in path.rglob("*") if p.is_file()):

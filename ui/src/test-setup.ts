@@ -11,4 +11,5 @@ afterEach(() => {
   root.lang = "en";
   root.dir = "ltr";
   delete root.dataset.theme;
+  localStorage.clear(); // the remembered look must not carry from one test to the next
 });

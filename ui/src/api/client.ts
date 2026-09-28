@@ -103,7 +103,8 @@ export async function revisionZip(projectId: string, number: number): Promise<Bl
 export function explain(error: unknown, t: Translate): string {
   if (error instanceof ApiError) {
     const key = `error.${error.code}` as Key;
-    if (t(key) !== key) return t(key, error.params);
+    // "unknown" is the service failing without a code of its own: say so, with the HTTP status it answered.
+    if (error.code !== "unknown" && t(key) !== key) return t(key, error.params);
     return t("error.unknown", { status: error.status || "?" });
   }
   return t("error.unknown", { status: "?" });
