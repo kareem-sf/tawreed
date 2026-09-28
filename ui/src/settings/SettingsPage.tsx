@@ -24,7 +24,7 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-[760px] flex-col px-4 pt-5 pb-10">
-      <h1 className="mb-2 text-[28px] font-light tracking-[-0.01em]">{t("settings.title")}</h1>
+      <h1 className="mb-2 text-[28px] font-heading font-light tracking-[-0.01em]">{t("settings.title")}</h1>
       <Row label={t("settings.language")}>
         <Choice
           label={t("settings.language")}

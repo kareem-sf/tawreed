@@ -29,7 +29,7 @@ export function Packages({ projectId, onBack }: { projectId: string; onBack: () 
           </svg>
           {t("packages.back")}
         </button>
-        <h2 className="text-[28px] font-light">{t("packages.title")}</h2>
+        <h2 className="text-[28px] font-heading font-light">{t("packages.title")}</h2>
         <div className="flex-1" />
         {!placingAll && packages.length > 0 && (
           <button type="button" onClick={() => setPlacingAll(true)} className="rounded-lg border border-line px-3.5 py-1 text-sm">

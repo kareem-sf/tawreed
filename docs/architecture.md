@@ -93,11 +93,11 @@ Each domain module owns its models and its service functions; the workflow's ste
 
 - **Figtree** (English) is open source (SIL Open Font License) and bundled with the interface from the
   `@fontsource-variable/figtree` package. Headings use Light (300), body text Regular (400), labels SemiBold (600).
-- **Thmanyah Sans** (Arabic) is licensed for use inside a compiled or packaged product only. Its files must never be
-  committed, uploaded or hosted anywhere, including GitHub, and must not sit loose where users can copy them. They are
-  kept locally in the gitignored `ui/src/fonts/thmanyah/` and reach users only inside the Tauri executable, which
-  embeds the built interface. The release interface is therefore served from Tauri's embedded assets, not from a
-  folder on disk. Builds without the files (CI) fall back to the system Arabic font; release builds that include
+- **Thmanyah Sans** (Arabic text) and **Thmanyah Serif Display** (Arabic headings, Light) are licensed for use
+  inside a compiled or packaged product only. Their files must never be committed, uploaded or hosted anywhere,
+  including GitHub, and must not sit loose where users can copy them. They are kept locally in the gitignored
+  `ui/src/fonts/thmanyah/` and reach users only inside the Tauri executable, which embeds the built interface. The
+  release interface is therefore served from Tauri's embedded assets, not from a folder on disk. Builds without the files (CI) fall back to the system Arabic font; release builds that include
   Thmanyah are made on the engineer's machine.
 
 ## Publishing

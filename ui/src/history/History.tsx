@@ -9,7 +9,7 @@ export function History({ onOpen }: { onOpen: (id: string) => void }) {
 
   return (
     <div className="mx-auto flex max-w-[880px] flex-col px-4 pt-6 pb-10">
-      <h1 className="mb-3 text-[28px] font-light tracking-[-0.01em]">{t("history.title")}</h1>
+      <h1 className="mb-3 text-[28px] font-heading font-light tracking-[-0.01em]">{t("history.title")}</h1>
       {projects.isError && (
         <p role="alert" className="text-danger">
           {explain(projects.error, t)}

@@ -1,9 +1,11 @@
 @import "tailwindcss";
 
 /* The approved minimal look: white (near-black in dark mode), hairlines, black buttons,
-   and one amber accent that means "needs you". Figtree for Latin, Thmanyah Sans for Arabic. */
+   and one amber accent that means "needs you". Figtree for Latin; Thmanyah Sans for Arabic text and
+   Thmanyah Serif Display for Arabic headings. */
 @theme inline {
   --font-sans: "Figtree Variable", "Thmanyah Sans", "Segoe UI", system-ui, sans-serif;
+  --font-heading: "Figtree Variable", "Thmanyah Serif Display", "Thmanyah Sans", "Segoe UI", system-ui, sans-serif;
   --color-page: var(--page);
   --color-soft: var(--soft);
   --color-subtle: var(--subtle);

@@ -30,8 +30,9 @@ npm ci
 On macOS or Linux, create the environment with `python3.12 -m venv service/.venv` and install with
 `service/.venv/bin/python -m pip install -e "./service[dev]"`.
 
-**Arabic font.** Tawreed's Arabic typeface, Thmanyah Sans, may only ship inside the compiled app, so it is not in
-this repository. Put `thmanyahsans-Light.woff2`, `-Regular`, `-Medium` and `-Bold` from the official download into
+**Arabic font.** Tawreed's Arabic typefaces, Thmanyah Sans and Thmanyah Serif Display (headings), may only ship
+inside the compiled app, so they are not in this repository. Put the `-Light`, `-Regular`, `-Medium` and `-Bold`
+`.woff2` files of `thmanyahsans` and `thmanyahserifdisplay` from the official download into
 `ui/src/fonts/thmanyah/` (ignored by git). Without them Arabic uses the system font.
 
 `npm run dev` starts the interface at `http://localhost:1430`. The dev server also starts the service on a free
