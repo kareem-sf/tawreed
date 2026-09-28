@@ -345,10 +345,9 @@ machine.
   colour, so it follows light, dark and Arabic (a gold-and-ivory tone exists for dark backgrounds). About gains a
   Founder section: the K, "Founded & developed by Kareem Safwat" with a link to kareemsafwat.com, and "Tawreed is
   part of QS Mind", in English and Arabic.
-- **Desktop links:** WebView2 silently dropped links that ask for a new window, so the website link did nothing in
-  the desktop window. The shell now builds its window itself and sends such http(s) links to the default browser;
-  the window never navigates away and the page gets no system access for it.
+- **Known gap:** WebView2 silently drops links that ask for a new window, so the kareemsafwat.com link does nothing in
+  the desktop window yet (it works in the browser build). Handing such links to the default browser is a separate
+  change to the desktop shell, kept out of this one until it has been tried in a running window.
 - **README:** the endorsed lockup (light and dark) heads it, and the founder's signature closes it.
-- **Checks:** 51 interface tests, typecheck and Clippy pass; About (English and Arabic, light and dark, 380 px and
-  wide) and the mark were looked at in a browser build. The desktop link hand-off compiles but was not clicked in a
-  running desktop window.
+- **Checks:** 51 interface tests and typecheck pass; About (English and Arabic, light and dark, 380 px and wide) and
+  the mark were looked at in a browser build.
