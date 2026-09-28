@@ -1,14 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
-  <defs>
-    <linearGradient id="gold" x1="105" y1="72" x2="375" y2="442" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFE394"/>
-      <stop offset="0.48" stop-color="#E9AD38"/>
-      <stop offset="1" stop-color="#C77A11"/>
-    </linearGradient>
-  </defs>
-  <g>
-    <path d="M100 82H438L390 173H300V430L236 392V173H130L78 124L100 82Z" fill="url(#gold)"/>
-    <path d="M300 222H396L363 284H300V222Z" fill="url(#gold)" opacity="0.78"/>
-    <path d="M300 318H351L321 377H300V318Z" fill="url(#gold)" opacity="0.5"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Tawreed icon"><title>Tawreed icon</title><rect width="1024" height="1024" rx="229.07" fill="#111418"/><rect x="1.5" y="1.5" width="1021" height="1021" rx="227.57" fill="none" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="3"/><g transform="translate(225.28 285.92) scale(0.767657) translate(-36 576)"><path d="M697 -467H681L620 -325C657 -289 708 -233 733 -189C658 -174 481 -151 335 -151C157 -151 78 -185 78 -321C78 -344 81 -375 85 -409H67C45 -332 36 -269 36 -214C36 -43 131 13 300 13C438 13 612 -25 694 -44L744 -180C758 -217 764 -254 762 -291L783 -341Z" fill="#E9AD38"/><path d="M521 -485C522 -485 522 -497 521 -498L443 -576L373 -506L303 -576L224 -497V-486L303 -406L373 -476L443 -406Z" fill="#F3EFE6"/></g></svg>
