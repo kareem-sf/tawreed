@@ -12,7 +12,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::http::{HeaderValue, Method, Request, Response, StatusCode, header};
-use tauri::{Manager, UriSchemeContext};
+use tauri::webview::NewWindowResponse;
+use tauri::{Manager, UriSchemeContext, WebviewWindowBuilder};
 
 /// The running service. Its standard input stays open while Tawreed runs; when Tawreed exits, or crashes, the
 /// system closes it and the service stops (it runs with --exit-with-stdin).
@@ -38,6 +39,16 @@ fn main() {
             });
         })
         .setup(|app| {
+            // The window is made here rather than from the config alone, so a link that asks for a new window (the
+            // About page's website) opens in the default browser. Tawreed's own window never leaves Tawreed.
+            WebviewWindowBuilder::from_config(app.handle(), &app.config().app.windows[0])?
+                .on_new_window(|url, _| {
+                    if matches!(url.scheme(), "http" | "https") {
+                        let _ = open::that_detached(url.as_str());
+                    }
+                    NewWindowResponse::Deny
+                })
+                .build()?;
             if !tauri::is_dev() {
                 let service = start_service(app)?;
                 app.manage(service);

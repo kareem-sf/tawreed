@@ -88,6 +88,8 @@ Each domain module owns its models and its service functions; the workflow's ste
   to the service with the token. As in development, the page never holds the token.
 - The app holds the service's standard input open; the service stops when it closes, so it can't outlive the app,
   even after a crash.
+- A web link that asks for a new window (`target="_blank"`, such as the About page's website) opens in the default
+  browser; Tawreed's window never navigates away, and the page is given no access to the system for it.
 
 ## Fonts
 
