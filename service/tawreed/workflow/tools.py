@@ -265,7 +265,10 @@ def view_page(ctx: RunContext[Step], file_id: str, page: int) -> ToolReturn | st
 
 def _report(session: Session, source: Source, summary: dict, pages: list[int]) -> str:
     items = session.scalars(
-        select(Item).where(Item.source_id == source.id, Item.page.in_(pages)).order_by(Item.ref).limit(3)
+        select(Item)
+        .where(Item.source_id == source.id, Item.page.in_(pages))
+        .order_by(Item.page, Item.position)
+        .limit(3)
     ).all()
     head = (
         f"Found {plural(summary['items'], 'item')} ({summary['without_quantity']} with a unit but no quantity), "
@@ -404,7 +407,7 @@ def list_items(
         unplaced_only: Only items not placed in a package yet.
         package: Only the items in this package (its number).
         search: Only items whose code or description contains this text.
-        start: The first item number to show.
+        start: Show the list from this item on (the number the last list said to start from).
     """
     with _session(ctx) as session:
         project_id = ctx.deps.project_id
@@ -423,7 +426,8 @@ def list_items(
             if search and search.casefold() not in f"{item.code} {item.description}".casefold():
                 continue
             found.append((item, assignment))
-    shown = [pair for pair in found if pair[0].ref >= start][:ITEMS_LISTED]
+    first = next((index for index, pair in enumerate(found) if pair[0].ref == start), 0)
+    shown = found[first : first + ITEMS_LISTED]
     lines, where, under = [], None, None
     for item, assignment in shown:
         if (item.source_id, item.page) != where:
@@ -442,7 +446,7 @@ def list_items(
         lines.append(f"{item.ref} · {item.code} · {item.description[:200]} · {item.unit} · {item.quantity_text}{state}")
     if not shown:
         return "No items match."
-    after = [pair for pair in found if pair[0].ref > shown[-1][0].ref]
+    after = found[first + len(shown) :]
     more = f"\n{len(after)} more match: list_items with start={after[0][0].ref}." if after else ""
     return f"{plural(len(found), 'item')} match.{more}\n{data(chr(10).join(lines))}"
 
