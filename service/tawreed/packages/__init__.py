@@ -339,7 +339,7 @@ def coverage(session: Session, project_id: str, waiting_items: set[str]) -> Cove
 
 def money(amount: Decimal) -> Decimal:
     """A computed amount as it is shown: to the cent. Excel's float noise (261016.92999999993) doesn't show."""
-    return amount.quantize(Decimal("0.01"))
+    return amount.quantize(Decimal("0.01")) + 0  # + 0: a difference of a trillionth shows as 0.00, not -0.00
 
 
 def reconcile(file: str, layout: Layout, names: dict[int, str]) -> dict[str, Any]:
