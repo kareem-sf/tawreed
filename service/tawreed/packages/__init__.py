@@ -94,13 +94,14 @@ def code(package: Package) -> str:
 
 
 def active_items(session: Session, project_id: str) -> list[Item]:
-    """Items that count: from files that are in use and not waiting for the engineer's overlap decision."""
+    """Items that count: from files that are in use and not waiting for the engineer's overlap decision. In file
+    order (file, page, row), which item numbers don't keep once a page is read again."""
     query = (
         select(Item)
         .join(Source, Source.id == Item.source_id)
         .where(Item.project_id == project_id, Source.active.is_(True))
         .where((Source.relation.is_(None)) | (Source.relation != "pending"))
-        .order_by(Item.ref)
+        .order_by(Source.added_at, Source.id, Item.page, Item.position)
     )
     return list(session.scalars(query))
 

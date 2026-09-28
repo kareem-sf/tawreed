@@ -78,7 +78,7 @@ def gather(session: Session, project: Project, name: str, published: datetime, p
     placed = packages.assignments(session, project.id)
     items: dict[str, list] = {}
     active = packages.active_items(session, project.id)
-    for item in active:  # in file order, by item number
+    for item in active:  # in file order
         items.setdefault(placed[item.id].package_id, []).append(item)
     files = {s.id: s for s in session.scalars(select(Source).where(Source.project_id == project.id))}
     layouts = session.scalars(

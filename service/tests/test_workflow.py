@@ -252,7 +252,8 @@ def test_place_again_for_one_package_keeps_the_engineers_placements(client, ai):
 
     body = {"step": "place", "package_id": concrete, "note": "Raft concrete goes with concrete."}
     assert client.post(f"/projects/{project_id}/redo", json=body).status_code == 204
-    work = settle(client, project_id, lambda w: "<engineer-note>" in brain.prompts[-1])
+    # The work is read first, then the prompts: placed again means the run with the note has finished.
+    settle(client, project_id, lambda w: w["coverage"]["unplaced"] == 0 and "<engineer-note>" in brain.prompts[-1])
     assert "Raft concrete goes with concrete." in brain.prompts[-1]
     now = placed(client, project_id)
     assert now["3.1.1"] == (earthworks, "engineer")  # the engineer's own placement stays
@@ -451,3 +452,10 @@ def test_a_page_read_again_the_same_way_keeps_its_placements(client, ai):
     assert client.put(f"/projects/{project_id}/sources/{source_id}/pages/1/layout", json=DIV03).status_code == 204
     assert placed(client, project_id) == before  # the same items stay where they were, by whoever placed them
     assert before["3.1.4"][1] == "engineer" and before["3.1.1"][1] == "agent"
+    items = client.get(f"/projects/{project_id}/items", params={"count": 1000}).json()["items"]
+    assert [i["code"] for i in items] == ["3.1.1", "3.1.2", "3.1.3", "3.1.4", "1"]  # still in file order
+    assert [i["ref"] for i in items][:4] != [1, 2, 3, 4]  # though page 1's items were numbered again
+
+    step = tools.Step(client.app.state.home, client.app.state.sessions, project_id, threading.Event(), False, "place")
+    listed = tools.list_items(SimpleNamespace(deps=step), start=items[2]["ref"])
+    assert listed.index("3.1.3") < listed.index("3.1.4") < listed.index("· 1 ·") and "3.1.1" not in listed

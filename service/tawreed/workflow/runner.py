@@ -259,27 +259,27 @@ class Worker:
         run = tools.Step(
             self.home, self.sessions, project_id, self._stop(project_id), self.sees_images(), step.name, step.source_id
         )
-        self._working = (project_id, step)
+        self._working = (project_id, step)  # until what the run did is recorded, so it never looks finished early
         try:
             if codex_run:
                 ended = await self._codex_run(found[1], run, prompt)
             else:
                 ended = await self._run_step(model, run, prompt)
+            if ended not in ("done", "out_of_steps", "tool_failed"):
+                return ended == "retry"
+            with self.sessions() as session:
+                project = session.get(Project, project_id)
+                if ended == "done" and redo and project.redo == redo:
+                    project.redo = None
+                moved = remaining(session, project, step) < before
+                idle = 0 if moved else self._idle_runs.get(project_id, 0) + 1
+                self._idle_runs[project_id] = idle
+                if idle >= NO_PROGRESS:
+                    project.paused, project.pause_reason = True, {"code": "no_progress", "step": step.name}
+                session.commit()
+            return idle < NO_PROGRESS
         finally:
             self._working = None
-        if ended not in ("done", "out_of_steps", "tool_failed"):
-            return ended == "retry"
-        with self.sessions() as session:
-            project = session.get(Project, project_id)
-            if ended == "done" and redo and project.redo == redo:
-                project.redo = None
-            moved = remaining(session, project, step) < before
-            idle = 0 if moved else self._idle_runs.get(project_id, 0) + 1
-            self._idle_runs[project_id] = idle
-            if idle >= NO_PROGRESS:
-                project.paused, project.pause_reason = True, {"code": "no_progress", "step": step.name}
-            session.commit()
-        return idle < NO_PROGRESS
 
     def _record(self, project_id: str, step: str, model: str) -> int:
         with self.sessions() as session:
