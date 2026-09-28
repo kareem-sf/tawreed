@@ -306,7 +306,9 @@ def _not_the_engineers(session: Session, source: Source, pages: list[int]) -> No
             raise ValueError("The engineer laid out that page themselves: leave it as it is.")
 
 
-def _after_layout(session: Session, project: Project, source: Source) -> None:
+def _after_layout(session: Session, project: Project, source: Source, pages: list[int], kept: packages.Kept) -> None:
+    """Items read again the same as before keep their placement; a revision's items take their earlier one's."""
+    packages.place_back(session, source.id, pages, kept)
     packages.carry_over(session, project, source)
     packages.touch(project)
 
@@ -323,8 +325,9 @@ def lay_out_sheet(ctx: RunContext[Step], file_id: str, page: int, layout: SheetL
     with _session(ctx) as session:
         source, project = _file(session, ctx, file_id), _project(session, ctx)
         _not_the_engineers(session, source, [page])
+        kept = packages.placed_on(session, source.id, [page])
         summary = ledger.lay_out_sheet(session, ctx.deps.home, source, page, layout, "agent")
-        _after_layout(session, project, source)
+        _after_layout(session, project, source, [page], kept)
         return _report(session, source, summary, [page])
 
 
@@ -340,8 +343,9 @@ def lay_out_pdf(ctx: RunContext[Step], file_id: str, layout: PdfLayout) -> str:
     with _session(ctx) as session:
         source, project = _file(session, ctx, file_id), _project(session, ctx)
         _not_the_engineers(session, source, layout.pages)
+        kept = packages.placed_on(session, source.id, layout.pages)
         summary = ledger.lay_out_pdf(session, ctx.deps.home, source, layout, "agent")
-        _after_layout(session, project, source)
+        _after_layout(session, project, source, layout.pages, kept)
         return _report(session, source, summary, layout.pages)
 
 
@@ -361,8 +365,9 @@ def transcribe_page(ctx: RunContext[Step], file_id: str, page: int, rows: list[T
         if ledger.page_of(source, page).has_text:
             raise ValueError("This page has text: lay it out with lay_out_pdf instead.")
         _not_the_engineers(session, source, [page])
+        kept = packages.placed_on(session, source.id, [page])
         summary = ledger.record_transcription(session, ctx.deps.home, source, page, rows, "agent")
-        _after_layout(session, project, source)
+        _after_layout(session, project, source, [page], kept)
         return _report(session, source, summary, [page])
 
 

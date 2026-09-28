@@ -268,6 +268,38 @@ def carry_over(session: Session, project: Project, source: Source) -> int:
     return carried
 
 
+Kept = dict[tuple[str, str, str, str], list[tuple[str, str, str]]]
+
+
+def placed_on(session: Session, source_id: str, pages: list[int]) -> Kept:
+    """Where the items on these pages are placed, by what they are, so a page read again keeps its placements."""
+    kept: Kept = {}
+    query = (
+        select(Item, Assignment)
+        .join(Assignment, Assignment.item_id == Item.id)
+        .where(Item.source_id == source_id, Item.page.in_(pages))
+        .order_by(Item.page, Item.position)
+    )
+    for item, a in session.execute(query):
+        kept.setdefault((*_key(item), item.quantity_text), []).append((a.package_id, a.decided_by, a.reason))
+    return kept
+
+
+def place_back(session: Session, source_id: str, pages: list[int], kept: Kept) -> int:
+    """Items read again from these pages that are the same as before (code, description, unit and quantity, in
+    order) go back where they were placed, by whoever placed them."""
+    back = 0
+    query = select(Item).where(Item.source_id == source_id, Item.page.in_(pages)).order_by(Item.page, Item.position)
+    for item in session.scalars(query):
+        same = kept.get((*_key(item), item.quantity_text))
+        if same:
+            package_id, by, reason = same.pop(0)
+            session.add(Assignment(item_id=item.id, package_id=package_id, decided_by=by, reason=reason))
+            back += 1
+    session.flush()
+    return back
+
+
 def _key(item: Item) -> tuple[str, str, str]:
     return item.code.strip().casefold(), " ".join(item.description.split()).casefold(), item.unit.strip().casefold()
 

@@ -436,3 +436,18 @@ def test_a_publish_card_goes_when_the_work_is_no_longer_complete(client, ai):
     with client.app.state.sessions() as session:  # the card left up while items waited to be placed again
         assert session.get(decisions.Decision, card["id"]).status == "withdrawn"
     assert placed(client, project_id)["3.1.4"][1] == "engineer"  # the engineer's own placement stayed
+
+
+def test_a_page_read_again_the_same_way_keeps_its_placements(client, ai):
+    project_id = allowed(client)
+    answer(client, project_id, settle(client, project_id, waiting("plan")), "plan", approve=True)
+    work = settle(client, project_id, waiting("uncertain"))
+    answer(client, project_id, work, "uncertain", package_id=work["decisions"][0]["recommended"], scope="item")
+    settle(client, project_id, waiting("publish"))
+    before = placed(client, project_id)
+    source_id = client.get(f"/projects/{project_id}").json()["sources"][0]["id"]
+
+    # The engineer sets the columns the AI chose: the page is theirs now, and its items are read again.
+    assert client.put(f"/projects/{project_id}/sources/{source_id}/pages/1/layout", json=DIV03).status_code == 204
+    assert placed(client, project_id) == before  # the same items stay where they were, by whoever placed them
+    assert before["3.1.4"][1] == "engineer" and before["3.1.1"][1] == "agent"

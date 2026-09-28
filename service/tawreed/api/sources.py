@@ -120,7 +120,8 @@ def get_source(project_id: str, source_id: str, session: DB) -> SourceDetail:
 
 
 def _changed(session, request: Request, source: sources.Source) -> None:
-    """After the engineer's own layout: earlier placements carry over, questions about items gone are withdrawn."""
+    """After the engineer's own layout: a revision's placements carry over, questions about items gone are
+    withdrawn."""
     project = session.get(Project, source.project_id)
     packages.carry_over(session, project, source)
     packages.touch(project)
@@ -135,11 +136,13 @@ def lay_out_sheet(
 ) -> Response:
     """The engineer sets a sheet's columns. Its items are read again from the cells; the AI leaves it as it is."""
     source = _source(session, project_id, source_id)
+    kept = packages.placed_on(session, source.id, [number])
     try:
         ledger.lay_out_sheet(session, home, source, number, body, "engineer")
     except ledger.NotReadable as error:
         session.rollback()
         raise problem(409, error.code) from error
+    packages.place_back(session, source.id, [number], kept)  # items read the same as before stay where they were
     _changed(session, request, source)
     return Response(status_code=204)
 
