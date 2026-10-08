@@ -1,5 +1,7 @@
 # Tawreed
 
+A QS Mind product.
+
 Tawreed turns construction bills of quantities into procurement packages. Add the BOQs for a project; the Tawreed
 fixed workflow reads them, designs the packages, places every item in exactly one package and publishes a master workbook
 and one workbook per package. You approve at every gate, and nothing in your BOQ is ever changed. See
@@ -48,7 +50,8 @@ the desktop window. Set `TAWREED_HOME` to use another data folder, for example a
 | `npm run build` | Typecheck and production build of the interface into `dist/` |
 | `npm run bindings` | Regenerate the interface's API types from the service |
 
-CI runs all of these on every pull request and fails if the API types are out of date.
+Run `npm run verify` before every push. CI runs the same checks, and fails if the API types are out of date, only when
+started by hand (Actions → CI → Run workflow), to stay inside the free GitHub Actions minutes.
 
 ## Windows installer
 

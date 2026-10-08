@@ -1,9 +1,9 @@
 name: CI
 
+# Runs only when started by hand (Actions > CI > Run workflow). Run `npm run verify`
+# locally before pushing: private repos share 2,000 free Actions minutes a month.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
