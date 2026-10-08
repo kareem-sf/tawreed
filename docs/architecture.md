@@ -109,5 +109,5 @@ and re-opened, then the folder is renamed into place as `Rev NN` with a manifest
 
 Service tests use pytest; the workflow is tested with a scripted model at the provider boundary (Pydantic AI
 `FunctionModel`), so the real runner, step tools, gates and database are exercised. Generated workbooks are re-opened
-and asserted. UI tests use Vitest and Testing Library. CI runs tests, typecheck, Ruff and Clippy on every pull
-request and fails if the API types drift from the service.
+and asserted. UI tests use Vitest and Testing Library. `npm run verify` runs tests, typecheck, Ruff and Clippy
+before every push; CI runs the same checks when started by hand and fails if the API types drift from the service.
