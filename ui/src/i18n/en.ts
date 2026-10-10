@@ -16,6 +16,10 @@ export const en = {
   "tab.about": "About",
   "tabs.label": "Sections",
   "language.other": "العربية",
+  "update.ready": "Tawreed {version} is ready to install.",
+  "update.install": "Update and restart",
+  "update.installing": "Updating… Tawreed will close and open again.",
+  "update.failed": "The update couldn't be downloaded. Check the internet connection and try again.",
 
   "drop.title": "Drop BOQ files here",
   "drop.formats": "Excel, CSV, ODS or PDF, scanned pages too",

@@ -6,6 +6,7 @@ import type { Key } from "../i18n";
 import { SettingsPage } from "../settings/SettingsPage";
 import { Logo } from "./Logo";
 import { useSettings } from "./settings";
+import { Update } from "./Update";
 
 type Tab = "home" | "history" | "settings" | "about";
 const TABS: Tab[] = ["home", "history", "settings", "about"];
@@ -56,6 +57,7 @@ export function App() {
           </button>
         </div>
       </header>
+      <Update />
       <main className="min-h-0 flex-1 overflow-y-auto">
         {tab === "home" && (
           <Home

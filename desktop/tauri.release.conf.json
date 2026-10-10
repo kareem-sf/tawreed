@@ -1,5 +1,14 @@
 {
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://downloads.qsmind.app/tawreed/latest.json"
+      ],
+      "pubkey": ""
+    }
+  },
   "bundle": {
+    "createUpdaterArtifacts": false,
     "active": true,
     "targets": [
       "nsis"

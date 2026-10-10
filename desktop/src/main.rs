@@ -1,6 +1,7 @@
 // The desktop window. In development it loads the Vite server, which also starts the local service. Installed, it
 // starts the bundled service itself, on a free port with a fresh token, and answers the interface's requests to the
-// `api` scheme by forwarding them to the service with that token, so the page never holds it.
+// `api` scheme by forwarding them to the service with that token, so the page never holds it. It answers
+// `/desktop/update` itself: whether a newer signed Tawreed is published, and installing it.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::fs::{self, File};
@@ -12,7 +13,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::http::{HeaderValue, Method, Request, Response, StatusCode, header};
-use tauri::{Manager, UriSchemeContext};
+use tauri::{AppHandle, Manager, UriSchemeContext};
+use tauri_plugin_updater::UpdaterExt;
 
 /// The running service. Its standard input stays open while Tawreed runs; when Tawreed exits, or crashes, the
 /// system closes it and the service stops (it runs with --exit-with-stdin).
@@ -20,7 +22,7 @@ struct Service {
     port: u16,
     token: String,
     ready: AtomicBool,
-    _child: Mutex<Child>,
+    child: Mutex<Child>,
 }
 
 const STARTING: Duration = Duration::from_secs(60); // how long a request waits for the service to come up
@@ -31,6 +33,7 @@ fn main() {
             let app = context.app_handle().clone();
             thread::spawn(move || {
                 let response = match app.try_state::<Service>() {
+                    Some(service) if request.uri().path() == "/desktop/update" => update(&app, &service, request.method()),
                     Some(service) => forward(&service, &request),
                     None => plain(StatusCode::SERVICE_UNAVAILABLE, "The Tawreed service isn't running."),
                 };
@@ -41,6 +44,9 @@ fn main() {
             if !tauri::is_dev() {
                 let service = start_service(app)?;
                 app.manage(service);
+                if signed_updates(app.handle()) {
+                    app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                }
             }
             Ok(())
         })
@@ -71,7 +77,43 @@ fn start_service(app: &tauri::App) -> Result<Service, Box<dyn std::error::Error>
         command.creation_flags(CREATE_NO_WINDOW);
     }
     let child = command.spawn()?;
-    Ok(Service { port, token, ready: AtomicBool::new(false), _child: Mutex::new(child) })
+    Ok(Service { port, token, ready: AtomicBool::new(false), child: Mutex::new(child) })
+}
+
+/// Updates are on once the release configuration carries the public key that their signatures are checked with.
+fn signed_updates(app: &AppHandle) -> bool {
+    let updater = app.config().plugins.0.get("updater");
+    updater.and_then(|updater| updater["pubkey"].as_str()).is_some_and(|key| !key.is_empty())
+}
+
+/// GET says which newer version is published, if any. POST downloads it, checks its signature, stops the service
+/// so its files can be replaced, and installs it; Tawreed closes and opens again as the new version.
+fn update(app: &AppHandle, service: &Service, method: &Method) -> Response<Vec<u8>> {
+    if method == Method::OPTIONS {
+        return allowed(Response::builder().status(StatusCode::NO_CONTENT).body(Vec::new()));
+    }
+    let found = match signed_updates(app) {
+        true => tauri::async_runtime::block_on(async { app.updater()?.check().await }),
+        false => Ok(None),
+    };
+    if method != Method::POST {
+        // Offline, or the address isn't answering: no update to offer, and nothing to report.
+        let version = found.ok().flatten().map_or("null".into(), |update| format!(r#""{}""#, update.version));
+        let body = format!(r#"{{"version": {version}}}"#).into_bytes();
+        return allowed(Response::builder().header(header::CONTENT_TYPE, "application/json").body(body));
+    }
+    let Ok(Some(update)) = found else {
+        return plain(StatusCode::BAD_GATEWAY, "Tawreed couldn't reach its updates.");
+    };
+    let Ok(installer) = tauri::async_runtime::block_on(update.download(|_, _| {}, || {})) else {
+        return plain(StatusCode::BAD_GATEWAY, "Tawreed couldn't download the update.");
+    };
+    if let Ok(mut child) = service.child.lock() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let _ = update.install(installer); // on Windows the installer takes over here and Tawreed exits
+    app.restart()
 }
 
 /// Send the interface's request to the service with the token, and hand back its answer. While the service is

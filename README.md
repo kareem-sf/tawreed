@@ -64,6 +64,11 @@ is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.qsmind.tawreed\log
 a draft release. Make release builds on a machine with the Thmanyah files in place, so the installer carries them;
 the script says whether it does.
 
+The installed app updates itself from the address in `desktop/tauri.release.conf.json`, once that file carries the
+updater's public key. With the key in place, `npm run package` also signs the installer and `npm run release` writes
+the update feed, `latest.json`. The key, the release inputs and the Windows test steps are in
+[docs/2026-10-10-updater-and-installer.md](docs/2026-10-10-updater-and-installer.md).
+
 ## License
 
 [MIT](LICENSE) © 2026 Kareem Safwat.

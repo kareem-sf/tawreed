@@ -12,6 +12,10 @@ export const ar: Record<Key, Entry> = {
   "tab.about": "حول توريد",
   "tabs.label": "الأقسام",
   "language.other": "English",
+  "update.ready": "توريد {version} جاهز للتثبيت.",
+  "update.install": "حدّث وأعد التشغيل",
+  "update.installing": "جارٍ التحديث… سيُغلق توريد ثم يفتح من جديد.",
+  "update.failed": "تعذّر تنزيل التحديث. تحقق من اتصال الإنترنت ثم حاول مرة أخرى.",
 
   "drop.title": "أفلت ملفات جداول الكميات هنا",
   "drop.formats": "إكسل أو CSV أو ODS أو PDF، والصفحات الممسوحة أيضاً",
