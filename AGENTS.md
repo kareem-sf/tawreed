@@ -24,9 +24,13 @@ specification is `docs/spec.md`; the architecture is `docs/architecture.md`; the
   next action, no sidebars, dashboards or decoration. Plain construction language, English and Arabic with full
   RTL. Every number is one click from its source. No provider, model or token details outside Settings, except
   that the consent card names the service a project's content would go to.
-- **Fonts.** Figtree for English (open licence, bundled; light headings, regular body). Thmanyah Sans for Arabic text
-  and Thmanyah Serif Display for Arabic headings: their licence forbids committing, uploading or hosting the font
-  files, so they live only in the gitignored `ui/src/fonts/thmanyah/` and ship only inside the compiled app.
+- **Brand.** QS Mind brand v2: the QS Mind sphere with Tawreed's Steel face (`#98BBE2` to `#3A6394`), for the
+  mark only. Amber stays the one accent and means "needs you". The master files are `brand/tawreed/` in the QS Mind
+  workspace. App ID `com.qsmind.tawreed`; publisher QS Mind. Open source under the MIT licence.
+- **Fonts.** Kumbh Sans for English, as on the QS Mind site (open licence, bundled; light headings, regular body).
+  Thmanyah Sans for all Arabic, with its swash letters (`swsh`) on headings: its licence forbids committing,
+  uploading or hosting the font files, so they live only in the gitignored `ui/src/fonts/thmanyah/` and ship only
+  inside the compiled app.
 - **Data.** Everything lives under `~/.tawreed` (`TAWREED_HOME` overrides it): keys in `auth.json`, settings in
   `settings.json`, projects in the database. Never commit customer BOQs, keys, extracted content or databases.
   Use synthetic data for tests and approvals; real BOQs are read in place only with the engineer's say-so.

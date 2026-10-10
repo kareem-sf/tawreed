@@ -1,11 +1,11 @@
-import "@fontsource-variable/figtree";
+import "@fontsource-variable/kumbh-sans";
 
 // Thmanyah (Arabic) is licensed for use inside the compiled app only, so its files are never committed: they sit in
-// the gitignored ui/src/fonts/thmanyah/ on the engineer's machine. Sans sets the text, Serif Display the headings.
+// the gitignored ui/src/fonts/thmanyah/ on the engineer's machine. Thmanyah Sans sets text and headings.
 // Without them (CI, a fresh clone) the glob is empty and Arabic falls back to the system font.
-const FAMILIES: Record<string, string> = { thmanyahsans: "Thmanyah Sans", thmanyahserifdisplay: "Thmanyah Serif Display" };
+const FAMILIES: Record<string, string> = { thmanyahsans: "Thmanyah Sans" };
 const WEIGHTS: Record<string, string> = { Light: "300", Regular: "400", Medium: "500", Bold: "700" };
-const files = import.meta.glob<string>("./fonts/thmanyah/*.woff2", { eager: true, query: "?url", import: "default" });
+const files = import.meta.glob<string>("./fonts/thmanyah/thmanyahsans-*.woff2", { eager: true, query: "?url", import: "default" });
 
 if (typeof FontFace !== "undefined") {
   for (const [path, url] of Object.entries(files)) {

@@ -1,6 +1,7 @@
+import webbrowser
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
 from tawreed import __version__, settings
@@ -58,3 +59,13 @@ def change_settings(body: SettingsChange, home: Home) -> SettingsOut:
 @router.get("/about")
 def about(home: Home) -> AboutOut:
     return AboutOut(version=__version__, data_folder=str(home))
+
+
+WEBSITE = "https://qsmind.app"
+
+
+@router.post("/about/website", status_code=204)
+def open_website() -> Response:
+    """Show the QS Mind website in the engineer's browser."""
+    webbrowser.open(WEBSITE)
+    return Response(status_code=204)

@@ -27,7 +27,7 @@ export function App() {
             tabs take a row of their own under the logo, so none is ever cut off. */}
         <div className="mx-auto flex w-full max-w-[880px] flex-wrap items-center gap-x-8 px-4 sm:h-[52px] sm:flex-nowrap sm:px-6">
           <span className="flex h-12 shrink-0 items-center gap-2 text-[19px] font-semibold sm:h-auto">
-            <Logo size={22} />
+            <Logo size={26} />
             {t("app.name")}
           </span>
           <nav

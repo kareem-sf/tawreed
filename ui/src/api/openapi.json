@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tawreed",
-    "version": "0.1.0"
+    "version": "0.0.1"
   },
   "paths": {
     "/health": {
@@ -1784,6 +1784,43 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/about/website": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Open Website",
+        "description": "Show the QS Mind website in the engineer's browser.",
+        "operationId": "open_website_about_website_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
