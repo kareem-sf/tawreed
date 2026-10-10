@@ -58,7 +58,7 @@ started by hand (Actions → CI → Run workflow), to stay inside the free GitHu
 `npm run package` freezes the service with PyInstaller into `service/dist/tawreed-service/` and builds the NSIS
 installer into `desktop/target/release/bundle/nsis/`. The installed app starts that service itself on a free local
 port with a fresh token, forwards the interface's requests to it, and the service stops when the app does. Its log
-is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.tawreed.desktop\logs`).
+is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.qsmind.tawreed\logs`).
 
 `npm run release` then writes `SHA256SUMS.txt` beside the installer and prints the `gh release create` command for
 a draft release. Make release builds on a machine with the Thmanyah files in place, so the installer carries them;
