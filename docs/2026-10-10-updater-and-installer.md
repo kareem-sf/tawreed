@@ -269,3 +269,12 @@ The build log retains non-fatal PyInstaller optional-import warnings for pysqlit
 - Live feed/deployment is owned by Platform; endpoint availability is not a prerequisite for quiet offline checks.
 - OpenConKit's updater: I could not read the repo (not found with my access), so this follows Tauri's documented
   pattern, not a copy of OpenConKit.
+
+
+## Installation failure recovery — 2026-10-11
+
+An install error no longer restarts Tawreed. After the signed download, the desktop must stop and wait for the service before installing. A stop error prevents installation. If the service is still alive it is kept; otherwise the desktop starts it again with the same port and token. An install error follows the same recovery path and returns an error to the interface. The service readiness flag is reset for a new child so requests can wait for startup. If recovery itself fails, the interface advises closing and reopening Tawreed.
+
+Focused Rust tests cover install failure, stop failure, success, and a stopped synthetic service process that answers requests after recovery. Run `cargo test --manifest-path desktop/Cargo.toml` alongside `npm run verify`.
+
+Fresh QA: use a throwaway signed Linux update with the existing test feed. Make the installed AppImage location unwritable to the test user, then select Update and restart. Expected: Tawreed stays open, shows the EN/AR installation error, and local service requests still work. Also repeat a successful update. Windows installer failures and native AppImage replacement still require packaged testing; the synthetic process test does not prove either platform installer.

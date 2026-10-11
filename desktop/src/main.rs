@@ -42,7 +42,7 @@ fn main() {
         })
         .setup(|app| {
             if !tauri::is_dev() {
-                let service = start_service(app)?;
+                let service = start_service(app.handle())?;
                 app.manage(service);
                 if signed_updates(app.handle()) {
                     app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -54,20 +54,25 @@ fn main() {
         .expect("Tawreed could not open its window");
 }
 
-fn start_service(app: &tauri::App) -> Result<Service, Box<dyn std::error::Error>> {
-    let executable = if cfg!(windows) { "tawreed-service.exe" } else { "tawreed-service" };
-    let program = app.path().resource_dir()?.join("service").join(executable);
+fn start_service(app: &AppHandle) -> Result<Service, Box<dyn std::error::Error>> {
     let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
     let token: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    let child = spawn_service(app, port, &token)?;
+    Ok(Service { port, token, ready: AtomicBool::new(false), child: Mutex::new(child) })
+}
+
+fn spawn_service(app: &AppHandle, port: u16, token: &str) -> Result<Child, Box<dyn std::error::Error>> {
+    let executable = if cfg!(windows) { "tawreed-service.exe" } else { "tawreed-service" };
+    let program = app.path().resource_dir()?.join("service").join(executable);
     let logs = app.path().app_log_dir()?;
     fs::create_dir_all(&logs)?;
 
     let mut command = Command::new(program);
     command
         .args(["--port", &port.to_string(), "--exit-with-stdin"])
-        .env("TAWREED_TOKEN", &token)
+        .env("TAWREED_TOKEN", token)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(File::create(logs.join("service.log"))?);
@@ -77,8 +82,7 @@ fn start_service(app: &tauri::App) -> Result<Service, Box<dyn std::error::Error>
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-    let child = command.spawn()?;
-    Ok(Service { port, token, ready: AtomicBool::new(false), child: Mutex::new(child) })
+    Ok(command.spawn()?)
 }
 
 /// Updates are on once the release configuration carries the public key that their signatures are checked with.
@@ -109,12 +113,50 @@ fn update(app: &AppHandle, service: &Service, method: &Method) -> Response<Vec<u
     let Ok(installer) = tauri::async_runtime::block_on(update.download(|_, _| {}, || {})) else {
         return plain(StatusCode::BAD_GATEWAY, "Tawreed couldn't download the update.");
     };
-    if let Ok(mut child) = service.child.lock() {
-        let _ = child.kill();
-        let _ = child.wait();
+    let result = install_with_recovery(
+        || {
+            let mut child = service.child.lock().map_err(|error| error.to_string())?;
+            child.kill().map_err(|error| error.to_string())?;
+            child.wait().map_err(|error| error.to_string())?;
+            Ok(())
+        },
+        || update.install(installer).map_err(|error| error.to_string()),
+        || {
+            let mut child = service.child.lock().map_err(|error| error.to_string())?;
+            restore_child(&mut child, || {
+                spawn_service(app, service.port, &service.token).map_err(|error| error.to_string())
+            })?;
+            service.ready.store(false, Ordering::Relaxed);
+            Ok(())
+        },
+    );
+    match result {
+        Ok(()) => app.restart(),
+        Err(_) => plain(StatusCode::BAD_GATEWAY, "Tawreed couldn't install the update. Try again; if the service isn't answering, reopen Tawreed."),
     }
-    let _ = update.install(installer); // on Windows the installer takes over here and Tawreed exits
-    app.restart()
+}
+
+/// Keep a service that survived a stop failure; otherwise replace the stopped process.
+fn restore_child(child: &mut Child, spawn: impl FnOnce() -> Result<Child, String>) -> Result<(), String> {
+    if child.try_wait().map_err(|error| error.to_string())?.is_none() {
+        return Ok(());
+    }
+    *child = spawn()?;
+    Ok(())
+}
+
+/// Only a completed install may restart the app. If stopping or installation fails, restore the service first.
+fn install_with_recovery(
+    stop: impl FnOnce() -> Result<(), String>,
+    install: impl FnOnce() -> Result<(), String>,
+    recover: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let result = stop().and_then(|()| install());
+    if let Err(error) = result {
+        recover().map_err(|recovery| format!("{error}; service recovery failed: {recovery}"))?;
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Send the interface's request to the service with the token, and hand back its answer. While the service is
@@ -175,4 +217,73 @@ fn allowed(response: Result<Response<Vec<u8>>, tauri::http::Error>) -> Response<
 fn plain(status: StatusCode, text: &str) -> Response<Vec<u8>> {
     let body = format!(r#"{{"detail": {{"code": "offline", "reason": "{text}"}}}}"#).into_bytes();
     allowed(Response::builder().status(status).header(header::CONTENT_TYPE, "application/json").body(body))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::{install_with_recovery, restore_child};
+    use std::cell::Cell;
+
+    #[test]
+    fn failed_install_restores_service_and_cannot_restart() {
+        let usable = Cell::new(true);
+        let result = install_with_recovery(
+            || { usable.set(false); Ok(()) },
+            || Err("AppImage location is unwritable".into()),
+            || { usable.set(true); Ok(()) },
+        );
+        assert!(result.is_err(), "only Ok may enter the restart path");
+        assert!(usable.get(), "service must be usable after recovery");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_install_restores_a_process_that_answers_requests() {
+        use std::cell::RefCell;
+        use std::io::{BufRead, BufReader, Write};
+        use std::process::{Command, Stdio};
+
+        // Synthetic service: an open stdin keeps it alive and each request gets a reply.
+        let spawn = || {
+            Command::new("sh").args(["-c", "while read -r line; do echo usable; done"])
+                .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().map_err(|error| error.to_string())
+        };
+        let child = RefCell::new(spawn().unwrap());
+        let result = install_with_recovery(
+            || {
+                let mut child = child.borrow_mut();
+                child.kill().map_err(|error| error.to_string())?;
+                child.wait().map_err(|error| error.to_string())?;
+                Ok(())
+            },
+            || Err("AppImage replacement failed".into()),
+            || restore_child(&mut child.borrow_mut(), spawn),
+        );
+        assert!(result.is_err());
+        let mut child = child.into_inner();
+        writeln!(child.stdin.as_mut().unwrap(), "request").unwrap();
+        let mut reply = String::new();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut reply).unwrap();
+        assert_eq!(reply, "usable\n");
+        child.stdin.take();
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn failed_stop_never_installs() {
+        let usable = Cell::new(true);
+        let result = install_with_recovery(
+            || Err("service stop failed".into()),
+            || panic!("must not install with locked service files"),
+            || { assert!(usable.get()); usable.set(true); Ok(()) },
+        );
+        assert!(result.is_err());
+        assert!(usable.get());
+    }
+
+    #[test]
+    fn successful_install_allows_restart_without_recovery() {
+        assert!(install_with_recovery(|| Ok(()), || Ok(()), || panic!("no recovery on success")).is_ok());
+    }
 }

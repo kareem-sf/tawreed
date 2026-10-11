@@ -30,6 +30,6 @@ test("a newer version is offered, and installed only when the engineer says so",
 
   // The app closes when the installer starts; an answer means the update didn't happen.
   finish(json({ detail: { code: "offline" } }, 502));
-  expect(await screen.findByRole("alert")).toHaveTextContent("The update couldn't be downloaded.");
+  expect(await screen.findByRole("alert")).toHaveTextContent("The update couldn't be downloaded or installed.");
   expect(screen.getByRole("button", { name: "Update and restart" })).toBeInTheDocument();
 });
