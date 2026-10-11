@@ -88,6 +88,9 @@ Each domain module owns its models and its service functions; the workflow's ste
   to the service with the token. As in development, the page never holds the token.
 - The app holds the service's standard input open; the service stops when it closes, so it can't outlive the app,
   even after a crash.
+- Updates are signed and the engineer starts them. The desktop app answers `/desktop/update` on the `api` scheme
+  itself: it reads the feed at the one address in `desktop/tauri.release.conf.json`, and installs only an installer
+  whose signature matches the public key built into the app. See `docs/2026-10-10-updater-and-installer.md`.
 
 ## Fonts
 

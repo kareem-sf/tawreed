@@ -12,6 +12,10 @@ export const ar: Record<Key, Entry> = {
   "tab.about": "حول توريد",
   "tabs.label": "الأقسام",
   "language.other": "English",
+  "update.ready": "توريد {version} جاهز للتثبيت.",
+  "update.install": "حدّث وأعد التشغيل",
+  "update.installing": "جارٍ التحديث… سيُغلق توريد ثم يفتح من جديد.",
+  "update.failed": "تعذّر تنزيل التحديث أو تثبيته. حاول مرة أخرى. إذا توقف توريد عن الاستجابة، أغلقه وافتحه من جديد.",
 
   "drop.title": "أفلت ملفات جداول الكميات هنا",
   "drop.formats": "إكسل أو CSV أو ODS أو PDF، والصفحات الممسوحة أيضاً",
@@ -318,7 +322,7 @@ export const ar: Record<Key, Entry> = {
   "about.version": "الإصدار {version}",
   "about.data": "مجلد البيانات",
   "about.licences": "التراخيص",
-  "about.license": "توريد مفتوح المصدر برخصة MIT.",
+  "about.license": "© 2026 كيو إس مايند. جميع الحقوق محفوظة.",
   "about.figtree": "خط Figtree، برخصة SIL المفتوحة للخطوط.",
   "about.thmanyah": "خط ثمانية © ثمانية، مستخدم وفق رخصة خط ثمانية.",
 

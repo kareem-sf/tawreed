@@ -53,17 +53,25 @@ the desktop window. Set `TAWREED_HOME` to use another data folder, for example a
 Run `npm run verify` before every push. CI runs the same checks, and fails if the API types are out of date, only when
 started by hand (Actions → CI → Run workflow), to stay inside the free GitHub Actions minutes.
 
-## Windows installer
+## Windows and Linux packages
 
 `npm run package` freezes the service with PyInstaller into `service/dist/tawreed-service/` and builds the NSIS
 installer into `desktop/target/release/bundle/nsis/`. The installed app starts that service itself on a free local
 port with a fresh token, forwards the interface's requests to it, and the service stops when the app does. Its log
-is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.tawreed.desktop\logs`).
+is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.qsmind.tawreed\logs`).
 
-`npm run release` then writes `SHA256SUMS.txt` beside the installer and prints the `gh release create` command for
-a draft release. Make release builds on a machine with the Thmanyah files in place, so the installer carries them;
-the script says whether it does.
+On Linux x64 the same native command builds an AppImage in `desktop/target/release/bundle/appimage/`.
+Build each platform on its own operating system. AppImage uses Tauri's maintained Linux updater path.
+
+`npm run release` prepares local checksums. With an updater public key configured, collect signed Windows and
+Linux packages of the same version in one bundle folder and run `npm run release -- <folder>` to write a combined
+`latest.json`. The script refuses a partial or unsigned feed. It does not publish. Make native builds with the
+licensed Thmanyah files present; they may only ship inside the compiled app.
+
+The app checks once when it opens, stays quiet offline, and installs only when the user presses Update and restart.
+The key, selected release inputs and clean Windows/Linux test steps are in
+[docs/2026-10-10-updater-and-installer.md](docs/2026-10-10-updater-and-installer.md).
 
 ## License
 
-[MIT](LICENSE) © 2026 Kareem Safwat.
+© 2026 QS Mind. All rights reserved. See [LICENSE](LICENSE).

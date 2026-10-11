@@ -99,6 +99,20 @@ export async function revisionZip(projectId: string, number: number): Promise<Bl
   return response.blob();
 }
 
+/** The newer Tawreed that is published, if any. The installed desktop app answers this itself; anywhere else
+    (development, a browser) there is nothing to update, so the answer is null. */
+export async function newerVersion(): Promise<string | null> {
+  const response = await globalThis.fetch(`${base}/desktop/update`).catch(() => null);
+  if (!response?.ok) return null;
+  return ((await response.json()) as { version: string | null }).version;
+}
+
+/** Download and install the newer Tawreed. The app closes while it installs, so an answer means it failed. */
+export async function installUpdate(): Promise<void> {
+  const response = await globalThis.fetch(`${base}/desktop/update`, { method: "POST" }).catch(offline);
+  throw await failure(response);
+}
+
 /** A plain sentence for the engineer, in their language. */
 export function explain(error: unknown, t: Translate): string {
   if (error instanceof ApiError) {

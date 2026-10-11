@@ -3,12 +3,14 @@ name = "tawreed-desktop"
 version = "0.1.0"
 description = "Tawreed desktop window"
 edition = "2024"
-license = "MIT"
+license-file = "../LICENSE"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"  # signed updates from the address in tauri.release.conf.json
+serde_json = "1"  # Tauri release context expands plugin configuration through this crate
 getrandom = "0.3"  # the service's access token
 ureq = "3"  # forwards the interface's requests to the service

@@ -16,6 +16,10 @@ export const en = {
   "tab.about": "About",
   "tabs.label": "Sections",
   "language.other": "العربية",
+  "update.ready": "Tawreed {version} is ready to install.",
+  "update.install": "Update and restart",
+  "update.installing": "Updating… Tawreed will close and open again.",
+  "update.failed": "The update couldn't be downloaded or installed. Try again. If Tawreed stops responding, close and reopen it.",
 
   "drop.title": "Drop BOQ files here",
   "drop.formats": "Excel, CSV, ODS or PDF, scanned pages too",
@@ -255,7 +259,7 @@ export const en = {
   "about.version": "Version {version}",
   "about.data": "Data folder",
   "about.licences": "Licences",
-  "about.license": "Tawreed is open source under the MIT licence.",
+  "about.license": "© 2026 QS Mind. All rights reserved.",
   "about.figtree": "Figtree, under the SIL Open Font License.",
   "about.thmanyah": "Thmanyah Sans and Thmanyah Serif Display © thmanyah, used under the thmanyah font licence.",
 

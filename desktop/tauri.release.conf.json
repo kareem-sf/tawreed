@@ -1,11 +1,21 @@
 {
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://downloads.qsmind.app/tawreed/latest.json"
+      ],
+      "pubkey": ""
+    }
+  },
   "bundle": {
+    "createUpdaterArtifacts": false,
     "active": true,
     "targets": [
-      "nsis"
+      "nsis",
+      "appimage"
     ],
-    "publisher": "Tawreed",
-    "copyright": "MIT licence",
+    "publisher": "QS Mind",
+    "copyright": "\u00a9 2026 QS Mind. All rights reserved.",
     "category": "Productivity",
     "shortDescription": "From bills of quantities to procurement packages",
     "resources": {
