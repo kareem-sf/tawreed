@@ -259,7 +259,7 @@ export const en = {
   "about.version": "Version {version}",
   "about.data": "Data folder",
   "about.licences": "Licences",
-  "about.license": "Tawreed is open source under the MIT licence.",
+  "about.license": "© 2026 QS Mind. All rights reserved.",
   "about.figtree": "Figtree, under the SIL Open Font License.",
   "about.thmanyah": "Thmanyah Sans and Thmanyah Serif Display © thmanyah, used under the thmanyah font licence.",
 

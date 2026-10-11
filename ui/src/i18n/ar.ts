@@ -322,7 +322,7 @@ export const ar: Record<Key, Entry> = {
   "about.version": "الإصدار {version}",
   "about.data": "مجلد البيانات",
   "about.licences": "التراخيص",
-  "about.license": "توريد مفتوح المصدر برخصة MIT.",
+  "about.license": "© 2026 كيو إس مايند. جميع الحقوق محفوظة.",
   "about.figtree": "خط Figtree، برخصة SIL المفتوحة للخطوط.",
   "about.thmanyah": "خط ثمانية © ثمانية، مستخدم وفق رخصة خط ثمانية.",
 
