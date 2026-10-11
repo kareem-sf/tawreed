@@ -1,19 +1,19 @@
 # Tawreed: the updater, the installer identity and the release inputs
 
-Date: 2026-10-10. Task QSM-3, branch `agent/qsm-3-updater`. Nothing is released, no key exists yet, and the updater
-has never run on Windows: see "Not checked" at the end.
+Date: 2026-10-10; revised 2026-10-11 after Engineering Lead changes requested. Task QSM-3, branch `agent/qsm-3-updater`. Nothing is released, no key exists yet, and the updater
+has never run on Windows or Linux: see "Not checked" at the end.
 
-The download place and the release runbook are the Platform Engineer's note, `docs/2026-10-10-release-and-updates.md`
-(task QSM-7, a proposal on branch `qsm-7-release-proposal`). This note is the app side.
+Saved launch choices in QSM-2/QSM-7: Windows AND Linux, app ID `com.qsmind.tawreed`, all rights reserved,
+MinIO hosting at `https://downloads.qsmind.app/tawreed/latest.json`, and Windows without Authenticode.
+This records the choices returned by the Engineering Lead; it is not merge, deploy or release approval.
+Tauri updater signatures remain mandatory. Hosting belongs to Platform (QSM-24).
 
 ## 1. How the updater works
 
-- The desktop app uses Tauri's updater (`tauri-plugin-updater`). An update is the same NSIS installer people
+- The desktop app uses Tauri's updater (`tauri-plugin-updater`). An update is the same Windows NSIS installer or Linux AppImage people
   download, with a signature file beside it. The app only installs a file whose signature matches the public key
   built into it.
-- **One address.** `plugins.updater.endpoints` in `desktop/tauri.release.conf.json`. Today it is the address QSM-7
-  proposes, `https://downloads.qsmind.app/tawreed/latest.json`. It is built into every installer, so it must be
-  final before the first release. Changing the host is this one line; `npm run release` works out the installer's
+- **One address.** `plugins.updater.endpoints` in `desktop/tauri.release.conf.json`. The selected address is `https://downloads.qsmind.app/tawreed/latest.json`. It is built into every package. Hosting approval remains separate. Changing the host is this one line; `npm run release` works out the installer's
   address from it (`v<version>/<installer>` beside `latest.json`).
 - **When it checks.** Once, when Tawreed opens. Offline or no answer: nothing is shown and nothing fails.
 - **What the engineer sees.** A line under the header on every tab: "Tawreed 0.2.0 is ready to install." with
@@ -65,26 +65,44 @@ What must be true before a build can be released:
 
 | Input | Where | State |
 |---|---|---|
-| Update address | `plugins.updater.endpoints` in `desktop/tauri.release.conf.json` | Proposed in QSM-7; founder has not said yes |
+| Update address | `plugins.updater.endpoints` in `desktop/tauri.release.conf.json` | Selected in QSM-7; deployment separate |
 | Updater public key | `plugins.updater.pubkey`, same file | Empty; founder makes the key |
 | `createUpdaterArtifacts` | `bundle`, same file | `false`; set `true` with the key |
 | Private key and password | Environment variables on the release machine | Do not exist yet |
-| App ID | `identifier` in `desktop/tauri.conf.json` | `com.qsmind.tawreed`; needs the founder's yes |
-| Publisher, copyright | `desktop/tauri.release.conf.json` | "QS Mind"; "© 2026 QS Mind. MIT licence." |
+| App ID | `identifier` in `desktop/tauri.conf.json` | `com.qsmind.tawreed`; selected launch identity |
+| Publisher, copyright | `desktop/tauri.release.conf.json` | "QS Mind"; "© 2026 QS Mind. All rights reserved." |
 | Version | `package.json`, `desktop/Cargo.toml`, `desktop/tauri.conf.json`, `service/pyproject.toml`, `service/tawreed/__init__.py` | Same number in all five |
 | Thmanyah font files | `ui/src/fonts/thmanyah/` on the release machine | Not in the repo (licence) |
 
-Then, on a Windows machine: `npm run verify`, `npm run package`, `npm run release`. With the key in place,
-`npm run package` also writes `Tawreed_<version>_x64-setup.exe.sig`, and `npm run release` writes `latest.json`
-beside the installer (and stops if the `.sig` is missing). Uploading is QSM-7's runbook; upload `latest.json` last.
+Build natively on **both** Windows x64 and Linux x64: `npm run verify`, then `npm run package`.
+Linux uses AppImage, the package supported by Tauri's Linux updater; no DEB/RPM update promise is made.
+With `createUpdaterArtifacts: true`, Tauri creates `.exe.sig` and `.AppImage.sig` beside the native artifacts.
+
+Collect the same version from both machines into a clean staging directory:
+
+```
+<staging>/nsis/Tawreed_<version>_x64-setup.exe
+<staging>/nsis/Tawreed_<version>_x64-setup.exe.sig
+<staging>/appimage/Tawreed_<version>_amd64.AppImage
+<staging>/appimage/Tawreed_<version>_amd64.AppImage.sig
+npm run release -- <staging>
+```
+
+The script writes `<staging>/SHA256SUMS.txt` and `<staging>/latest.json` with **both** platform entries.
+It refuses to replace a feed if either platform or a non-empty signature is absent. Synthetic tests prove this;
+the script checks signature presence, while the updater verifies cryptographic validity.
+Without a public key, it writes checksums for available native packages but no feed, and prints NOT FOR RELEASE.
+Never upload an old feed left in a staging folder. Upload both artifacts and signatures to `v<version>/`, then
+the combined `latest.json` last, only through the separately approved Platform runbook. Nothing publishes here.
 
 ## 4. Installer identity and the app ID
 
-- Publisher is "QS Mind". Copyright is "© 2026 QS Mind. MIT licence.", the same line as on `brand-v2`, so the two
-  branches merge cleanly. **The licence is still the founder's open decision**: if it changes, this line changes
-  with it (one string).
-- App ID `com.tawreed.desktop` → `com.qsmind.tawreed` is its own commit (`1d40e69`). `brand-v2` already carries the
-  same change inside its brand commit. **It needs the founder's yes before the first release.**
+- Publisher is "QS Mind". Copyright is "© 2026 QS Mind. All rights reserved."
+- The selected proprietary licence is reflected in EN/AR About, root/service LICENSE, npm metadata (UNLICENSED),
+  Cargo's licence-file and Python metadata (LicenseRef-Proprietary). Third-party font notices remain unchanged.
+  This branch changes no brand assets. Older MIT copies in brand branches need reconciliation by their owner.
+- App ID `com.tawreed.desktop` → `com.qsmind.tawreed` remains its own commit (`1d40e69`).
+  It is the selected launch identity. No further app-ID change is included.
 
 What the app ID changes on Windows:
 
@@ -119,8 +137,8 @@ npm run package
 npm run release
 ```
 
-Expected: `desktop\target\release\bundle\nsis\Tawreed_<version>_x64-setup.exe` exists; `npm run release` prints its
-hash and "NOT FOR RELEASE: no updater public key". No key is needed for this build.
+Expected: `desktop\target\release\bundle\nsis\Tawreed_<version>_x64-setup.exe` exists; `npm run release` writes
+checksums in the bundle folder and prints "NOT FOR RELEASE: no updater public key". No key is needed for this build.
 
 ## 6. Test steps on a clean Windows PC (for QA)
 
@@ -141,7 +159,7 @@ Use a normal user, not an administrator. Use synthetic BOQs only.
    does **not** exist.
 7. Settings > Apps > Installed apps, find Tawreed. Expect: publisher "QS Mind".
 8. Right-click `%LOCALAPPDATA%\Tawreed\Tawreed.exe` > Properties > Details. Expect: copyright
-   "© 2026 QS Mind. MIT licence."
+   "© 2026 QS Mind. All rights reserved."
 9. Drop a synthetic BOQ and take it as far as the launch test plan (QSM-6) says.
 10. Close Tawreed. In Task Manager, expect no `tawreed-service.exe` left after a few seconds.
 11. Uninstall from Settings. Expect: the app is gone; `%USERPROFILE%\.tawreed` (your projects) is still there.
@@ -178,11 +196,76 @@ in section 3), each with `npm run package` and `npm run release`. Nothing is upl
 
 Report for each step: pass or fail, the exact words on screen, and a screenshot for steps A2, B4, B5 and B8.
 
+## 7. Native Linux build and clean install/update (for QA)
+
+Build on an x64 Linux machine with Python 3.12, Node 24, Rust and Tauri prerequisites. Debian/Ubuntu packages:
+`libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`.
+AppImage tooling also needs working FUSE (or extraction support) and network access for Tauri's bundler tools.
+Build on the oldest supported distribution: building on newer glibc raises the minimum runtime requirement.
+This local Arch/Omarchy build cannot establish Ubuntu/Debian compatibility.
+
+```
+python3.12 -m venv service/.venv
+service/.venv/bin/python -m pip install -e './service[dev]'
+npm ci
+npm run verify
+npm run package
+npm run release
+```
+
+Expected package: `desktop/target/release/bundle/appimage/Tawreed_<version>_amd64.AppImage`.
+No production key is needed for a local package. No-key release command only prepares checksums.
+
+On a clean Linux x64 desktop with no Python/Node/Rust installed:
+
+1. Copy the AppImage to a user-owned writable directory. Compare `sha256sum <file>` with SHA256SUMS.txt.
+2. `chmod +x <file>` and run `./<file>`. If FUSE is unavailable, record the error; install the distro's FUSE runtime
+   as directed by its documentation, or use `--appimage-extract-and-run` for a diagnostic. An extracted tree is not
+   the install/update acceptance test. No sudo is needed to run the app.
+3. Expect Home and a running bundled service. Check EN/AR About: all rights reserved and retained font notices.
+   Use a synthetic project; confirm it is saved under `~/.tawreed`.
+4. Close the app; confirm its service process also exits. Reopen offline; expect quiet update checks.
+5. Use the throwaway-key, HTTPS-test-feed and two-build process from Windows Part B, with native AppImages.
+   Collect the Windows artifacts too before generating the combined feed. Both builds must use the same test key.
+6. Run N from the writable directory. Offer N+1. Confirm no installation occurs until Update and restart is pressed.
+   Expect the AppImage to be replaced, restart on N+1, one service process, and unchanged synthetic projects/settings.
+7. Repeat with tampered N+1 bytes, a broken feed, an unwritable AppImage location, and an active BOQ run.
+   Record exact errors and project recovery. A failed install must not be recorded as a successful update.
+8. Delete only the AppImage to uninstall; confirm `~/.tawreed` remains.
+
+Tauri documents the native AppImage/signature format and platform keys:
+https://v2.tauri.app/plugin/updater/ ; build baseline caveats:
+https://v2.tauri.app/distribute/appimage/ ; prerequisites:
+https://v2.tauri.app/start/prerequisites/ . Checked 2026-10-11.
+
+## Revision verification (2026-10-11)
+
+`npm run verify` passed: typecheck, Ruff, Clippy, 124 service tests, 53 UI tests and five release tests.
+EN/AR About was opened in the running foreground dev app at `127.0.0.1:15433`, with `TAWREED_HOME` set to a
+run-owned synthetic directory. Screenshots show the proprietary notice, retained font notices and Arabic RTL.
+The frozen Linux service answered `/about` with version 0.1.0 and exited with code 0 when stdin closed.
+The desktop selects `tawreed-service.exe` on Windows and `tawreed-service` on Linux. A direct `serde_json`
+dependency fixes Tauri release-context compilation with the updater config.
+No licensed Arabic fonts are present in this worktree, so that check used the system fallback.
+Paperclip reported no managed execution workspace; the documented foreground command was used and stopped.
+The local run needed explicit `RUSTUP_HOME=/home/kareem/.rustup CARGO_HOME=/home/kareem/.cargo RUSTUP_TOOLCHAIN=stable`.
+The stale Python environment was recreated with a persistent Python 3.12 installation before verification.
+`npm run package` succeeded natively on Omarchy/Arch x64 (glibc 2.44):
+`desktop/target/release/bundle/appimage/Tawreed_0.1.0_amd64.AppImage`, 168.19 MiB.
+The bundled service exists with executable permission in `usr/lib/Tawreed/service/tawreed-service`.
+`npm run release` prepared its SHA256SUMS.txt and printed NOT FOR RELEASE because no public key is configured.
+This is a local diagnostic package without Thmanyah; it was not published and is not launch-approved.
+The build log retains non-fatal PyInstaller optional-import warnings for pysqlite2/MySQLdb and ignored Linux icon.
+
 ## Not checked
 
-- The installer was not built and the updater has not run on Windows. Everything in section 6 is untested.
+- The Windows installer was not built here. A Windows 10/11 build machine with Python 3.12, Node 24, Rust, MSVC
+  build tools and WebView2 is required. Everything in section 6 is untested.
+- Clean Linux install/update and Ubuntu/Debian compatibility are NOT TESTED. QA needs clean target Linux VMs;
+  actual signed updates on both systems also need two native builds, a throwaway test key and an approved HTTPS
+  test location. No production signing key was made.
 - The moment in step B5 where the service stops and the installer replaces its files. This is the part most likely
   to need a fix.
-- The address `downloads.qsmind.app` does not exist yet (QSM-7).
+- Live feed/deployment is owned by Platform; endpoint availability is not a prerequisite for quiet offline checks.
 - OpenConKit's updater: I could not read the repo (not found with my access), so this follows Tauri's documented
   pattern, not a copy of OpenConKit.

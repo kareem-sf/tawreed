@@ -55,7 +55,8 @@ fn main() {
 }
 
 fn start_service(app: &tauri::App) -> Result<Service, Box<dyn std::error::Error>> {
-    let program = app.path().resource_dir()?.join("service").join("tawreed-service.exe");
+    let executable = if cfg!(windows) { "tawreed-service.exe" } else { "tawreed-service" };
+    let program = app.path().resource_dir()?.join("service").join(executable);
     let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;

@@ -11,10 +11,11 @@
     "createUpdaterArtifacts": false,
     "active": true,
     "targets": [
-      "nsis"
+      "nsis",
+      "appimage"
     ],
     "publisher": "QS Mind",
-    "copyright": "© 2026 QS Mind. MIT licence.",
+    "copyright": "\u00a9 2026 QS Mind. All rights reserved.",
     "category": "Productivity",
     "shortDescription": "From bills of quantities to procurement packages",
     "resources": {
