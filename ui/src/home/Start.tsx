@@ -1,12 +1,14 @@
-import { explain } from "../api/client";
+import { useQuery } from "@tanstack/react-query";
+import { api, must, explain } from "../api/client";
 import { ago } from "../app/format";
 import { useSettings } from "../app/settings";
-import { Alert, button, SectionLabel } from "../app/ui";
+import { Alert, button, SectionLabel, Skeleton } from "../app/ui";
 import { DropRegion, PickFiles } from "./files";
 import { useProjects, useStartProject } from "./queries";
 
-export function Start({ onOpen }: { onOpen: (id: string) => void }) {
+export function Start({ onOpen, onOpenSettings }: { onOpen: (id: string) => void; onOpenSettings: () => void }) {
   const { t, locale } = useSettings();
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => must(api.GET("/settings")) });
   const projects = useProjects();
   const start = useStartProject();
   const begin = (files: File[]) => start.mutate(files, { onSuccess: (project) => onOpen(project.id) });
@@ -16,6 +18,20 @@ export function Start({ onOpen }: { onOpen: (id: string) => void }) {
     <DropRegion onFiles={begin} className="flex min-h-full flex-col items-center justify-center gap-10 px-4 py-10 sm:px-6">
       {(over) => (
         <>
+          {(settings.isPending || settings.isError || (settings.isSuccess && !settings.data.ai) || projects.isError) && (
+            <div className="flex w-full max-w-[640px] flex-col gap-3">
+              {settings.isPending && <Skeleton className="h-20 w-full" />}
+              {settings.isError && <Alert onRetry={() => void settings.refetch()}>{explain(settings.error, t)}</Alert>}
+              {settings.isSuccess && !settings.data.ai && (
+                <section aria-labelledby="connect-ai" className="flex flex-col items-start gap-3 rounded-xl border border-amber p-5">
+                  <h2 id="connect-ai" className="font-heading text-xl font-light">{t("start.connectTitle")}</h2>
+                  <p className="text-ink-2">{t("start.connectNote")}</p>
+                  <button type="button" onClick={onOpenSettings} className={button("primary")}>{t("start.connect")}</button>
+                </section>
+              )}
+              {projects.isError && <Alert onRetry={() => void projects.refetch()}>{explain(projects.error, t)}</Alert>}
+            </div>
+          )}
           <section
             aria-label={t("drop.label")}
             aria-busy={start.isPending}

@@ -1,6 +1,9 @@
 import type { Entry, Key } from "./en";
 
 export const ar: Record<Key, Entry> = {
+  "start.connectTitle": "اربط الذكاء الاصطناعي لبدء العمل",
+  "start.connectNote": "أضف اتصالاً في الإعدادات، وافحص نموذجاً، ثم اختره لتوريد.",
+  "start.connect": "اربط الذكاء الاصطناعي",
   "app.name": "توريد",
   "ui.retry": "حاول مرة أخرى",
   "ui.cancel": "إلغاء",

@@ -5,6 +5,9 @@ export type Plural = Partial<Record<Intl.LDMLPluralRule, string>> & { other: str
 export type Entry = string | Plural;
 
 export const en = {
+  "start.connectTitle": "Connect AI to start work",
+  "start.connectNote": "Add a connection in Settings, check a model, then choose it for Tawreed.",
+  "start.connect": "Connect AI",
   "app.name": "Tawreed",
   "ui.retry": "Try again",
   "ui.cancel": "Cancel",

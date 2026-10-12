@@ -16,6 +16,6 @@ export function Home({
   return projectId ? (
     <ProjectView key={projectId} projectId={projectId} onClose={onClose} onOpenSettings={onOpenSettings} />
   ) : (
-    <Start onOpen={onOpen} />
+    <Start onOpen={onOpen} onOpenSettings={onOpenSettings} />
   );
 }
