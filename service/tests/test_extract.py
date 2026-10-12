@@ -235,3 +235,13 @@ def test_laying_out_a_page_again_replaces_its_items_and_keeps_the_layout(client)
         with pytest.raises(ledger.NotReadable) as missing:
             ledger.lay_out_sheet(session, app.state.home, source, 9, DIV03, "agent")
         assert missing.value.code == "page_not_found"
+
+
+def test_an_item_with_total_in_its_description_and_a_unit_stays_an_item():
+    drafts, report = extract_sheet(
+        {"rows": [["1", "Total station survey", "day", 2, 50, 100]]},
+        1,
+        DIV03.model_copy(update={"first_row": 1}),
+    )
+    assert [(d.code, d.quantity, d.amount) for d in drafts] == [("1", Decimal(2), Decimal(100))]
+    assert not report.totals

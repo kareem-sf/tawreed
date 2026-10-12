@@ -320,3 +320,42 @@ def test_a_sheet_with_a_total_per_section_reconciles_when_the_sections_add_up(cl
         [total] = packages.coverage(session, project["id"], set()).totals
     assert total["count"] == 2 and packages.money(total["stated_sum"]) == Decimal("4261.40")
     assert str(packages.money(total["difference"])) == "0.00"  # each section total, added up, equals the items
+
+
+@pytest.mark.parametrize("total_label", ["Total carried to summary", "المجموع"])
+def test_excel_quantity_total_is_not_a_procurement_item(client, total_label):
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Synthetic"
+    for row in [
+        ["ITEM", "DESCRIPTION", "UNIT", "QTY", "RATE", "AMOUNT"],
+        ["البند", "الوصف", "الوحدة", "الكمية", "السعر", "القيمة"],
+        [None, "Concrete / أعمال الخرسانة"],
+        ["1", "Concrete", "m3", 10, 20, 200],
+        ["2", "خرسانة", "م3", "١٥", 20, 300],
+        ["3", None, "m3", 7],
+        ["4", "Rate only", "m3", "invalid"],
+        [None, total_label, None, 25, None, 500],
+    ]:
+        sheet.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    project = read_all(client, start(client, {"synthetic.xlsx": buffer.getvalue()})["id"])
+    with client.app.state.sessions() as session:
+        source = session.get(Source, project["sources"][0]["id"])
+        report = ledger.lay_out_sheet(
+            session, client.app.state.home, source, 1, DIV03.model_copy(update={"first_row": 1}), "agent"
+        )
+        items = packages.active_items(session, project["id"])
+        assert [i.code for i in items] == ["1", "2", "4"]
+        assert [i.quantity for i in items] == ["10", "15", None]
+        assert items[2].quantity_text == "invalid"
+        assert items[1].provenance["cells"]["quantity"] == "D5"
+        assert report["without_quantity"] == 1
+        assert any(s["reason"] == "quantity_without_description" for s in report["skipped"])
+        [package] = planned(session, project["id"], ("Concrete",))
+        packages.place(session, session.get(Project, project["id"]), items, package, "agent")
+        coverage = packages.coverage(session, project["id"], set())
+        assert coverage.packages[0].amount == Decimal(500)
+        assert coverage.items == coverage.placed == 3
+        assert coverage.totals[0]["difference"] == 0

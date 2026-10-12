@@ -220,15 +220,16 @@ def _classify(report: Report, where: dict, code: str, description: str, unit: st
     if normalised(unit) in _HEADER_WORDS or normalised(text_of(raw_quantity)) in _HEADER_WORDS:
         report.skip(where, "header_row", " ".join(t for t in (code, description, unit) if t))
         return None
+    # Totals can sum quantities as well as amounts; that quantity is not an item.
+    if description and not unit and is_total(description):
+        report.totals.append({**where, "text": description[:120], "amount": text_of(amount) or None})
+        return None
     if description and (quantity is not None or unit):
         return "item"
     if quantity is not None:
         report.skip(where, "quantity_without_description", f"{code} {text_of(raw_quantity)}".strip())
         return None
     if description and not unit:
-        if is_total(description):
-            report.totals.append({**where, "text": description[:120], "amount": text_of(amount) or None})
-            return None
         if is_note(description) or _is_bullet(description):
             report.notes += 1
             return None
