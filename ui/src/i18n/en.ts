@@ -265,6 +265,7 @@ export const en = {
   "error.project_not_found": "This project no longer exists.",
   "error.offline": "The Tawreed service isn’t answering. Make sure Tawreed is running, then try again.",
   "error.unknown": "Something went wrong ({status}). Try again.",
+  "error.key_missing": "The connection has no key. Add the key again in Settings.",
   "error.key_refused": "The key was refused. Check it and try again.",
   "error.model_missing": "This model isn’t available on this account.",
   "error.rate_limited": "The service is limiting requests, or the account is out of credit. Try again later.",

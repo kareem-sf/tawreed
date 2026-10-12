@@ -50,6 +50,12 @@ class CodexStatus(BaseModel):
     signed_in: bool
 
 
+class ConnectionTest(BaseModel):
+    ok: bool
+    problem: str | None = None
+    params: dict[str, str] = {}
+
+
 class CheckRequest(BaseModel):
     model: Text
 
@@ -116,6 +122,24 @@ async def list_models(connection_id: str, home: Home) -> list[str]:
         if c["provider"] == "openai_compatible":
             return []  # the engineer types the model name instead
         raise _failed(error) from error
+
+
+@router.post("/connections/{connection_id}/test")
+async def test_connection(connection_id: str, home: Home) -> ConnectionTest:
+    """Reach the provider with the saved key, without spending a model request. A failure is the answer, not an
+    error: `problem` is the code the interface explains (no key, key refused, unreachable, ...)."""
+    c = _connection(home, connection_id)
+    if c["provider"] == "codex":
+        state = await anyio.to_thread.run_sync(codex.status)
+        if not state["installed"]:
+            return ConnectionTest(ok=False, problem="codex_missing")
+        if not state["signed_in"]:
+            return ConnectionTest(ok=False, problem="codex_signed_out")
+        return ConnectionTest(ok=True)
+    failure = await providers.ping(c["provider"], c["api_key"], c["base_url"])
+    return (
+        ConnectionTest(ok=True) if failure is None else ConnectionTest(ok=False, problem=failure[0], params=failure[1])
+    )
 
 
 @router.post("/connections/{connection_id}/checks")

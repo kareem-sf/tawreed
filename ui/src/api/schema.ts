@@ -598,6 +598,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai/connections/{connection_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Connection
+         * @description Reach the provider with the saved key, without spending a model request. A failure is the answer, not an
+         *     error: `problem` is the code the interface explains (no key, key refused, unreachable, ...).
+         */
+        post: operations["test_connection_ai_connections__connection_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai/connections/{connection_id}/checks": {
         parameters: {
             query?: never;
@@ -752,6 +773,20 @@ export interface components {
             /** Checks */
             checks: {
                 [key: string]: components["schemas"]["ModelCheck"];
+            };
+        };
+        /** ConnectionTest */
+        ConnectionTest: {
+            /** Ok */
+            ok: boolean;
+            /** Problem */
+            problem?: string | null;
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
+                [key: string]: string;
             };
         };
         /** CoverageOut */
@@ -2524,6 +2559,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": string[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_ai_connections__connection_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTest"];
                 };
             };
             /** @description Validation Error */
