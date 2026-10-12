@@ -1,11 +1,17 @@
-// Tawreed's mark, kept from the previous app: one source beam, a central T, and two routed outputs.
-// Monochrome: it takes the surrounding text colour, so it follows the theme. The gold version is the app icon.
+// Tawreed's mark: the QS Mind sphere with Tawreed's Steel face (brand v2), from brand/tawreed/mark/tawreed-mark.svg
+// in the QS Mind workspace. One mark at every size, only resized. The lines take the surrounding text colour, so
+// they are ink on light and white on dark; the face keeps its Steel.
 export function Logo({ size = 20 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true" data-testid="logo">
-      <path d="M5.1 4.5H28L24.7 10.7H18.5V27.4L14.2 24.9V10.7H7.2L3.7 7.4L5.1 4.5Z" fill="currentColor" />
-      <path d="M18.5 14H25.1L22.8 18.3H18.5V14Z" fill="currentColor" opacity="0.78" />
-      <path d="M18.5 20.6H22L19.9 24.7H18.5V20.6Z" fill="currentColor" opacity="0.52" />
+    <svg width={size} height={size} viewBox="0 0 240 240" fill="none" aria-hidden="true" data-testid="logo">
+      <defs>
+        <linearGradient id="logo-face" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#98BBE2" />
+          <stop offset="1" stopColor="#3A6394" />
+        </linearGradient>
+      </defs>
+      <polygon points="182.68,51.49 206.9,101.48 158.61,79.35" fill="url(#logo-face)" />
+      <path d="M18 109.32L31.22 171.34M18 109.32L31.63 138.83M18 109.32L41.86 84.2M18 109.32L43.74 51.39M31.22 171.34L31.63 138.83M31.22 171.34L63.25 184.55M31.22 171.34L78.35 213.75M31.63 138.83L41.86 84.2M31.63 138.83L63.25 184.55M31.63 138.83L69.83 130.69M41.86 84.2L43.74 51.39M41.86 84.2L69.83 130.69M41.86 84.2L75.43 40.26M41.86 84.2L95.57 72.76M43.74 51.39L75.43 40.26M43.74 51.39L98.61 19.66M63.25 184.55L69.83 130.69M63.25 184.55L78.35 213.75M63.25 184.55L111.82 210.98M63.25 184.55L116.96 173.1M69.83 130.69L95.57 72.76M69.83 130.69L116.96 173.1M69.83 130.69L123.01 119.36M75.43 40.26L95.57 72.76M75.43 40.26L98.61 19.66M75.43 40.26L130.64 32.86M78.35 213.75L111.82 210.98M78.35 213.75L141.39 220.34M95.57 72.76L123.01 119.36M95.57 72.76L130.64 32.86M95.57 72.76L158.61 79.35M98.61 19.66L130.64 32.86M98.61 19.66L161.65 26.25M111.82 210.98L116.96 173.1M111.82 210.98L141.39 220.34M111.82 210.98L165.25 195.22M116.96 173.1L123.01 119.36M116.96 173.1L165.25 195.22M116.96 173.1L171.83 141.37M123.01 119.36L158.61 79.35M123.01 119.36L171.83 141.37M130.64 32.86L158.61 79.35M130.64 32.86L161.65 26.25M130.64 32.86L182.68 51.49M141.39 220.34L165.25 195.22M141.39 220.34L196.26 188.61M158.61 79.35L171.83 141.37M158.61 79.35L182.68 51.49M158.61 79.35L206.9 101.48M161.65 26.25L182.68 51.49M161.65 26.25L208.78 68.66M165.25 195.22L171.83 141.37M165.25 195.22L196.26 188.61M165.25 195.22L205.17 157M171.83 141.37L205.17 157M171.83 141.37L206.9 101.48M182.68 51.49L206.9 101.48M182.68 51.49L208.78 68.66M196.26 188.61L205.17 157M196.26 188.61L222 130.68M205.17 157L206.9 101.48M205.17 157L222 130.68M206.9 101.48L208.78 68.66M206.9 101.48L222 130.68M208.78 68.66L222 130.68" stroke="currentColor" strokeWidth="4.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

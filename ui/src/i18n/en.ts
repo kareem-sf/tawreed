@@ -257,14 +257,14 @@ export const en = {
   "add.checking": "Checking the key…",
   "project.openSettings": "Open Settings",
 
-  "about.title": "About Tawreed",
   "about.tagline": "From bills of quantities to procurement packages.",
   "about.version": "Version {version}",
+  "about.madeBy": "Made by",
+  "about.company": "QS Mind",
+  "about.licence": "Licence",
+  "about.copyright": "© 2026 QS Mind",
   "about.data": "Data folder",
-  "about.licences": "Licences",
   "about.license": "© 2026 QS Mind. All rights reserved.",
-  "about.figtree": "Figtree, under the SIL Open Font License.",
-  "about.thmanyah": "Thmanyah Sans and Thmanyah Serif Display © thmanyah, used under the thmanyah font licence.",
 
   "error.unsupported_file": "Tawreed can’t read “{file}”. Use Excel, CSV, ODS, PDF or an image.",
   "error.empty_file": "“{file}” is empty.",

@@ -108,7 +108,7 @@ means "needs you". No sidebars, dashboards or decoration.
 
 English and Arabic interface with full right-to-left layout; the AI writes package names, scopes and reasons in
 the interface language. English
-text uses Figtree and Arabic text uses Thmanyah Sans, with Thmanyah Serif Display for Arabic headings: light
+text uses Kumbh Sans and Arabic text uses Thmanyah Sans, with its swash letters on Arabic headings: light
 headings, regular body text. Light and dark themes, following the system. A desktop app on
 Windows first.
 

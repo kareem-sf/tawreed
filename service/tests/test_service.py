@@ -51,6 +51,13 @@ def test_about_names_the_version_and_data_folder(client, tmp_path):
     assert about["data_folder"] == str(tmp_path)
 
 
+def test_about_opens_the_qs_mind_website(client, monkeypatch):
+    opened = []
+    monkeypatch.setattr("webbrowser.open", opened.append)
+    assert client.post("/about/website").status_code == 204
+    assert opened == ["https://qsmind.app"]
+
+
 def test_the_service_stops_when_the_desktop_app_lets_go_of_it(tmp_path):
     """Run as the desktop app runs it: when its standard input closes (the app exited or crashed), it stops."""
     import os

@@ -331,3 +331,22 @@ machine.
   120-character package name is enough): revision files are now written and exported through extended paths. An
   unknown service failure read "({status})"; it now gives the status.
 - **Checks:** 124 service tests, 49 interface tests, typecheck, Ruff, Clippy.
+
+## 10 October 2026: QS Mind brand v2
+
+- The "T" monogram is retired. Tawreed now carries the QS Mind sphere with its Steel face: the mark in the
+  header (lines in the text colour, so ink on light and white on dark), the brand favicon, and app icons made from
+  the full mark with the sphere's outline filled with Paper, as Qiyas does. Master files: `brand/tawreed/` in the
+  QS Mind workspace.
+- Founder's decisions: the header is the sphere and the name only; amber stays the one accent ("needs you") and
+  Steel is for the mark only; Arabic headings use Thmanyah Sans with swash letters, so Thmanyah Serif Display is no
+  longer loaded; English uses Kumbh Sans, the QS Mind site's typeface, in place of Figtree; the licence stays
+  all rights reserved.
+- App ID `com.tawreed.desktop` became `com.qsmind.tawreed` (before any release, so nothing moves for users). The
+  installer's publisher is QS Mind.
+- About was rebuilt: the mark at 64 px, the name, the tagline and the version, then three rows (made by QS Mind with a
+  name itself the link to qsmind.app, the licence, the data folder) and the copyright line. No font credits in the
+  interface (founder's decision). The link is opened by the service (`POST /about/website`), as the revision folders are.
+- Kumbh Sans kerns "/." so tightly that the dot disappears; the data-folder path turns kerning off.
+- No support email: support will be a form in the app that saves to the QS Mind database. Not built yet.
+- Not done here: the repository is still private on GitHub; the launch-gaps items on logs and updates in About.

@@ -320,14 +320,14 @@ export const ar: Record<Key, Entry> = {
   "add.checking": "جارٍ التحقق من المفتاح…",
   "project.openSettings": "افتح الإعدادات",
 
-  "about.title": "حول توريد",
   "about.tagline": "من جداول الكميات إلى حزم التوريد.",
   "about.version": "الإصدار {version}",
+  "about.madeBy": "من تطوير",
+  "about.company": "كيو إس مايند",
+  "about.licence": "الترخيص",
+  "about.copyright": "© 2026 كيو إس مايند",
   "about.data": "مجلد البيانات",
-  "about.licences": "التراخيص",
   "about.license": "© 2026 كيو إس مايند. جميع الحقوق محفوظة.",
-  "about.figtree": "خط Figtree، برخصة SIL المفتوحة للخطوط.",
-  "about.thmanyah": "خط ثمانية © ثمانية، مستخدم وفق رخصة خط ثمانية.",
 
   "error.unsupported_file": "لا يستطيع توريد قراءة «{file}». استخدم إكسل أو CSV أو ODS أو PDF أو صورة.",
   "error.empty_file": "الملف «{file}» فارغ.",
