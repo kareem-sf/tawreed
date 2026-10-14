@@ -1,5 +1,5 @@
-// Tawreed's mark: the QS Mind sphere with Tawreed's Steel face (brand v2), from brand/tawreed/mark/tawreed-mark.svg
-// in the QS Mind workspace. One mark at every size, only resized. The lines take the surrounding text colour, so
+// Tawreed's mark: the QS Mind sphere with Tawreed's Steel face (brand v2), from brand/mark/tawreed-mark.svg
+// in this repo. One mark at every size, only resized. The lines take the surrounding text colour, so
 // they are ink on light and white on dark; the face keeps its Steel.
 export function Logo({ size = 20 }: { size?: number }) {
   return (

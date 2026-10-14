@@ -25,8 +25,8 @@ specification is `docs/spec.md`; the architecture is `docs/architecture.md`; the
   RTL. Every number is one click from its source. No provider, model or token details outside Settings, except
   that the consent card names the service a project's content would go to.
 - **Brand.** QS Mind brand v2: the QS Mind sphere with Tawreed's Steel face (`#98BBE2` to `#3A6394`), for the
-  mark only. Amber stays the one accent and means "needs you". The master files are `brand/tawreed/` in the QS Mind
-  workspace. App ID `com.qsmind.tawreed`; publisher QS Mind. All rights reserved (proprietary licence).
+  mark only. Amber stays the one accent and means "needs you". Tawreed\'s brand files are in `brand/` in this repo
+  (master kit: `brand/` in qs-mind/website). App ID `com.qsmind.tawreed`; publisher QS Mind. All rights reserved (proprietary licence).
 - **Fonts.** Kumbh Sans for English, as on the QS Mind site (open licence, bundled; light headings, regular body).
   Thmanyah Sans for all Arabic, with its swash letters (`swsh`) on headings: its licence forbids committing,
   uploading or hosting the font files, so they live only in the gitignored `ui/src/fonts/thmanyah/` and ship only
