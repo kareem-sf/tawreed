@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="-8 -8 256 256">
   <!-- The app icon: the Tawreed mark, exactly, with the sphere's own outline filled with Paper so it reads on a
-       dark taskbar. Made from brand/tawreed/mark/tawreed-mark.svg (the QS Mind workspace). -->
+       dark taskbar. Made from brand/mark/tawreed-mark.svg. -->
   <defs>
     <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#98BBE2"/>
