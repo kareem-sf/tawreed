@@ -1,11 +1,16 @@
+import io
 import time
 
+import openpyxl
 from conftest import TOKEN
 from fastapi.testclient import TestClient
 from reading import FIXTURES, read_all, scan, start, workbook
+from sqlalchemy import delete
 
 from tawreed.api.app import create_app
+from tawreed.projects import Project
 from tawreed.sources import overlap
+from tawreed.sources import reader as reader_module
 from tawreed.sources.arabic import Char, lines_from_chars, reading_text
 
 
@@ -92,6 +97,48 @@ def test_files_that_cannot_be_read_say_why(client):
         ("failed", "password_protected"),
         ("failed", "damaged_file"),
     ]
+
+
+def test_a_sheet_too_big_to_read_fails_on_its_own_and_the_service_reads_on(client):
+    """One value in the last cell of a sheet makes the spreadsheet library build the whole grid (hundreds of
+    gigabytes) and abort. The file is read in a child process, so only the file fails, and the next file reads."""
+    book = openpyxl.Workbook()
+    book.active["A1"], book.active["XFD1048576"] = "Item", "x"
+    buffer = io.BytesIO()
+    book.save(buffer)
+    project = read_all(client, start(client, {"Huge.xlsx": buffer.getvalue(), "Tower.xlsx": workbook()})["id"])
+    assert [(s["status"], s["problem"]) for s in project["sources"]] == [("failed", "too_big"), ("read", None)]
+
+
+def test_a_file_whose_project_was_deleted_just_before_reading_is_skipped_and_reading_goes_on(tmp_path, monkeypatch):
+    """The project is deleted after the reader found its file and before it claimed it. The reader leaves it, keeps
+    nothing of it, and reads the next project's file; what is left of the deleted project goes at the next start."""
+    real, deleted = reader_module.update, []
+
+    def delete_first(entity):
+        if not deleted:
+            with app.state.sessions() as other:
+                deleted.append(other.execute(delete(Project)).rowcount)
+                other.commit()
+        return real(entity)
+
+    monkeypatch.setattr(reader_module, "update", delete_first)
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    app = create_app(tmp_path, TOKEN)
+    with TestClient(app, headers=headers) as c:
+        gone = start(c, {"Tower.xlsx": workbook()})["id"]
+        deadline = time.monotonic() + 30
+        while not deleted:
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        assert deleted == [1]
+        project = read_all(c, start(c, {"Next.xlsx": workbook()})["id"])
+        assert project["sources"][0]["status"] == "read"
+        assert not (tmp_path / "projects" / gone / "pages").exists()
+    assert (tmp_path / "projects" / gone).is_dir()  # its copy of the file, until the next start
+    with TestClient(create_app(tmp_path, TOKEN), headers=headers):
+        assert not (tmp_path / "projects" / gone).exists()
+        assert (tmp_path / "projects" / project["id"]).is_dir()
 
 
 def test_reading_that_a_restart_interrupted_starts_again(tmp_path):

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, must, pageImage, upload, type Project, type SheetView } from "../api/client";
+import { api, must, pageImage, succeed, upload, type Project, type SheetView } from "../api/client";
 
 /** How often an open project is asked again while its files are being read. */
 export const READING_POLL = 1000;
@@ -80,6 +80,18 @@ export function useStartProject() {
 export function useAddFiles(projectId: string) {
   const keep = useKeep();
   return useMutation({ mutationFn: (files: File[]) => upload(`/projects/${projectId}/sources`, files), onSuccess: keep });
+}
+
+/** Delete a project and everything Tawreed keeps for it; the projects list forgets it. */
+export function useDeleteProject(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => succeed(api.DELETE("/projects/{project_id}", { params: { path: { project_id: projectId } } })),
+    onSuccess: () => {
+      client.removeQueries({ queryKey: ["project", projectId] });
+      void client.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
 }
 
 export function useRename(projectId: string) {

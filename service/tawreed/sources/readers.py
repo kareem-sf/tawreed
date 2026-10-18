@@ -2,14 +2,20 @@
 
 A sheet keeps its cell values at their Excel positions. A PDF page keeps its text as lines of words with positions,
 so a table can be split into columns. A page without a text layer (a scan) is marked, and read later from its image.
-Reading never changes the file."""
+Reading never changes the file. The service reads each file in a child process (`read_apart`), so a file that
+makes a reader's native code abort, or asks for more memory than the computer has, fails on its own."""
 
 import codecs
 import csv
 import io
+import json
+import logging
 import math
+import os
+import subprocess
+import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -24,6 +30,10 @@ from tawreed.sources.arabic import Char, lines_from_chars, reading_text
 PDFIUM = threading.Lock()  # PDFium is not thread-safe
 SCAN_CHARACTERS = 20  # a page with fewer visible characters than this is treated as a scan
 IMAGE_WIDTH = 1400  # pixels, for page images shown to the engineer and to the AI
+READ_SECONDS = 600  # a file still being read after this is too big for Tawreed
+READ_MEMORY = 4 * 1024**3  # bytes a child reading one file may use, where the system can cap it
+
+log = logging.getLogger("tawreed.sources")
 
 
 class Unreadable(Exception):
@@ -45,6 +55,54 @@ class Page:
     cols: int | None = None
     width: float | None = None
     height: float | None = None
+
+
+def read_apart(path: Path, kind: str) -> list[Page]:
+    """Read a file in a child process, the service itself (`--read`). A spreadsheet with one value far below or to
+    the right of its table makes the spreadsheet library build the whole grid, hundreds of gigabytes, and abort;
+    in the service that would end it, and reading the file again at the next start would end it again. Here the
+    child ends, and the file is marked too big to read."""
+    command = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "tawreed"]
+    env = {k: v for k, v in os.environ.items() if k != "TAWREED_TOKEN"}  # the child serves nothing
+    hidden = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # no console window flashes on Windows
+    try:
+        done = subprocess.run(
+            [*command, "--read", str(path), kind],
+            capture_output=True,
+            timeout=READ_SECONDS,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            creationflags=hidden,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise Unreadable("too_big") from error
+    if done.returncode == 1:  # an error in a reader, reported by the child itself
+        log.error("Reading %s failed: %s", path.name, done.stderr.decode(errors="replace")[-2000:])
+        raise Unreadable("unreadable_file")
+    if done.returncode != 0:  # aborted or killed: out of memory
+        raise Unreadable("too_big")
+    answer = json.loads(done.stdout)
+    if "unreadable" in answer:
+        raise Unreadable(answer["unreadable"])
+    return [Page(**page) for page in answer["pages"]]
+
+
+def read_in_child(path: Path, kind: str) -> None:
+    """The child's side of `read_apart`: read the file and write its pages to standard output as JSON."""
+    if os.name != "nt":
+        import resource  # not on Windows, where the library's own allocation failure ends the child instead
+
+        hard = resource.getrlimit(resource.RLIMIT_AS)[1]
+        limit = READ_MEMORY if hard == resource.RLIM_INFINITY else min(hard, READ_MEMORY)
+        resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
+    try:
+        answer: dict[str, Any] = {"pages": [asdict(page) for page in read_file(path, kind)]}
+    except Unreadable as error:
+        answer = {"unreadable": error.code}
+    except MemoryError:
+        answer = {"unreadable": "too_big"}
+    sys.stdout.buffer.write(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
+    sys.stdout.flush()
 
 
 def read_file(path: Path, kind: str) -> list[Page]:

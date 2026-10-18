@@ -1,5 +1,7 @@
 """Projects: a name, the BOQ files added to it, and the engineer's consent to send its content to an AI service."""
 
+import logging
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +11,9 @@ from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from tawreed.core.db import Base, UTCDateTime, now
+from tawreed.core.home import long_path
+
+log = logging.getLogger("tawreed.projects")
 
 NAME_LIMIT = 200
 
@@ -43,6 +48,26 @@ class Consent(Base):
 
 def folder(home: Path, project_id: str) -> Path:
     return home / "projects" / project_id
+
+
+def remove_folder(home: Path, project_id: str) -> None:
+    """Remove a deleted project's folder. A file open in another program (a workbook open in Excel) can keep part
+    of it; what is left is removed when Tawreed next starts."""
+    path = long_path(folder(home, project_id))
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():
+        log.warning("Part of deleted project %s is still in use; it is removed at the next start", project_id)
+
+
+def remove_leftovers(session: Session, home: Path) -> None:
+    """Remove the folders of projects that no longer exist. Run at start, before anything else uses the folders."""
+    root = home / "projects"
+    if not root.is_dir():
+        return
+    kept = set(session.scalars(select(Project.id)))
+    for path in root.iterdir():
+        if path.is_dir() and path.name not in kept:
+            remove_folder(home, path.name)
 
 
 def name_from_filename(filename: str) -> str:

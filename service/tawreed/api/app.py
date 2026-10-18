@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from tawreed import __version__, decisions
 from tawreed.api import ai, projects, revisions, settings, sources, work
 from tawreed.core.db import open_database
+from tawreed.projects import remove_leftovers
 from tawreed.sources.reader import Reader
 from tawreed.workflow import mcp_endpoint
 from tawreed.workflow.runner import Worker
@@ -26,6 +27,8 @@ def create_app(home: Path, token: str, port: int | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.sessions = open_database(home)
+        with app.state.sessions() as session:
+            remove_leftovers(session, home)
         app.state.worker = Worker(home, app.state.sessions, runs=runs, mcp_url=app.state.mcp_url)
         app.state.reader = Reader(
             home,

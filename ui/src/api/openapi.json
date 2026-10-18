@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tawreed",
-    "version": "0.0.1"
+    "version": "0.1.0"
   },
   "paths": {
     "/health": {
@@ -227,6 +227,50 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Delete Project",
+        "description": "Delete a project and everything Tawreed keeps for it: its copies of the BOQ files, what was read from them,\nthe work, the decisions and every revision. Files the engineer exported or saved elsewhere are not touched. A\nproject whose step is still running, or whose file is still being read, is stopped first and deleted once that\nhas finished.",
+        "operationId": "delete_project_projects__project_id__delete",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",

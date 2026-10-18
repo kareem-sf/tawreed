@@ -1,17 +1,14 @@
 """Run the service on loopback: python -m tawreed --port 8765, with the access token in TAWREED_TOKEN.
 
-The data home is ~/.tawreed, or TAWREED_HOME when set (for example, a scratch folder for testing)."""
+The data home is ~/.tawreed, or TAWREED_HOME when set (for example, a scratch folder for testing).
+`--read FILE KIND` is the service reading one file in a child process; see `tawreed.sources.readers.read_apart`."""
 
 import argparse
 import logging
 import os
 import sys
 import threading
-
-import uvicorn
-
-from tawreed.api.app import create_app
-from tawreed.core.home import data_home
+from pathlib import Path
 
 
 def exit_with_stdin() -> None:
@@ -27,9 +24,22 @@ def exit_with_stdin() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="tawreed")
-    parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--port", type=int)
     parser.add_argument("--exit-with-stdin", action="store_true", help="stop when standard input closes")
+    parser.add_argument("--read", nargs=2, metavar=("FILE", "KIND"), help="read one file, for the service")
     args = parser.parse_args()
+    if args.read:
+        from tawreed.sources.readers import read_in_child
+
+        read_in_child(Path(args.read[0]), args.read[1])
+        return
+    if args.port is None:
+        parser.error("--port is required")
+    import uvicorn
+
+    from tawreed.api.app import create_app
+    from tawreed.core.home import data_home
+
     token = os.environ.get("TAWREED_TOKEN")
     if not token:
         raise SystemExit("TAWREED_TOKEN must be set.")

@@ -10,7 +10,7 @@ import { Published, RevisionsButton } from "../work/Revisions";
 import { Status } from "../work/Status";
 import { useRun, useWork } from "../work/queries";
 import { DropRegion, PickFiles } from "./files";
-import { isReading, useAddFiles, useProject, useRename } from "./queries";
+import { isReading, useAddFiles, useDeleteProject, useProject, useRename } from "./queries";
 import { SourcePreview } from "./SourcePreview";
 
 const STEPS = ["read", "plan", "place", "check", "publish"] as const;
@@ -130,6 +130,7 @@ export function ProjectView({
               </Tabs>
             </>
           )}
+          {view === "work" && <DeleteProject projectId={projectId} name={data.name} onDeleted={onClose} />}
           <RevisionsButton projectId={projectId} projectName={data.name} latest={work.data?.published?.name} />
         </Page>
       )}
@@ -385,6 +386,39 @@ function SourceStatus({ source }: { source: Source }) {
 function problem(source: Source, t: Translate): string {
   const key = `problem.${source.problem}` as Key;
   return t(key) !== key ? t(key) : t("problem.unreadable_file");
+}
+
+/** Delete the project, after one confirmation that says what goes with it. */
+function DeleteProject({ projectId, name, onDeleted }: { projectId: string; name: string; onDeleted: () => void }) {
+  const { t } = useSettings();
+  const remove = useDeleteProject(projectId);
+  const [asking, setAsking] = useState(false);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-line pt-4">
+      {asking ? (
+        <div role="group" aria-label={t("project.deleteConfirm", { name })} className="flex flex-wrap items-center gap-3 rounded-lg bg-subtle px-3 py-2.5 text-sm animate-enter">
+          <span className="min-w-0 flex-1">{t("project.deleteConfirm", { name })}</span>
+          <button
+            type="button"
+            onClick={() => remove.mutate(undefined, { onSuccess: onDeleted })}
+            disabled={remove.isPending}
+            className={button("danger", "sm")}
+          >
+            {t("project.delete")}
+          </button>
+          <button type="button" autoFocus onClick={() => setAsking(false)} className={button("quiet", "sm")}>
+            {t("ui.cancel")}
+          </button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAsking(true)} className={`${button("quiet", "sm")} w-fit`}>
+          {t("project.delete")}
+        </button>
+      )}
+      {remove.isError && <Alert>{explain(remove.error, t)}</Alert>}
+    </div>
+  );
 }
 
 /** The project's name as an editable heading. Enter or leaving the field saves; Escape undoes. */

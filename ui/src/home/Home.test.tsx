@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test } from "vitest";
 import { fakeService, json, project, renderApp, type Call } from "../testing";
@@ -96,6 +96,47 @@ test("renaming a project saves on Enter; Escape puts the name back", async () =>
   await user.type(name, " draft{Escape}");
   expect(name).toHaveValue("Riverside Clinic");
   expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
+});
+
+test("deleting a project asks once, then returns to Home without it", async () => {
+  let projects = [{ id: "p1", name: "Al Noor Tower", updated_at: new Date().toISOString(), files: 2 }];
+  const calls = fakeService({
+    "GET /projects": () => projects,
+    "GET /projects/p1": () => project,
+    "DELETE /projects/p1": () => {
+      projects = [];
+      return new Response(null, { status: 204 });
+    },
+  });
+  renderApp();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /Al Noor Tower/ }));
+
+  await user.click(await screen.findByRole("button", { name: "Delete project" }));
+  const confirm = screen.getByRole("group", { name: /Delete “Al Noor Tower”\?/ });
+  await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+  expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
+
+  await user.click(screen.getByRole("button", { name: "Delete project" }));
+  await user.click(within(screen.getByRole("group", { name: /Delete “Al Noor Tower”\?/ })).getByRole("button", { name: "Delete project" }));
+  expect(await screen.findByText("Drop BOQ files here")).toBeInTheDocument();
+  expect(calls.filter((c) => c.method === "DELETE").map((c) => c.path)).toEqual(["/projects/p1"]);
+  await waitFor(() => expect(screen.queryByRole("button", { name: /Al Noor Tower/ })).not.toBeInTheDocument());
+});
+
+test("a project still at work is not deleted, and the engineer is told why", async () => {
+  fakeService({
+    "GET /projects": () => [{ id: "p1", name: "Al Noor Tower", updated_at: new Date().toISOString(), files: 2 }],
+    "GET /projects/p1": () => project,
+    "DELETE /projects/p1": () => json({ detail: { code: "project_busy" } }, 409),
+  });
+  renderApp();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /Al Noor Tower/ }));
+  await user.click(await screen.findByRole("button", { name: "Delete project" }));
+  await user.click(within(screen.getByRole("group", { name: /Delete “Al Noor Tower”\?/ })).getByRole("button", { name: "Delete project" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Tawreed stopped the work on this project.");
+  expect(screen.getByDisplayValue("Al Noor Tower")).toBeInTheDocument();
 });
 
 test("files dropped on an open project are added to it", async () => {

@@ -6,12 +6,14 @@ anything else is written as its text. Totals are computed by Tawreed from those 
 mostly Arabic gets Arabic labels and right-to-left sheets."""
 
 import re
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.cell import Cell
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
@@ -30,6 +32,7 @@ WRAP = Alignment(wrap_text=True, vertical="top")
 HEADER_ROW = 5  # a package sheet's column headings; its items start on the next row
 FIRST_ITEM_ROW = HEADER_ROW + 1
 TOP = Alignment(vertical="top")
+_FORMULAS: "weakref.WeakKeyDictionary[Worksheet, set[str]]" = weakref.WeakKeyDictionary()  # Tawreed's own, per sheet
 
 LABELS: dict[str, dict[str, str]] = {
     "en": {
@@ -222,6 +225,25 @@ def _number_format(parsed: str) -> str:
     return "#,##0" + ("." + "0" * decimals if decimals else "")
 
 
+def _formula(cell: Cell) -> Cell:
+    """Mark a cell as holding one of Tawreed's own formulas: the only cells a workbook keeps as formulas."""
+    _FORMULAS.setdefault(cell.parent, set()).add(cell.coordinate)
+    return cell
+
+
+def _as_text(workbook: Workbook) -> Workbook:
+    """Text stays text. openpyxl stores a string that starts with "=" as a formula (and "#N/A" as an error), so a
+    description, code, unit or name that starts that way would reach Excel as a live formula. Every cell that is not
+    one of Tawreed's own formulas is written as the text the source states."""
+    for sheet in workbook.worksheets:
+        own = _FORMULAS.get(sheet, set())
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.data_type in ("f", "e") and cell.coordinate not in own:
+                    cell.data_type = "s"
+    return workbook
+
+
 def _value(cell, parsed: str | None, text: str) -> None:
     """A value the source wrote as a number goes out as that number; anything else as its text."""
     if parsed is not None:
@@ -334,7 +356,7 @@ def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool =
                     cell.number_format = "#,##0.00"  # for the supplier's rate
             elif key == "amount":
                 if (not prices and _for_supplier(item)) or (prices and _reproduces(item)):
-                    cell.value = f"={quantity}{row}*{rate}{row}"
+                    _formula(cell).value = f"={quantity}{row}*{rate}{row}"
                     cell.number_format = _number_format(item.amount) if prices and item.amount else "#,##0.00"
                 elif prices:
                     _value(cell, item.amount, item.amount_text)
@@ -349,7 +371,7 @@ def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool =
         return written, None
     sheet.cell(row=row + 1, column=2, value=labels["total"]).font = BOLD
     total = sheet.cell(row=row + 1, column=columns.index("amount") + 1)
-    total.value = f"=SUM({amount}{FIRST_ITEM_ROW}:{amount}{last})"
+    _formula(total).value = f"=SUM({amount}{FIRST_ITEM_ROW}:{amount}{last})"
     total.font = BOLD
     total.number_format = "#,##0.00"
     return written, f"{amount}{row + 1}"
@@ -403,13 +425,13 @@ def master(book: Book) -> Workbook:
         index.cell(row=row, column=3, value=package.scope or None).alignment = WRAP
         index.cell(row=row, column=4, value=counts[package.id].items)
         if total:  # the package sheet's own total
-            index.cell(row=row, column=5, value=f"={_sheet_ref(name)}!{total}").number_format = "#,##0.00"
+            _formula(index.cell(row=row, column=5, value=f"={_sheet_ref(name)}!{total}")).number_format = "#,##0.00"
         index.cell(row=row, column=6, value=package_file(book, package))
     if priced:
         amounts = f"=SUM({_sheet_ref(index.title)}!E2:E{len(book.packages) + 1})"
-        cover.cell(row=total_row, column=2, value=amounts).number_format = "#,##0.00"
+        _formula(cover.cell(row=total_row, column=2, value=amounts)).number_format = "#,##0.00"
     workbook.calculation.fullCalcOnLoad = True
-    return workbook
+    return _as_text(workbook)
 
 
 def package_file(book: Book, package: Package) -> str:
@@ -428,7 +450,7 @@ def package_workbook(book: Book, package: Package) -> Workbook:
     sheet.title = sheet_name(package_title(package))
     write_package(sheet, book, package, book.prices)
     workbook.calculation.fullCalcOnLoad = True
-    return workbook
+    return _as_text(workbook)
 
 
 def coverage_check(book: Book) -> Workbook:
@@ -452,8 +474,10 @@ def coverage_check(book: Book) -> Workbook:
     for row, (label, value) in enumerate(rows, start=1):
         summary.cell(row=row, column=1, value=label).font = BOLD
         cell = summary.cell(row=row, column=2, value=value)
-        if isinstance(value, Decimal) or str(value).startswith("="):
+        if isinstance(value, Decimal) or str(value).startswith("="):  # only Tawreed's own values in this list
             cell.number_format = "#,##0.00"
+        if str(value).startswith("="):
+            _formula(cell)
     row = len(rows) + 2
     _header(summary, row, [labels["file"], labels["stated"], labels["items_sum"], labels["difference"]], (2, 3, 4))
     for total in coverage.totals:
@@ -461,6 +485,7 @@ def coverage_check(book: Book) -> Workbook:
         summary.cell(row=row, column=1, value=f"{total['file']} › {total['where']}")
         for column, value in ((2, money(total["stated_sum"])), (3, money(total["items_sum"])), (4, f"=B{row}-C{row}")):
             summary.cell(row=row, column=column, value=value).number_format = "#,##0.00"
+        _formula(summary.cell(row=row, column=4))
 
     items = workbook.create_sheet(sheet_name(labels["items"]))
     _prepare(items, book, [12, 60, 9, 13, 16, 8, 34, 40])
@@ -481,7 +506,7 @@ def coverage_check(book: Book) -> Workbook:
             items.cell(row=row, column=6, value=code(package))
             items.cell(row=row, column=7, value=package.name)
             items.cell(row=row, column=8, value=where(item, book.files, labels))
-    return workbook
+    return _as_text(workbook)
 
 
 def decision_log(book: Book) -> Workbook:
@@ -539,7 +564,7 @@ def decision_log(book: Book) -> Workbook:
         reading.cell(row=row, column=4, value=labels["agent"] if layout.decided_by == "agent" else labels["engineer"])
         reading.cell(row=row, column=5, value=layout.report.get("items", 0))
         reading.cell(row=row, column=6, value=layout.report.get("skipped_count", 0))
-    return workbook
+    return _as_text(workbook)
 
 
 def _how(layout: Layout, labels: dict[str, str]) -> str:

@@ -10,7 +10,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import uuid
 import zipfile
 from datetime import datetime
@@ -23,6 +22,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from tawreed import decisions, ledger, packages
 from tawreed.core.db import Base, UTCDateTime, now
+from tawreed.core.home import long_path
 from tawreed.projects import Project, folder
 from tawreed.publish import workbooks
 from tawreed.sources import Source
@@ -48,16 +48,6 @@ class NotReady(Exception):
 
 def revisions_folder(home: Path, project_id: str) -> Path:
     return folder(home, project_id) / "revisions"
-
-
-def _long(path: Path) -> Path:
-    """The path in Windows' extended form, which has no 260-character limit: a long data folder, project name or
-    package name can pass it (package names alone may run to 120 characters). Elsewhere the path as it is."""
-    if sys.platform != "win32":
-        return path
-    text = str(path.resolve())
-    prefix = "\\\\?\\"
-    return Path(text if text.startswith(prefix) else prefix + text)
 
 
 def revisions(session: Session, project_id: str) -> list[Revision]:
@@ -122,7 +112,7 @@ def _next_number(session: Session, root: Path, project_id: str) -> int:
 def publish(session: Session, home: Path, project: Project, prices: bool = True) -> Revision:
     """Write the revision's workbooks, check them, and put the revision in place in one step. Without prices, the
     package workbooks leave the rates empty for suppliers to fill; the master always shows them."""
-    root = _long(revisions_folder(home, project.id))
+    root = long_path(revisions_folder(home, project.id))
     root.mkdir(parents=True, exist_ok=True)
     number = _next_number(session, root, project.id)
     name = f"Rev {number:02d}"
@@ -209,7 +199,7 @@ def open_folder(home: Path, revision: Revision) -> None:
 
 def zipped(home: Path, revision: Revision) -> bytes:
     """The revision's files in one zip, as its folder holds them."""
-    path = _long(revisions_folder(home, revision.project_id) / revision.name)
+    path = long_path(revisions_folder(home, revision.project_id) / revision.name)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for file in sorted(p for p in path.rglob("*") if p.is_file()):

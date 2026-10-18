@@ -36,7 +36,9 @@ on About too), a check while the app stays open for days, release notes in the a
 
 ## 2. The updater signing key
 
-No key exists. I did not make one. **The founder makes it, once.**
+Made on 2026-10-18 with the founder's approval, in the cloud, by the steps below. The private key and its
+password are in the QS Mind project's shared folder, `.secrets/tawreed-updater/`; the public key is committed.
+Copy the private key and password to the password manager and one offline copy. The steps stay for a future key.
 
 1. On the founder's own machine, in the repo folder:
 
@@ -66,9 +68,9 @@ What must be true before a build can be released:
 | Input | Where | State |
 |---|---|---|
 | Update address | `plugins.updater.endpoints` in `desktop/tauri.release.conf.json` | Selected in QSM-7; deployment separate |
-| Updater public key | `plugins.updater.pubkey`, same file | Empty; founder makes the key |
-| `createUpdaterArtifacts` | `bundle`, same file | `false`; set `true` with the key |
-| Private key and password | Environment variables on the release machine | Do not exist yet |
+| Updater public key | `plugins.updater.pubkey`, same file | Set 2026-10-18 |
+| `createUpdaterArtifacts` | `bundle`, same file | `true` |
+| Private key and password | Environment variables on the release machine | In the project's `.secrets/tawreed-updater/` |
 | App ID | `identifier` in `desktop/tauri.conf.json` | `com.qsmind.tawreed`; selected launch identity |
 | Publisher, copyright | `desktop/tauri.release.conf.json` | "QS Mind"; "© 2026 QS Mind. All rights reserved." |
 | Version | `package.json`, `desktop/Cargo.toml`, `desktop/tauri.conf.json`, `service/pyproject.toml`, `service/tawreed/__init__.py` | Same number in all five |

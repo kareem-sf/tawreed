@@ -1,13 +1,15 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, StringConstraints
+from sqlalchemy import delete, select
 
 from tawreed import projects as service
 from tawreed import publish, sources
 from tawreed.api.common import DB, Home, problem
-from tawreed.projects import NAME_LIMIT
+from tawreed.projects import NAME_LIMIT, Project
+from tawreed.sources import Source
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -112,6 +114,29 @@ def change_project(project_id: str, body: ProjectChange, session: DB) -> Project
     if project is None:
         raise problem(404, "project_not_found")
     return ProjectOut.model_validate(service.rename_project(session, project, body.name))
+
+
+@router.delete("/{project_id}", status_code=204)
+def delete_project(project_id: str, request: Request, session: DB, home: Home) -> Response:
+    """Delete a project and everything Tawreed keeps for it: its copies of the BOQ files, what was read from them,
+    the work, the decisions and every revision. Files the engineer exported or saved elsewhere are not touched. A
+    project whose step is still running, or whose file is still being read, is stopped first and deleted once that
+    has finished."""
+    project = service.get_project(session, project_id)
+    if project is None:
+        raise problem(404, "project_not_found")
+    worker = request.app.state.worker
+    worker.stop(project_id)
+    if worker.running(project_id):
+        raise problem(409, "project_busy")
+    # One statement, so the reader cannot start on one of its files between a check and the delete
+    reading = select(Source.id).where(Source.project_id == project_id, Source.status == "reading").exists()
+    deleted = session.execute(delete(Project).where(Project.id == project_id, ~reading)).rowcount
+    session.commit()  # the database removes everything that belongs to the project
+    if not deleted:
+        raise problem(409, "project_busy")
+    service.remove_folder(home, project_id)
+    return Response(status_code=204)
 
 
 @router.post("/{project_id}/sources")

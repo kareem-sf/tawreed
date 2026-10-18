@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from tawreed.sources import Source, SourcePage, copy_of, overlap, pages_folder, readers
@@ -60,19 +60,26 @@ class Reader:
             source = session.scalars(select(Source).where(Source.status == "added").order_by(Source.added_at)).first()
             if source is None:
                 return False
-            source.status = "reading"
+            source_id, filename = source.id, source.filename
+            # Only a file still waiting: its project may have been deleted since it was found
+            claim = update(Source).where(Source.id == source_id, Source.status == "added").values(status="reading")
+            claimed = session.execute(claim).rowcount
             session.commit()
+            if not claimed:
+                return True
             try:
+                source = session.get_one(Source, source_id)
                 read_source(session, self.home, source)
                 if source.status == "read" and self.after_read:
                     self.after_read(session, source)
                 session.commit()
             except Exception:  # noqa: BLE001  (one bad file must not stop the reader for the others)
-                log.exception("Reading %s failed", source.filename)
+                log.exception("Reading %s failed", filename)
                 session.rollback()
-                source = session.get(Source, source.id)
-                source.status, source.problem = "failed", "unreadable_file"
-                session.commit()
+                failed = session.get(Source, source_id)
+                if failed is not None:
+                    failed.status, failed.problem = "failed", "unreadable_file"
+                    session.commit()
         if self.notify:
             self.notify()
         return True
@@ -82,7 +89,7 @@ def read_source(session: Session, home: Path, source: Source) -> None:
     """Read the file into pages, keep each page's content as JSON beside the copy, and note how it went."""
     folder = pages_folder(home, source)
     try:
-        pages = readers.read_file(copy_of(home, source), source.kind)
+        pages = readers.read_apart(copy_of(home, source), source.kind)
     except readers.Unreadable as error:
         source.status, source.problem = "failed", error.code
         return

