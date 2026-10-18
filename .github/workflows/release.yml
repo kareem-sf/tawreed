@@ -1,0 +1,56 @@
+name: Release build
+
+# Builds the Windows installer and the Linux AppImage for one version and keeps them as workflow artifacts.
+# Nothing is published here: the files are signed for the updater with the private key, which never goes to
+# GitHub, and then attached to a GitHub release with `npm run release`. Started by hand (Actions > Release build).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundle: nsis
+            python: service/.venv/Scripts/python
+          # The oldest supported Ubuntu, so the AppImage runs on as many Linux systems as possible.
+          - os: ubuntu-22.04
+            bundle: appimage
+            python: service/.venv/bin/python
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+      - run: python -m venv service/.venv
+      - run: ${{ matrix.python }} -m pip install -e "./service[dev]"
+      - run: npm ci
+      # Thmanyah is not in the repository (licence), so Arabic uses the system font in these builds.
+      # The updater signatures are made afterwards with the private key, outside GitHub.
+      - name: Build without signing
+        shell: bash
+        run: |
+          node -e 'const f="desktop/tauri.release.conf.json",fs=require("fs"),c=JSON.parse(fs.readFileSync(f));c.bundle.createUpdaterArtifacts=false;c.bundle.targets=["${{ matrix.bundle }}"];fs.writeFileSync(f,JSON.stringify(c,null,2))'
+          npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bundle }}
+          path: |
+            desktop/target/release/bundle/${{ matrix.bundle }}/*.exe
+            desktop/target/release/bundle/${{ matrix.bundle }}/*.AppImage
+          if-no-files-found: error
