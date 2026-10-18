@@ -42,6 +42,9 @@ key built into it.
 
 ## See it work
 
+Watch the launch film and the step-by-step guide, with a short clip for every step, on the
+[Tawreed page](https://qsmind.app/en/tawreed#guide) ([بالعربية](https://qsmind.app/ar/tawreed#guide)).
+
 <p align="center">
   <img src="docs/media/flow-en.gif" alt="The engineer picks the package for an uncertain item, publishes Rev 00, opens the Concrete works package and traces an item to its row in the source sheet" width="720">
 </p>
