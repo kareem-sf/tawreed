@@ -4,7 +4,8 @@ Date: 2026-10-10; revised 2026-10-11 after Engineering Lead changes requested. T
 has never run on Windows or Linux: see "Not checked" at the end.
 
 Saved launch choices in QSM-2/QSM-7: Windows AND Linux, app ID `com.qsmind.tawreed`, all rights reserved,
-MinIO hosting at `https://downloads.qsmind.app/tawreed/latest.json`, and Windows without Authenticode.
+MinIO hosting at `https://downloads.qsmind.app/tawreed/latest.json` (replaced 2026-10-18, see below), and Windows
+without Authenticode.
 This records the choices returned by the Engineering Lead; it is not merge, deploy or release approval.
 Tauri updater signatures remain mandatory. Hosting belongs to Platform (QSM-24).
 
@@ -13,8 +14,15 @@ Tauri updater signatures remain mandatory. Hosting belongs to Platform (QSM-24).
 - The desktop app uses Tauri's updater (`tauri-plugin-updater`). An update is the same Windows NSIS installer or Linux AppImage people
   download, with a signature file beside it. The app only installs a file whose signature matches the public key
   built into it.
-- **One address.** `plugins.updater.endpoints` in `desktop/tauri.release.conf.json`. The selected address is `https://downloads.qsmind.app/tawreed/latest.json`. It is built into every package. Hosting approval remains separate. Changing the host is this one line; `npm run release` works out the installer's
-  address from it (`v<version>/<installer>` beside `latest.json`).
+- **One address.** `plugins.updater.endpoints` in `desktop/tauri.release.conf.json`. Since 2026-10-18 (founder's
+  choice) downloads and updates come from GitHub releases of the public repo `qs-mind/tawreed-releases`, not a QS
+  Mind server: `https://github.com/qs-mind/tawreed-releases/releases/latest/download/latest.json`. It is built into
+  every package. `npm run release` works out each installer's address from it
+  (`releases/download/v<version>/<installer>`).
+- **Fixed file names.** Each release carries `Tawreed_x64-setup.exe` and `Tawreed_amd64.AppImage`, without the
+  version, so the download buttons on qsmind.app link to
+  `https://github.com/qs-mind/tawreed-releases/releases/latest/download/<file>` and start the download directly;
+  nobody has to open GitHub.
 - **When it checks.** Once, when Tawreed opens. Offline or no answer: nothing is shown and nothing fails.
 - **What the engineer sees.** A line under the header on every tab: "Tawreed 0.2.0 is ready to install." with
   "Update and restart". Nothing installs until they press it, so a running job is never cut off by surprise.
@@ -94,8 +102,9 @@ The script writes `<staging>/SHA256SUMS.txt` and `<staging>/latest.json` with **
 It refuses to replace a feed if either platform or a non-empty signature is absent. Synthetic tests prove this;
 the script checks signature presence, while the updater verifies cryptographic validity.
 Without a public key, it writes checksums for available native packages but no feed, and prints NOT FOR RELEASE.
-Never upload an old feed left in a staging folder. Upload both artifacts and signatures to `v<version>/`, then
-the combined `latest.json` last, only through the separately approved Platform runbook. Nothing publishes here.
+It also copies each installer to the staging folder under its fixed name. Never upload an old feed left in a
+staging folder. Upload the two fixed-name installers, `SHA256SUMS.txt` and `latest.json` to one GitHub release
+`v<version>` of `qs-mind/tawreed-releases`, only with the founder's approval. Nothing publishes here.
 
 ## 4. Installer identity and the app ID
 
@@ -171,14 +180,14 @@ Use a normal user, not an administrator. Use synthetic BOQs only.
 Never use the real key for this. The builder makes a **throwaway** key (`npx tauri signer generate -w test.key`)
 and, in a scratch copy of the repo that is never committed, sets in `desktop/tauri.release.conf.json`: the test
 public key, `createUpdaterArtifacts: true`, and a test address (ask the Platform Engineer for an HTTPS test folder,
-for example `https://downloads.qsmind.app/tawreed-test/latest.json`; the address must be HTTPS).
+for example the latest release of a separate public test repo; the address must be HTTPS).
 
 The builder makes build **N** (for example 0.1.0) and build **N+1** (0.1.1: change the version in the five places
 in section 3), each with `npm run package` and `npm run release`. Nothing is uploaded yet.
 
 1. Install build N on the clean PC. Open it. Expect: no line about updates (the test folder is empty).
 2. Turn the network off and open Tawreed. Expect: it opens and works as normal, no error about updates.
-3. Network on. The builder uploads N+1: the installer and `.sig` into `v<N+1>/`, then `latest.json`.
+3. Network on. The builder publishes N+1: the fixed-name installer and `latest.json` in release `v<N+1>`.
 4. Close and open Tawreed. Expect, within a few seconds: "Tawreed <N+1> is ready to install." under the header, on
    every tab. Switch to Arabic. Expect: the same line in Arabic, right to left.
 5. Open a project and leave it open. Press "Update and restart". Expect: "Updating… Tawreed will close and open

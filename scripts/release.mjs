@@ -1,13 +1,14 @@
 // Prepare local release files only. Collect native Windows/Linux builds in one bundle folder before making a feed.
+// The files to upload get names without the version, so the site's buttons can always link to the latest release.
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { root } from "./python.mjs";
 
 const targets = [
-  { folder: "nsis", platform: "windows-x86_64", suffix: "_x64-setup.exe" },
-  { folder: "appimage", platform: "linux-x86_64", suffix: "_amd64.AppImage" },
+  { folder: "nsis", platform: "windows-x86_64", suffix: "_x64-setup.exe", asset: "Tawreed_x64-setup.exe" },
+  { folder: "appimage", platform: "linux-x86_64", suffix: "_amd64.AppImage", asset: "Tawreed_amd64.AppImage" },
 ];
 
 export function prepareRelease(folder, version, updater) {
@@ -18,18 +19,20 @@ export function prepareRelease(folder, version, updater) {
     return names.map((name) => ({ ...target, name, file: path.join(directory, name) }));
   });
   if (!artifacts.length) throw new Error(`No x64 artifacts for ${version} in ${folder}. Run npm run package first.`);
-  const sums = artifacts.map(({ file, name }) => `${createHash("sha256").update(readFileSync(file)).digest("hex")}  ${name}`).join("\n") + "\n";
+  for (const { file, asset } of artifacts) copyFileSync(file, path.join(folder, asset));
+  const sums = artifacts.map(({ file, asset }) => `${createHash("sha256").update(readFileSync(file)).digest("hex")}  ${asset}`).join("\n") + "\n";
   if (!updater.pubkey) {
     writeFileSync(path.join(folder, "SHA256SUMS.txt"), sums);
     return { artifacts, feed: null };
   }
   // Never overwrite the combined feed with a single-platform build or an unsigned artifact.
   if (artifacts.length !== targets.length) throw new Error("Both Windows NSIS and Linux AppImage builds are required for latest.json. Collect them in nsis/ and appimage/ first.");
-  const platforms = Object.fromEntries(artifacts.map(({ file, name, platform }) => {
+  const platforms = Object.fromEntries(artifacts.map(({ file, name, platform, asset }) => {
     if (!existsSync(`${file}.sig`)) throw new Error(`No ${name}.sig. Enable createUpdaterArtifacts and set TAURI_SIGNING_PRIVATE_KEY, then rebuild.`);
     const signature = readFileSync(`${file}.sig`, "utf8").trim();
     if (!signature) throw new Error(`Empty ${name}.sig. Rebuild and sign the artifact.`);
-    return [platform, { signature, url: new URL(`v${version}/${encodeURIComponent(name)}`, updater.endpoints[0]).href }];
+    // The feed is the latest GitHub release's latest.json; each installer is an asset of its own release, v<version>
+    return [platform, { signature, url: new URL(`../../download/v${version}/${asset}`, updater.endpoints[0]).href }];
   }));
   const feed = { version, pub_date: new Date().toISOString(), platforms };
   writeFileSync(path.join(folder, "SHA256SUMS.txt"), sums);
@@ -47,7 +50,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`SHA256SUMS.txt: ${folder}`);
     const fonts = path.join(root, "ui", "src", "fonts", "thmanyah");
     console.log(existsSync(fonts) && readdirSync(fonts).some((name) => /\.(woff2|otf|ttf)$/.test(name)) ? "Thmanyah is present on this machine. Check each native build embeds it." : "Thmanyah is NOT present: Arabic falls back to the system font.");
-    console.log(feed ? `Combined update feed: ${path.join(folder, "latest.json")}\nUpload both artifacts and their signatures to v${version}/; upload latest.json last. Publishing requires separate approval.` : "NOT FOR RELEASE: no updater public key. No update feed was generated. Do not publish an old latest.json from this folder.");
+    console.log(feed ? `Combined update feed: ${path.join(folder, "latest.json")}\nUpload ${artifacts.map(({ asset }) => asset).join(", ")}, SHA256SUMS.txt and latest.json to a GitHub release v${version} of qs-mind/tawreed-releases. Publishing requires separate approval.` : "NOT FOR RELEASE: no updater public key. No update feed was generated. Do not publish an old latest.json from this folder.");
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
