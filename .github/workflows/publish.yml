@@ -1,0 +1,60 @@
+name: Publish release
+
+# Publishes the installers from one "Release build" run as a GitHub release of this repo. The updater signatures
+# are made with the private key outside GitHub and passed in here; they are public, the key is not. The feed
+# (latest.json), the checksums and the fixed-name installers come from `scripts/release.mjs`, so the download
+# buttons on qsmind.app and the app's updater always point at the latest release. Started by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: The "Release build" run whose installers to publish
+        required: true
+      windows_signature:
+        description: Contents of Tawreed_<version>_x64-setup.exe.sig
+        required: true
+      linux_signature:
+        description: Contents of Tawreed_<version>_amd64.AppImage.sig
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v4
+        with:
+          name: nsis
+          path: bundle/nsis
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
+          path: bundle/appimage
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Signatures, checksums and update feed
+        env:
+          WINDOWS_SIGNATURE: ${{ inputs.windows_signature }}
+          LINUX_SIGNATURE: ${{ inputs.linux_signature }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          printf '%s' "$WINDOWS_SIGNATURE" > "bundle/nsis/Tawreed_${version}_x64-setup.exe.sig"
+          printf '%s' "$LINUX_SIGNATURE" > "bundle/appimage/Tawreed_${version}_amd64.AppImage.sig"
+          node scripts/release.mjs bundle
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Tawreed $VERSION" --latest \
+            --notes-file "docs/releases/$VERSION.md" \
+            bundle/Tawreed_x64-setup.exe bundle/Tawreed_amd64.AppImage bundle/SHA256SUMS.txt bundle/latest.json
