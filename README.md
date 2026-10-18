@@ -1,27 +1,164 @@
-# Tawreed
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/lockup/tawreed-lockup-white.svg">
+    <img src="brand/lockup/tawreed-lockup.svg" alt="QS Mind | Tawreed" width="320">
+  </picture>
+</p>
 
-A QS Mind product.
+<h3 align="center">From bills of quantities to procurement packages. Every number has a source.</h3>
 
-Tawreed turns construction bills of quantities into procurement packages. Add the BOQs for a project; the Tawreed
-fixed workflow reads them, designs the packages, places every item in exactly one package and publishes a master workbook
-and one workbook per package. You approve at every gate, and nothing in your BOQ is ever changed. See
-[the specification](docs/spec.md) and [architecture](docs/architecture.md).
+<p align="center" dir="rtl">توريد يحوّل جداول الكميات إلى حزم توريد جاهزة للتسعير، بالعربية والإنجليزية. كل رقم له مصدر.</p>
 
-Tawreed keeps its data in `~/.tawreed`.
+<p align="center">
+  <img src="docs/media/published-en.png" alt="A published Tawreed project: eight procurement packages with item counts, amounts and the total, and Rev 00 ready in its folder" width="100%">
+</p>
 
-## Status
+Tawreed is a desktop app by [QS Mind](https://qsmind.app/en/tawreed) for quantity surveyors, estimators and
+procurement engineers. Drop the BOQs for a project and Tawreed reads them, proposes a package structure, places
+every item in exactly one package, and publishes a master workbook plus one workbook per package, ready to send to
+suppliers and subcontractors for pricing. You approve at every gate, and nothing in your BOQ is ever changed.
 
-Tawreed is being rebuilt from scratch. Progress is recorded in [docs/progress.md](docs/progress.md). The previous
-version is in git history at tag `legacy-final`.
+## Download
 
-## Open Tawreed
+<p>
+  <a href="https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_x64-setup.exe"><img src="docs/media/download-windows.svg" alt="Download for Windows" height="48"></a>
+  &nbsp;
+  <a href="https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_amd64.AppImage"><img src="docs/media/download-linux.svg" alt="Download for Linux" height="48"></a>
+</p>
 
-Double-click **Start-Tawreed.cmd**. It opens the desktop window, which starts the local service.
+| System | File |
+| --- | --- |
+| Windows 10 and 11, 64-bit | [`Tawreed_x64-setup.exe`](https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_x64-setup.exe): installs for your user, no administrator rights needed |
+| Linux, 64-bit | [`Tawreed_amd64.AppImage`](https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_amd64.AppImage): make it executable (`chmod +x Tawreed_amd64.AppImage`), then open it |
+
+All versions, checksums (`SHA256SUMS.txt`) and release notes are on the [Releases page](https://github.com/qs-mind/tawreed/releases).
+
+> **Windows SmartScreen.** The Windows installer is not code-signed yet, so Windows may show "Windows protected your
+> PC" the first time you run it. Choose **More info**, then **Run anyway**.
+
+Tawreed checks for a new version once when it opens. When one is out it offers it, and installs it only when you
+press **Update and restart**. Updates are signed, and the app installs only an update whose signature matches the
+key built into it.
+
+## See it work
+
+<p align="center">
+  <img src="docs/media/flow-en.gif" alt="The engineer picks the package for an uncertain item, publishes Rev 00, opens the Concrete works package and traces an item to its row in the source sheet" width="720">
+</p>
+
+An item Tawreed could not place with confidence waits for you. You pick the package, Tawreed asks to publish and
+shows what the revision holds, you publish, and any item opens straight to its row in your BOQ.
+
+## How it works
+
+Tawreed is a fixed workflow, not a chat. It runs on its own from the dropped BOQ to each gate, and the gates always
+stop for you.
+
+1. **Read.** Tawreed keeps an unchanged copy of each file. The AI works out each file's layout (which sheet, which
+   header row, which column is the quantity, where a PDF's columns fall); Tawreed then extracts the exact values,
+   each item linked to its cell or page. Rows the AI reads from a scanned page are marked "read from image, verify"
+   and shown beside the page.
+2. **Overlapping files** *(gate)*. When a new file overlaps the project's existing files, you say whether it is an
+   addition, a replacement or a revision.
+3. **Package plan** *(gate)*. The AI proposes the packages: a name, the scope each covers and why, along the trades
+   suppliers and subcontractors actually price. Approve it, edit it first (rename, change the scope, remove, merge,
+   add), or have it proposed again with a note.
+4. **Place.** The AI places every item in one package.
+5. **Uncertain items** *(gate)*. Items it cannot place with confidence come to you with the candidate packages and
+   its reasoning. You pick, for this item, this project or all future projects.
+6. **Check.** Tawreed verifies that every item appears exactly once and that the package totals reconcile with the
+   source totals.
+7. **Publish** *(gate)*. Tawreed shows what the revision holds, computed, and writes it only when you approve: all of
+   it, or none of it.
+
+The AI proposes; Tawreed computes. The AI never writes an item's code, description, unit, quantity, rate or amount,
+and every count and total you see is Tawreed's own arithmetic. You correct the work directly (move items, rename,
+merge, remove or add packages, set a sheet's columns, set a page aside) or by running a step again with a note.
+
+## What you get
+
+Each publish is a numbered revision (`Rev 00`, `Rev 01`, …) kept with the project, with **Open folder** and
+**Export…**:
+
+- **Master workbook:** a cover, a package index with item counts and totals, and one sheet per package.
+- **Package workbooks:** one standalone workbook per package, ready to send. You choose whether they show your rates
+  and amounts, or leave the rates empty for suppliers to fill.
+- **Simple formulas:** amounts are `=Qty*Rate` wherever that gives your BOQ's own amount (otherwise your figure
+  stays), package totals are `=SUM(...)`, and the cover adds up the index.
+- **Decision log:** what the AI proposed and what you decided, with the reasons.
+- **Coverage check:** every source item once, and source totals against output totals.
+
+Item codes, descriptions, units, quantities, rates, amounts and comments reach the workbooks exactly as they are in
+your BOQ, and every item keeps its source sheet and row, or page. Arabic projects get right-to-left sheets.
+
+## Files it reads
+
+- Excel: `.xlsx`, `.xlsm`, `.xls`
+- OpenDocument: `.ods`
+- CSV, including Arabic text saved as Windows-1256
+- PDF, searchable or scanned
+- Page images: `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.webp`
+
+Any layout: there is no template to follow. English, Arabic or both. Up to 100 MB per file.
+
+## AI connections
+
+Tawreed works with the AI service you choose, in **Settings**:
+
+- your own API key for **Anthropic**, **OpenAI**, **Google**, **xAI**, or one **OpenAI-compatible** service; or
+- a **ChatGPT** subscription, through the official Codex client. Tawreed never reads or copies its sign-in tokens.
+
+Before a model can be used, Tawreed checks that it calls Tawreed's tools correctly, and records whether it can read
+page images (scanned pages need that). Without a working connection your projects, files and past revisions stay
+open, and the AI steps wait.
+
+## Your data stays on your PC
+
+- Everything lives in `~/.tawreed` on your computer: settings, projects, the copies of your files and every
+  revision. Supplied files are never changed.
+- API keys are kept in `~/.tawreed/auth.json`, readable only by your user account. Tawreed shows only a key's last
+  four characters and sends a key only to its own service.
+- A project's content goes only to the AI service you picked, and only after you allow it: the first time, a card
+  names the service and says what would be sent. Your keys and your other projects are never sent.
+- Text in a BOQ, PDF, image or comment is treated as data, never as instructions.
+- The app's local service listens only on `127.0.0.1`, with a fresh access token for each launch.
+
+To report a security problem, see [SECURITY.md](SECURITY.md).
+
+## Screenshots
+
+### English
+
+| | |
+| --- | --- |
+| <img src="docs/media/home-en.png" alt="Home: drop BOQ files here, with recent projects"> | <img src="docs/media/consent-en.png" alt="Consent card naming the AI service before anything is sent"> |
+| **Home.** Drop BOQs and the work starts. | **Consent.** Nothing is sent until you allow it. |
+| <img src="docs/media/plan-en.png" alt="The package plan: eight packages, each with its scope and the reason"> | <img src="docs/media/uncertain-en.png" alt="An uncertain item with two candidate packages and the AI's reasoning"> |
+| **Package plan.** Approve, edit or propose again. | **Uncertain item.** You pick the package. |
+| <img src="docs/media/publish-en.png" alt="Ready to publish: packages, items and amounts, with the choice to show rates"> | <img src="docs/media/items-en.png" alt="A package's items with unit, quantity, rate, amount and source"> |
+| **Publish.** What the revision holds, computed. | **Packages.** Every item with its source. |
+| <img src="docs/media/source-en.png" alt="An item traced to its row in the source sheet"> | <img src="docs/media/settings-en.png" alt="Settings: language, theme, the AI and its connections"> |
+| **Source.** One click to the cell. | **Settings.** Your AI connection and model. |
+| <img src="docs/media/history-en.png" alt="History: past projects and their revisions"> | |
+| **History.** Past projects and revisions. | |
+
+### العربية
+
+| | |
+| --- | --- |
+| <img src="docs/media/home-ar.png" alt="الرئيسية بالعربية"> | <img src="docs/media/plan-ar.png" alt="خطة الحزم بالعربية"> |
+| **الرئيسية** | **خطة الحزم** |
+| <img src="docs/media/uncertain-ar.png" alt="بند غير مؤكد بالعربية"> | <img src="docs/media/published-ar.png" alt="إصدار منشور بالعربية"> |
+| **بند غير مؤكد** | **الإصدار المنشور** |
+| <img src="docs/media/items-ar.png" alt="بنود الحزمة بالعربية"> | <img src="docs/media/source-ar.png" alt="مصدر البند بالعربية"> |
+| **بنود الحزمة** | **المصدر** |
+
+All screenshots use made-up projects ("Synthetic Tower" and others) with synthetic BOQs.
 
 ## Development
 
-You need Python 3.12, Node 24 or later, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
-(including Rust). Set up once:
+You need Python 3.12, Node 24 or later, and the Tauri 2 prerequisites for your system (including Rust). Set up
+once:
 
 ```powershell
 py -3.12 -m venv service/.venv
@@ -32,26 +169,30 @@ npm ci
 On macOS or Linux, create the environment with `python3.12 -m venv service/.venv` and install with
 `service/.venv/bin/python -m pip install -e "./service[dev]"`.
 
-**Arabic font.** Tawreed's Arabic typeface, Thmanyah Sans, may only ship
-inside the compiled app, so it is not in this repository. Put the `-Light`, `-Regular`, `-Medium` and `-Bold`
-`.woff2` files of `thmanyahsans` from the official download into
-`ui/src/fonts/thmanyah/` (ignored by git). Without them Arabic uses the system font.
+**Arabic font.** Tawreed's Arabic typeface, Thmanyah Sans, may only ship inside the compiled app, so it is not in
+this repository. Put the `-Light`, `-Regular`, `-Medium` and `-Bold` `.woff2` files of `thmanyahsans` from the
+official download into `ui/src/fonts/thmanyah/` (ignored by git). Without them Arabic uses the system font. Never
+commit, upload or host these files.
 
 `npm run dev` starts the interface at `http://localhost:1430`. The dev server also starts the service on a free
 local port with a fresh access token, and forwards `/api` to it. `npm run tauri dev` opens the same interface in
-the desktop window. Set `TAWREED_HOME` to use another data folder, for example a scratch folder for testing.
+the desktop window; on Windows, double-clicking `Start-Tawreed.cmd` does the same. Set `TAWREED_HOME` to use
+another data folder, for example a scratch folder for testing.
 
 | Command | What it does |
 | --- | --- |
 | `npm run test:service` | Service tests |
 | `npm run test:ui` | Interface tests |
 | `npm run check` | Typecheck, Ruff and Clippy |
-| `npm run verify` | `check`, then both test suites |
+| `npm run verify` | `check`, then the service, interface and release-script tests |
 | `npm run build` | Typecheck and production build of the interface into `dist/` |
 | `npm run bindings` | Regenerate the interface's API types from the service |
 
-Run `npm run verify` before every push. CI runs the same checks, and fails if the API types are out of date, only when
-started by hand (Actions → CI → Run workflow), to stay inside the free GitHub Actions minutes.
+Run `npm run verify` before every push. CI runs the same checks, and fails if the API types are out of date, only
+when started by hand (Actions → CI → Run workflow).
+
+The specification is [docs/spec.md](docs/spec.md), the architecture [docs/architecture.md](docs/architecture.md)
+and the record of the work [docs/progress.md](docs/progress.md).
 
 ## Windows and Linux packages
 
@@ -60,19 +201,28 @@ installer into `desktop/target/release/bundle/nsis/`. The installed app starts t
 port with a fresh token, forwards the interface's requests to it, and the service stops when the app does. Its log
 is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.qsmind.tawreed\logs`).
 
-On Linux x64 the same native command builds an AppImage in `desktop/target/release/bundle/appimage/`.
-Build each platform on its own operating system. AppImage uses Tauri's maintained Linux updater path.
+On Linux x64 the same command builds an AppImage in `desktop/target/release/bundle/appimage/`. Build each platform
+on its own operating system. Native builds made with the licensed Thmanyah files present embed them in the app;
+builds without them, such as the **Release build** workflow on GitHub, use the system Arabic font.
 
-`npm run release` prepares local checksums. With an updater public key configured, collect signed Windows and
-Linux packages of the same version in one bundle folder and run `npm run release -- <folder>` to write a combined
-`latest.json` for a GitHub release of `qs-mind/tawreed`. The script refuses a partial or unsigned feed. It
-does not publish. Make native builds with the
-licensed Thmanyah files present; they may only ship inside the compiled app.
+## Releases
 
-The app checks once when it opens, stays quiet offline, and installs only when the user presses Update and restart.
-The key, selected release inputs and clean Windows/Linux test steps are in
+Releases are GitHub releases of this repo. Each carries `Tawreed_x64-setup.exe`, `Tawreed_amd64.AppImage`,
+`SHA256SUMS.txt` and the update feed `latest.json`; the download links above and the app's updater always point
+at the latest one. Release notes are in `docs/releases/<version>.md`.
+
+1. **Release build** (Actions, started by hand) builds the Windows installer and the Linux AppImage for the version
+   in `package.json` and keeps them as workflow artifacts.
+2. **Publish release**, first run (with that run's id): a draft release holds the two installers. They are signed
+   for the updater outside GitHub, with the private key, which never goes to GitHub.
+3. **Publish release**, second run (with the two signatures): adds the checksums and `latest.json` from
+   `scripts/release.mjs`, checks them against the draft's files, and publishes the release as the latest.
+
+Locally, `npm run release -- <folder>` writes the same checksums and `latest.json` for a folder of signed Windows
+and Linux packages of one version; it refuses a partial or unsigned feed and does not publish. The updater key,
+release inputs and clean Windows and Linux test steps are in
 [docs/2026-10-10-updater-and-installer.md](docs/2026-10-10-updater-and-installer.md).
 
 ## License
 
-© 2026 QS Mind. All rights reserved. See [LICENSE](LICENSE).
+© 2026 QS Mind. All rights reserved. Tawreed is proprietary software; see [LICENSE](LICENSE).
