@@ -1,9 +1,11 @@
 name: Publish release
 
-# Publishes the installers from one "Release build" run as a GitHub release of this repo. The updater signatures
-# are made with the private key outside GitHub and passed in here; they are public, the key is not. The feed
-# (latest.json), the checksums and the fixed-name installers come from `scripts/release.mjs`, so the download
-# buttons on qsmind.app and the app's updater always point at the latest release. Started by hand.
+# Publishes the installers from one "Release build" run as a GitHub release of this repo, in two runs:
+# 1. Without signatures: a draft release (hidden from the public) holds the two installers, so they can be signed
+#    for the updater with the private key, which never goes to GitHub.
+# 2. With the signatures (public text): the same installers get the checksums and the update feed (latest.json)
+#    from `scripts/release.mjs`, and the release is published as the latest. The download buttons on qsmind.app
+#    and the app's updater always point at the latest release. Started by hand.
 on:
   workflow_dispatch:
     inputs:
@@ -11,11 +13,11 @@ on:
         description: The "Release build" run whose installers to publish
         required: true
       windows_signature:
-        description: Contents of Tawreed_<version>_x64-setup.exe.sig
-        required: true
+        description: Contents of Tawreed_<version>_x64-setup.exe.sig (empty for the draft run)
+        required: false
       linux_signature:
-        description: Contents of Tawreed_<version>_amd64.AppImage.sig
-        required: true
+        description: Contents of Tawreed_<version>_amd64.AppImage.sig (empty for the draft run)
+        required: false
 
 permissions:
   contents: write
@@ -24,6 +26,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -41,20 +45,25 @@ jobs:
           path: bundle/appimage
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
-      - name: Signatures, checksums and update feed
+      - run: echo "VERSION=$(node -p 'require("./package.json").version')" >> "$GITHUB_ENV"
+      - name: Draft with the installers, to sign
+        if: inputs.windows_signature == ''
+        run: |
+          cp "bundle/nsis/Tawreed_${VERSION}_x64-setup.exe" bundle/Tawreed_x64-setup.exe
+          cp "bundle/appimage/Tawreed_${VERSION}_amd64.AppImage" bundle/Tawreed_amd64.AppImage
+          gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "Tawreed $VERSION" \
+            --notes-file "docs/releases/$VERSION.md" bundle/Tawreed_x64-setup.exe bundle/Tawreed_amd64.AppImage
+      - name: Signatures, checksums, update feed, and publish
+        if: inputs.windows_signature != ''
         env:
           WINDOWS_SIGNATURE: ${{ inputs.windows_signature }}
           LINUX_SIGNATURE: ${{ inputs.linux_signature }}
         run: |
-          version=$(node -p 'require("./package.json").version')
-          printf '%s' "$WINDOWS_SIGNATURE" > "bundle/nsis/Tawreed_${version}_x64-setup.exe.sig"
-          printf '%s' "$LINUX_SIGNATURE" > "bundle/appimage/Tawreed_${version}_amd64.AppImage.sig"
+          printf '%s' "$WINDOWS_SIGNATURE" > "bundle/nsis/Tawreed_${VERSION}_x64-setup.exe.sig"
+          printf '%s' "$LINUX_SIGNATURE" > "bundle/appimage/Tawreed_${VERSION}_amd64.AppImage.sig"
           node scripts/release.mjs bundle
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Tawreed $VERSION" --latest \
-            --notes-file "docs/releases/$VERSION.md" \
-            bundle/Tawreed_x64-setup.exe bundle/Tawreed_amd64.AppImage bundle/SHA256SUMS.txt bundle/latest.json
+          # The draft holds the same bytes the signatures were made over; the checksums must agree.
+          gh release download "v$VERSION" --dir drafted --pattern 'Tawreed_*'
+          (cd drafted && sha256sum -c ../bundle/SHA256SUMS.txt)
+          gh release upload "v$VERSION" bundle/SHA256SUMS.txt bundle/latest.json --clobber
+          gh release edit "v$VERSION" --draft=false --latest --notes-file "docs/releases/$VERSION.md"
