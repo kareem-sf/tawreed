@@ -1,0 +1,65 @@
+name: Bug report
+description: Something in Tawreed doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't attach a real BOQ, a client's name, generated workbooks, API keys or files from `~/.tawreed`.
+        A description of the rows that misbehaved, or a small file with made-up numbers, is enough.
+  - type: input
+    id: version
+    attributes:
+      label: Tawreed version
+      description: Shown in About.
+      placeholder: 0.0.1
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: AI connection
+      options:
+        - Anthropic
+        - OpenAI
+        - Google
+        - xAI
+        - OpenAI-compatible endpoint
+        - ChatGPT subscription (Codex)
+        - None, or not related
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a BOQ with two sheets…
+        2. Approve the plan…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: The message as Tawreed showed it. Screenshots help if they show no client data.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have not included a real BOQ, client data or an API key.
+          required: true
