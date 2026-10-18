@@ -1,7 +1,27 @@
+Tawreed
 © 2026 QS Mind. All rights reserved.
 
-Tawreed is proprietary software. No permission to use, copy, modify or distribute
-this software is granted by this notice. Any permitted use requires a separate
-agreement with QS Mind.
+Tawreed is proprietary software owned by QS Mind.
 
-Third-party software and fonts retain their own licences and notices.
+1. Permission to use. You may download the official Tawreed installers published by QS Mind (on
+   qsmind.app or the Releases page of github.com/qs-mind/tawreed), install them, and use Tawreed free
+   of charge for your own work, personal or commercial.
+
+2. What needs QS Mind's written approval. Anything beyond that use needs prior written approval from
+   QS Mind, including:
+   - modifying, customizing, refactoring, translating or building on Tawreed or its source code;
+   - copying, redistributing, selling, renting or sublicensing Tawreed or its source code;
+   - publishing Tawreed, or any part or derivative of it, under any name other than QS Mind, or
+     attributing it to anyone else;
+   - removing, hiding or changing the Tawreed or QS Mind names, marks, notices or identity.
+
+3. Source code. The source code is published so that it can be read and reviewed. Reading it gives no
+   right to use it beyond section 1.
+
+4. No warranty. Tawreed is provided "as is", without warranty of any kind. Check every output before
+   relying on it. QS Mind is not liable for any loss arising from its use.
+
+5. Third parties. Third-party software and fonts included in Tawreed keep their own licences and
+   notices.
+
+Approvals and questions: qsmind@agentmail.to

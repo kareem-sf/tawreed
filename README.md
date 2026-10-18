@@ -225,4 +225,6 @@ release inputs and clean Windows and Linux test steps are in
 
 ## License
 
-© 2026 QS Mind. All rights reserved. Tawreed is proprietary software; see [LICENSE](LICENSE).
+© 2026 QS Mind. All rights reserved. You may download the official installers and use Tawreed free of charge.
+Modifying, customizing, redistributing or rebranding it, or attributing it to anyone else, needs QS Mind's written
+approval. See [LICENSE](LICENSE).
