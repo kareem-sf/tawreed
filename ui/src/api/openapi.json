@@ -2079,6 +2079,59 @@
         }
       }
     },
+    "/ai/connections/{connection_id}/test": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Test Connection",
+        "description": "Reach the provider with the saved key, without spending a model request. A failure is the answer, not an\nerror: `problem` is the code the interface explains (no key, key refused, unreachable, ...).",
+        "operationId": "test_connection_ai_connections__connection_id__test_post",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ai/connections/{connection_id}/checks": {
       "post": {
         "tags": [
@@ -2541,6 +2594,38 @@
           "checks"
         ],
         "title": "ConnectionOut"
+      },
+      "ConnectionTest": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Params",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "ConnectionTest"
       },
       "CoverageOut": {
         "properties": {

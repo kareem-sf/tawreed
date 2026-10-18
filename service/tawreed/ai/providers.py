@@ -70,6 +70,20 @@ async def list_models(provider: Provider, key: str, base_url: str | None) -> lis
     return sorted([m.id async for m in client.models.list()], reverse=True)
 
 
+async def ping(provider: Provider, key: str, base_url: str | None) -> tuple[str, dict[str, str]] | None:
+    """Reach the provider with the key and say what is wrong, or None when it answers. Used for a saved connection."""
+    if not key.strip():
+        return "key_missing", {}
+    try:
+        await list_models(provider, key, base_url)
+    except Exception as error:  # noqa: BLE001  (every failure becomes a code the engineer can read)
+        code, params = explain(error)
+        if provider == "openai_compatible" and code == "model_missing":
+            return None  # such a service may not list its models; the key is proven by a model check
+        return code, params
+    return None
+
+
 def explain(error: BaseException) -> tuple[str, dict[str, str]]:
     """A stable code (and details) for what went wrong. Never includes the key or the raw response."""
     for _ in range(5):  # Pydantic AI wraps the provider's own error; explain from that
@@ -87,7 +101,7 @@ def explain(error: BaseException) -> tuple[str, dict[str, str]]:
         return "rate_limited", {}
     if "timeout" in kind:
         return "timed_out", {}
-    if status in ("UNAVAILABLE", "DEADLINE_EXCEEDED") or "connect" in kind:
+    if status in ("UNAVAILABLE", "DEADLINE_EXCEEDED") or "connect" in kind or isinstance(error, OSError):
         return "unreachable", {}
     return "service_error", {"status": str(status or type(error).__name__)}
 
