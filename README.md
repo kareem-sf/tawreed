@@ -65,7 +65,7 @@ Build each platform on its own operating system. AppImage uses Tauri's maintaine
 
 `npm run release` prepares local checksums. With an updater public key configured, collect signed Windows and
 Linux packages of the same version in one bundle folder and run `npm run release -- <folder>` to write a combined
-`latest.json` for a GitHub release of `qs-mind/tawreed-releases`. The script refuses a partial or unsigned feed. It
+`latest.json` for a GitHub release of `qs-mind/tawreed`. The script refuses a partial or unsigned feed. It
 does not publish. Make native builds with the
 licensed Thmanyah files present; they may only ship inside the compiled app.
 

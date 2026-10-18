@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { prepareRelease } from "./release.mjs";
 
 const version = "0.1.0";
-const updater = { pubkey: "synthetic-public-key", endpoints: ["https://github.com/qs-mind/tawreed-releases/releases/latest/download/latest.json"] };
+const updater = { pubkey: "synthetic-public-key", endpoints: ["https://github.com/qs-mind/tawreed/releases/latest/download/latest.json"] };
 function bundle(t, { linux = true, signatures = true } = {}) {
   const folder = mkdtempSync(path.join(process.env.PAPERCLIP_RUN_SCRATCH_DIR ?? process.cwd(), "release-test-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
@@ -23,8 +23,8 @@ test("combined feed carries Windows and Linux URLs, signatures and artifact hash
   const folder = bundle(t);
   const { feed } = prepareRelease(folder, version, updater);
   assert.deepEqual(feed.platforms, {
-    "windows-x86_64": { signature: "synthetic nsis signature", url: "https://github.com/qs-mind/tawreed-releases/releases/download/v0.1.0/Tawreed_x64-setup.exe" },
-    "linux-x86_64": { signature: "synthetic appimage signature", url: "https://github.com/qs-mind/tawreed-releases/releases/download/v0.1.0/Tawreed_amd64.AppImage" },
+    "windows-x86_64": { signature: "synthetic nsis signature", url: "https://github.com/qs-mind/tawreed/releases/download/v0.1.0/Tawreed_x64-setup.exe" },
+    "linux-x86_64": { signature: "synthetic appimage signature", url: "https://github.com/qs-mind/tawreed/releases/download/v0.1.0/Tawreed_amd64.AppImage" },
   });
   assert.deepEqual(JSON.parse(readFileSync(path.join(folder, "latest.json"))), feed);
   for (const [data, name] of [["synthetic nsis", "Tawreed_x64-setup.exe"], ["synthetic appimage", "Tawreed_amd64.AppImage"]]) {

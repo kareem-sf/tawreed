@@ -50,7 +50,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`SHA256SUMS.txt: ${folder}`);
     const fonts = path.join(root, "ui", "src", "fonts", "thmanyah");
     console.log(existsSync(fonts) && readdirSync(fonts).some((name) => /\.(woff2|otf|ttf)$/.test(name)) ? "Thmanyah is present on this machine. Check each native build embeds it." : "Thmanyah is NOT present: Arabic falls back to the system font.");
-    console.log(feed ? `Combined update feed: ${path.join(folder, "latest.json")}\nUpload ${artifacts.map(({ asset }) => asset).join(", ")}, SHA256SUMS.txt and latest.json to a GitHub release v${version} of qs-mind/tawreed-releases. Publishing requires separate approval.` : "NOT FOR RELEASE: no updater public key. No update feed was generated. Do not publish an old latest.json from this folder.");
+    console.log(feed ? `Combined update feed: ${path.join(folder, "latest.json")}\nUpload ${artifacts.map(({ asset }) => asset).join(", ")}, SHA256SUMS.txt and latest.json to a GitHub release v${version} of qs-mind/tawreed. Publishing requires separate approval.` : "NOT FOR RELEASE: no updater public key. No update feed was generated. Do not publish an old latest.json from this folder.");
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

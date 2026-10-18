@@ -15,13 +15,14 @@ Tauri updater signatures remain mandatory. Hosting belongs to Platform (QSM-24).
   download, with a signature file beside it. The app only installs a file whose signature matches the public key
   built into it.
 - **One address.** `plugins.updater.endpoints` in `desktop/tauri.release.conf.json`. Since 2026-10-18 (founder's
-  choice) downloads and updates come from GitHub releases of the public repo `qs-mind/tawreed-releases`, not a QS
-  Mind server: `https://github.com/qs-mind/tawreed-releases/releases/latest/download/latest.json`. It is built into
+  choice) downloads and updates come from GitHub releases of this repo, `qs-mind/tawreed`, not a QS Mind server:
+  `https://github.com/qs-mind/tawreed/releases/latest/download/latest.json`. GitHub serves release files to anyone
+  only from a public repo; while the repo is private these links ask for a GitHub sign-in. It is built into
   every package. `npm run release` works out each installer's address from it
   (`releases/download/v<version>/<installer>`).
 - **Fixed file names.** Each release carries `Tawreed_x64-setup.exe` and `Tawreed_amd64.AppImage`, without the
   version, so the download buttons on qsmind.app link to
-  `https://github.com/qs-mind/tawreed-releases/releases/latest/download/<file>` and start the download directly;
+  `https://github.com/qs-mind/tawreed/releases/latest/download/<file>` and start the download directly;
   nobody has to open GitHub.
 - **When it checks.** Once, when Tawreed opens. Offline or no answer: nothing is shown and nothing fails.
 - **What the engineer sees.** A line under the header on every tab: "Tawreed 0.2.0 is ready to install." with
@@ -104,7 +105,7 @@ the script checks signature presence, while the updater verifies cryptographic v
 Without a public key, it writes checksums for available native packages but no feed, and prints NOT FOR RELEASE.
 It also copies each installer to the staging folder under its fixed name. Never upload an old feed left in a
 staging folder. Upload the two fixed-name installers, `SHA256SUMS.txt` and `latest.json` to one GitHub release
-`v<version>` of `qs-mind/tawreed-releases`, only with the founder's approval. Nothing publishes here.
+`v<version>` of `qs-mind/tawreed`, only with the founder's approval. Nothing publishes here.
 
 ## 4. Installer identity and the app ID
 
