@@ -1,16 +1,9 @@
 # Progress
 
-## 27 September 2026: rebuild started
+## 27 September 2026: work started
 
-- The previous Tawreed was removed from `main`; it remains in git history at tag `legacy-final`.
-- Uncommitted work at that point is archived on branch `archive/pre-rebuild-2026-09-27`; the
-  `.worktrees/platform-foundation` changes are committed on `codex/platform-foundation` and the worktree removed.
-- PR #89 (auto-pilot) and ten Dependabot PRs were closed as superseded.
-- Personal ignored folders (`.remember`, `.superpowers`, `release`, the private eval corpus) moved to
-  `D:\AI Work\_private-backups\tawreed-pre-rebuild-2026-09-27`; build output deleted.
-- The old data home `~/.tawreed` and `~/.tawreed-signing` are for the engineer to delete. Until then, development
-  runs use `TAWREED_HOME` pointed at a scratch folder.
 - The product is specified in [spec.md](spec.md) and [architecture.md](architecture.md). The stack mirrors Quantix.
+- Development runs use `TAWREED_HOME` pointed at a scratch folder.
 
 ## 27 September 2026: design directions
 
@@ -45,12 +38,11 @@
   the wrong side; on Windows, stopping the dev server left the service running, because the venv's `python.exe` is
   a launcher (the dev plugin now stops the whole process tree; Quantix's plugin has the same gap).
 
-## 27 September 2026: the Tawreed logo is back
+## 27 September 2026: the Tawreed logo
 
-- At the engineer's request, the previous app's logo returns: the "T" monogram with one source beam and two routed
-  outputs. The app icons are the original files, byte for byte (from tag `legacy-final`), and `desktop/app-icon.svg`
-  is the original gold source. In the header the same mark is drawn in the text colour beside the name, as the
-  previous app last did, so it follows light, dark and Arabic. The browser tab uses the gold mark.
+- The logo is the "T" monogram with one source beam and two routed outputs; `desktop/app-icon.svg` is the gold
+  source. In the header the same mark is drawn in the text colour beside the name, so it follows light, dark and
+  Arabic. The browser tab uses the gold mark.
 
 ## 27 September 2026: AI connections
 
