@@ -30,6 +30,14 @@ export function About() {
           </button>
           {website.isError && <Alert>{explain(website.error, t)}</Alert>}
         </Row>
+        <Row label={t("policy.title")}>
+          <p>{t("policy.summary")}</p>
+          <ul className="flex list-disc flex-col gap-1 ps-5 text-ink-2">
+            <li>{t("policy.asStated")}</li>
+            <li>{t("policy.proposals")}</li>
+            <li>{t("policy.scanned")}</li>
+          </ul>
+        </Row>
         <Row label={t("about.licence")}>{t("about.license")}</Row>
         <Row label={t("about.data")}>
           {about.data ? (

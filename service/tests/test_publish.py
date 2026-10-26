@@ -133,6 +133,14 @@ def test_publishing_writes_every_workbook_with_the_values_as_the_source_states_t
     cover, index = master["Cover"], master["Packages"]
     assert index["E2"].value == "='01 Concrete works'!F10" and computed(index, "E2") == pytest.approx(1465585.13)
     assert computed(cover, "B7") == pytest.approx(1465585.13)  # =SUM of the package index
+    limits = (
+        "For review. Tawreed does not design, calculate loads or approve anything; "
+        "checking and approval rest with the engineer and the firm."
+    )
+    assert cover["A2"].value == limits and concrete["A4"].value == limits
+    assumptions = [r for r in rows(cover) if r[0] == "Assumptions"]
+    assert len(assumptions) == 1 and "not market prices" in assumptions[0][1]
+    assert {s.oddHeader.center.text for s in master.worksheets} == {"For review"}
     formwork = master["02 Formwork and joints"]
     quantity = formwork["D7"]
     assert (formwork["A7"].value, quantity.value, quantity.number_format) == ("3.1.3", 1250, "#,##0.00")  # "1,250.00"
@@ -142,6 +150,7 @@ def test_publishing_writes_every_workbook_with_the_values_as_the_source_states_t
     package = openpyxl.load_workbook(revision / "Packages/03 Earthworks - Rev 00.xlsx").active
     # Its only item has no amount, so there is no total: 0.00 would read as priced at nothing.
     assert rows(package, 6) == [["1", "أعمال الحفر", "م3", 350, None, None, "Tower BOQ.xlsx › الملخص › row 2"]]
+    assert package["A4"].value == limits and package.oddHeader.center.text == "For review"
 
     work = client.get(f"/projects/{project_id}/work").json()
     assert work["stage"] == "published" and work["published"]["name"] == "Rev 00"
@@ -320,6 +329,8 @@ def test_an_arabic_project_gets_arabic_right_to_left_workbooks(client):
     assert sheet.sheet_view.rightToLeft is True
     assert [c.value for c in sheet[5]] == ["البند", "الوصف", "الوحدة", "الكمية", "السعر", "المبلغ", "المصدر"]
     assert master.sheetnames[:2] == ["الغلاف", "الحزم"]
+    assert sheet["A4"].value.startswith("للمراجعة. لا يصمّم توريد ولا يحسب أحمالاً ولا يعتمد أي شيء")
+    assert sheet.oddHeader.center.text == "للمراجعة" and master["الغلاف"]["A2"].value == sheet["A4"].value
 
 
 def test_revisions_are_opened_and_exported(client, monkeypatch):

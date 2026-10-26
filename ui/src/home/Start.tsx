@@ -60,6 +60,7 @@ export function Start({ onOpen, onOpenSettings }: { onOpen: (id: string) => void
               {t("drop.choose")}
             </PickFiles>
           </section>
+          <p className="-mt-6 w-full max-w-[640px] text-center text-sm text-balance text-ink-2">{t("policy.summary")}</p>
 
           {start.isError && (
             <div className="w-full max-w-[640px]">

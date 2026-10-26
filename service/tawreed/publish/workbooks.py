@@ -3,7 +3,8 @@
 Every item's code, description, unit, quantity, rate, amount and comment go out exactly as the source states them:
 a value the source wrote as a number is written as that number, shown with the source's decimals and grouping;
 anything else is written as its text. Totals are computed by Tawreed from those values. A project whose items are
-mostly Arabic gets Arabic labels and right-to-left sheets."""
+mostly Arabic gets Arabic labels and right-to-left sheets. Every sheet is marked for review, with Tawreed's limits
+on the cover and on each package, and the cover states the assumptions behind the figures."""
 
 import re
 import weakref
@@ -102,6 +103,17 @@ LABELS: dict[str, dict[str, str]] = {
         "set_aside_pages": "Set aside",
         "columns": "Columns",
         "transcribed": "Transcribed from the page picture",
+        "review": "For review",
+        "limits": "For review. Tawreed does not design, calculate loads or approve anything; checking and approval "
+        "rest with the engineer and the firm.",
+        "assumptions": "Assumptions",
+        "assume_source": "Codes, descriptions, units, quantities, rates and amounts are as the BOQs state them, not "
+        "checked against drawings or specifications. The rates are the BOQs' own, not market prices.",
+        "assume_amounts": "An amount is Qty × Rate where that gives the BOQ's own amount; otherwise the BOQ's figure "
+        "stays. Totals add up those amounts.",
+        "assume_packages": "The AI proposed the packages and placed the items; the engineer approved the plan, the "
+        "uncertain items and this revision (see the decision log).",
+        "assume_pictures": "Rows read from a page picture say so in their Source column: check them against the page.",
     },
     "ar": {
         "item": "البند",
@@ -170,6 +182,17 @@ LABELS: dict[str, dict[str, str]] = {
         "set_aside_pages": "مستبعدة",
         "columns": "الأعمدة",
         "transcribed": "منسوخة من صورة الصفحة",
+        "review": "للمراجعة",
+        "limits": "للمراجعة. لا يصمّم توريد ولا يحسب أحمالاً ولا يعتمد أي شيء، والتحقق والاعتماد مسؤولية "
+        "المهندس والشركة.",
+        "assumptions": "الافتراضات",
+        "assume_source": "الرموز والأوصاف والوحدات والكميات والأسعار والمبالغ كما في جداول الكميات، دون مراجعة مقابل "
+        "المخططات أو المواصفات. الأسعار أسعار الجداول لا أسعار السوق.",
+        "assume_amounts": "المبلغ هو الكمية × السعر حيث يطابق ذلك مبلغ الجدول، وإلا يبقى مبلغ الجدول كما هو. المجاميع "
+        "جمع لهذه المبالغ.",
+        "assume_packages": "اقترح الذكاء الاصطناعي الحزم ووزّع البنود، ووافق المهندس على الخطة والبنود غير المؤكدة وهذا "
+        "الإصدار (انظر سجل القرارات).",
+        "assume_pictures": "الصفوف المقروءة من صورة صفحة مُعلَّمة في عمود المصدر: راجعها مقابل الصفحة.",
     },
 }
 
@@ -267,7 +290,7 @@ def where(item: Item, files: dict[str, Source], labels: dict[str, str]) -> str:
 
 
 def _prepare(sheet: Worksheet, book: Book, widths: list[int]) -> None:
-    """Column widths and direction, and printing: landscape A4, one page wide, numbered pages."""
+    """Column widths and direction, and printing: landscape A4, one page wide, numbered pages marked for review."""
     sheet.sheet_view.rightToLeft = book.language == "ar"
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
@@ -277,6 +300,7 @@ def _prepare(sheet: Worksheet, book: Book, widths: list[int]) -> None:
     sheet.page_setup.fitToHeight = 0
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.oddFooter.center.text = "&P / &N"
+    sheet.oddHeader.center.text = book.labels["review"]
 
 
 def _header(sheet: Worksheet, row: int, values: list[str], numbers: tuple[int, ...] = ()) -> None:
@@ -327,6 +351,7 @@ def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool =
     sheet["A2"] = f"{labels['project']}: {book.project.name} · {labels['revision']}: {book.name}"
     if package.scope:
         sheet["A3"] = f"{labels['scope']}: {package.scope}"
+    sheet["A4"] = labels["limits"]
     numbers = tuple(columns.index(c) + 1 for c in ("quantity", "rate", "amount"))
     _header(sheet, HEADER_ROW, [labels[c] for c in columns], numbers)
     sheet.freeze_panes = sheet.cell(row=FIRST_ITEM_ROW, column=1)
@@ -390,6 +415,8 @@ def master(book: Book) -> Workbook:
     _prepare(cover, book, [34, 70])
     cover["A1"] = book.project.name
     cover["A1"].font = TITLE
+    cover["A2"] = labels["limits"]
+    cover["A2"].font = BOLD
     priced = any(i.amount is not None for items in book.items.values() for i in items)
     rows = [
         (labels["revision"], book.name),
@@ -412,6 +439,9 @@ def master(book: Book) -> Workbook:
         note = "" if source.active else f" ({labels['set_aside']})"
         cover.cell(row=row, column=2, value=source.filename + note)
         row += 1
+    cover.cell(row=row + 1, column=1, value=labels["assumptions"]).font = BOLD
+    for offset, key in enumerate(("assume_source", "assume_amounts", "assume_packages", "assume_pictures"), start=1):
+        cover.cell(row=row + offset, column=2, value=labels[key]).alignment = WRAP
 
     index = workbook.create_sheet(sheet_name(labels["packages"]))
     _prepare(index, book, [8, 40, 60, 10, 18, 44])

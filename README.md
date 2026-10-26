@@ -94,6 +94,24 @@ Each publish is a numbered revision (`Rev 00`, `Rev 01`, …) kept with the proj
 Item codes, descriptions, units, quantities, rates, amounts and comments reach the workbooks exactly as they are in
 your BOQ, and every item keeps its source sheet and row, or page. Arabic projects get right-to-left sheets.
 
+## Limits of use / حدود الاستخدام
+
+Tawreed helps you sort BOQ items into procurement packages and publish them as workbooks for pricing. It does not
+design, calculate loads or approve anything. Everything it produces is for review; checking and approval rest with
+the engineer and the firm.
+
+- Codes, descriptions, units, quantities, rates and amounts are copied from your BOQs as they are. Tawreed does not
+  check them against drawings or specifications, and the rates are your BOQ's, not market prices.
+- The package plan and the placing of items are the AI's proposals. Confirm each package's scope and specifications
+  before you send it out.
+- Rows read from a scanned page are marked: check them against the page.
+
+Every printed sheet of a revision is headed "For review". The master's cover and each package sheet state these
+limits in one line, and the cover lists the assumptions behind the figures. The app shows them under the drop zone
+and in **About**.
+
+<p dir="rtl">يساعدك توريد في توزيع بنود جداول الكميات على حزم توريد وإصدارها في مصنفات جاهزة للتسعير. لا يصمّم ولا يحسب أحمالاً ولا يعتمد أي شيء. كل ما يخرج منه للمراجعة، والتحقق والاعتماد مسؤولية المهندس والشركة. تُنقل الكميات والأسعار والمبالغ من جداول الكميات كما هي، والأسعار أسعار جدولك لا أسعار السوق، وخطة الحزم وتوزيع البنود اقتراحات تؤكدها قبل الإرسال.</p>
+
 ## Files it reads
 
 - Excel: `.xlsx`, `.xlsm`, `.xls`

@@ -66,6 +66,8 @@ images. Any layout: there is no required template.
   them up.
 - **Decision log:** what the AI proposed and what the engineer decided, with reasons and rules applied.
 - **Coverage check:** every source item once, and source totals against output totals.
+- **For review:** every printed sheet is headed "For review". The cover and each package sheet state Tawreed's
+  limits in one line, and the cover lists the assumptions behind the figures.
 
 Revisions are numbered `Rev 00`, `Rev 01`, … and kept under the project in `~/.tawreed`, with Open folder and
 Export to… actions. Arabic projects get right-to-left sheets.
@@ -88,7 +90,8 @@ Export to… actions. Arabic projects get right-to-left sheets.
 
 Tawreed is a tool, not a workspace. One window with four tabs: **Home**, **History**, **Settings** and **About**.
 
-- **Home** starts as a drop zone ("Drop BOQ files here", or Choose files) with the recent projects below it.
+- **Home** starts as a drop zone ("Drop BOQ files here", or Choose files), Tawreed's limits of use in one line,
+  and the recent projects below it.
   Dropping files starts the work; dropping more files onto a running project adds them to it.
 - An open project shows, in this order: its name, a five-step line (Read · Plan · Place · Check · Publish) and a
   status line; the one thing waiting for the engineer (a decision card), or else the published revision on one line
@@ -99,7 +102,7 @@ Tawreed is a tool, not a workspace. One window with four tabs: **Home**, **Histo
   files, Open folder and Export to….
 - **History** lists past projects and their revisions; opening one returns to Home for that project.
 - **Settings**: language, theme, the AI Tawreed works with, connections, and rules that apply to all projects.
-- **About**: version, data folder, logs, updates and licences.
+- **About**: version, limits of use, data folder, logs, updates and licences.
 
 Minimal and calm: white (or near-black in dark mode), hairlines, black primary buttons, and one amber accent that
 means "needs you". No sidebars, dashboards or decoration.

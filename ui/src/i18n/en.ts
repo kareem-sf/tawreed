@@ -269,6 +269,12 @@ export const en = {
   "about.data": "Data folder",
   "about.license": "© 2026 QS Mind. All rights reserved.",
 
+  "policy.title": "Limits of use",
+  "policy.summary": "Tawreed helps you sort BOQ items into procurement packages and publish them as workbooks for pricing. It does not design, calculate loads or approve anything. Everything it produces is for review; checking and approval rest with the engineer and the firm.",
+  "policy.asStated": "Codes, descriptions, units, quantities, rates and amounts are copied from your BOQs as they are. Tawreed does not check them against drawings or specifications, and the rates are your BOQ’s, not market prices.",
+  "policy.proposals": "The package plan and the placing of items are the AI’s proposals. Confirm each package’s scope and specifications before you send it out.",
+  "policy.scanned": "Rows read from a scanned page are marked: check them against the page.",
+
   "error.unsupported_file": "Tawreed can’t read “{file}”. Use Excel, CSV, ODS, PDF or an image.",
   "error.empty_file": "“{file}” is empty.",
   "error.file_too_large": "“{file}” is larger than 100 MB.",
