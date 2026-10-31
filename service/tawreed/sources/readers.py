@@ -37,6 +37,7 @@ READ_SECONDS = 600  # a file still being read after this is too big for Tawreed
 PIXEL_BUDGET = 25_000_000  # pixels in a page image, however large the page is drawn
 HEIGHT_MOST = 12_000  # pixels tall at most, for a very long page
 READ_MEMORY = 4 * 1024**3  # bytes a child reading one file may use, where the system can cap it
+MOST_CELLS = 20_000_000  # cells a worksheet may declare; the spreadsheet library builds the whole grid in memory
 
 Image.MAX_IMAGE_PIXELS = 50_000_000  # a picture larger than this is refused, not decoded (a decompression bomb)
 
@@ -128,7 +129,23 @@ def read_file(path: Path, kind: str) -> list[Page]:
 # Spreadsheets -------------------------------------------------------------------------------------------------
 
 
+def _declared_cells(path: Path) -> int:
+    """The largest grid an .xlsx or .xlsm worksheet declares (its dimension), read without loading any cells."""
+    if path.suffix.lower() not in (".xlsx", ".xlsm"):
+        return 0
+    try:
+        book = openpyxl.load_workbook(path, read_only=True)
+    except Exception:  # noqa: BLE001  (damage is reported by the reader proper)
+        return 0
+    try:
+        return max(((sheet.max_row or 0) * (sheet.max_column or 0) for sheet in book.worksheets), default=0)
+    finally:
+        book.close()
+
+
 def _spreadsheet(path: Path) -> list[Page]:
+    if _declared_cells(path) > MOST_CELLS:
+        raise Unreadable("too_big")  # refused before the grid is built: macOS and Windows can't cap the memory
     try:
         workbook = calamine.CalamineWorkbook.from_path(str(path))
     except Exception as error:  # noqa: BLE001  (calamine raises its own error types for every kind of damage)

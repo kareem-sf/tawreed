@@ -311,6 +311,7 @@ def test_a_database_failure_in_a_tool_goes_back_to_the_model(client):
 # Files ---------------------------------------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(os.name == "nt", reason="file modes are POSIX; Windows keeps the files in the user's own profile")
 def test_the_data_home_and_the_keys_are_private(tmp_path):
     home = tmp_path / "new-home"
     db.open_database(home)
@@ -411,6 +412,7 @@ def test_the_page_picture_is_written_in_one_step(client, tmp_path):
     assert (pages / "1.png").exists() and not [p for p in pages.iterdir() if p.name.endswith(".tmp")]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no address-space limit to set")
 def test_a_read_that_cannot_cap_its_memory_still_reads(monkeypatch, tmp_path):
     import resource
 
@@ -499,12 +501,12 @@ def test_programs_started_by_the_frozen_service_get_the_original_library_path(mo
 
 
 def test_codex_is_found_where_a_desktop_launcher_does_not_look(tmp_path, monkeypatch):
-    program = tmp_path / "codex"
+    program = tmp_path / ("codex.cmd" if os.name == "nt" else "codex")  # npm installs a .cmd launcher on Windows
     program.write_text("#!/bin/sh\n")
     program.chmod(0o755)
     monkeypatch.setenv("PATH", "/nonexistent")
     monkeypatch.setattr(codex, "_usual_places", lambda: [tmp_path])
-    assert codex.executable() == [str(program)]
+    assert [os.path.normcase(p) for p in codex.executable() or []] == [os.path.normcase(str(program))]
 
 
 def test_a_catalogue_codex_cannot_be_read_is_a_clean_error(monkeypatch):

@@ -93,6 +93,7 @@ def test_a_refused_key_is_not_kept(client, models, tmp_path):
     assert not (tmp_path / "auth.json").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="file modes are POSIX; Windows keeps the files in the user's own profile")
 def test_auth_json_is_readable_by_the_current_user_only(client, models, tmp_path):
     add(client)
     file = tmp_path / "auth.json"
