@@ -46,9 +46,11 @@ on About too), a check while the app stays open for days, release notes in the a
 
 ## 2. The updater signing key
 
-Made on 2026-10-18 with the founder's approval, in the cloud, by the steps below. The private key and its
-password are in the QS Mind project's shared folder, `.secrets/tawreed-updater/`; the public key is committed.
-Copy the private key and password to the password manager and one offline copy. The steps stay for a future key.
+The first key, made on 2026-10-18 in a cloud session, was lost with that session: 0.0.1 can't update itself.
+The current key was made on 2026-10-31 on the founder's laptop, by the steps below: the private key is
+`~/.tauri/tawreed-updater.key`, its password `~/.tauri/tawreed-updater.key.password` (both readable by the owner
+only); the public key is committed. Copy both to the password manager and one offline copy: without them no
+installed Tawreed can be updated again. The steps stay for a future key.
 
 1. On the founder's own machine, in the repo folder:
 
