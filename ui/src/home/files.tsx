@@ -9,18 +9,35 @@ let dragFromPage = false;
 window.addEventListener("dragstart", () => (dragFromPage = true));
 for (const done of ["dragend", "drop"]) window.addEventListener(done, () => (dragFromPage = false)); // drop: in case the dragged element is gone
 
-/** A region that takes dropped files. `over` is true while files are dragged above it. */
+const hasFiles = (event: Pick<globalThis.DragEvent, "dataTransfer">) =>
+  !dragFromPage && Array.from(event.dataTransfer?.types ?? []).includes("Files");
+
+// Files dropped anywhere that takes none must not be opened by the window (it would leave Tawreed for the file).
+// The regions below handle their drops first; whatever reaches the window is refused.
+window.addEventListener("dragover", (event) => {
+  if (!hasFiles(event) || event.defaultPrevented) return; // a region that takes the files has already said so
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+});
+window.addEventListener("drop", (event) => {
+  if (hasFiles(event)) event.preventDefault();
+});
+
+/** A region that takes dropped files. `over` is true while files are dragged above it. A disabled one takes none
+ *  (a drop meanwhile is refused, not queued). */
 export function DropRegion({
   onFiles,
   className,
+  disabled = false,
   children,
 }: {
   onFiles: (files: File[]) => void;
   className?: string;
+  disabled?: boolean;
   children: (over: boolean) => ReactNode;
 }) {
   const [depth, setDepth] = useState(0); // dragenter/leave fire for every child, so count them
-  const carriesFiles = (event: DragEvent) => !dragFromPage && Array.from(event.dataTransfer.types).includes("Files");
+  const carriesFiles = (event: DragEvent) => !disabled && hasFiles(event);
 
   return (
     <div

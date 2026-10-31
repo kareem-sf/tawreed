@@ -1,10 +1,13 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, must, pageImage, succeed, upload, type Project, type SheetView } from "../api/client";
+import { api, ApiError, must, pageImage, succeed, upload, type Project, type SheetView } from "../api/client";
 
 /** How often an open project is asked again while its files are being read. */
 export const READING_POLL = 1000;
 
 const ROWS = 200; // sheet rows fetched at a time
+
+/** A window of sheet rows: where it starts, and how many rows it holds. */
+type Window = { start: number; count: number };
 
 export const isReading = (project: Project) =>
   project.sources.some((source) => source.status === "added" || source.status === "reading");
@@ -13,11 +16,12 @@ export function useProjects() {
   return useQuery({ queryKey: ["projects"], queryFn: () => must(api.GET("/projects")) });
 }
 
-export function useProject(projectId: string) {
+/** `working`: a step is running on the project, which changes its files' status and its name list, so ask again. */
+export function useProject(projectId: string, working = false) {
   return useQuery({
     queryKey: ["project", projectId],
     queryFn: () => must(api.GET("/projects/{project_id}", { params: { path: { project_id: projectId } } })),
-    refetchInterval: (query) => (query.state.data && isReading(query.state.data) ? READING_POLL : false),
+    refetchInterval: (query) => (working || (query.state.data && isReading(query.state.data)) ? READING_POLL : false),
   });
 }
 
@@ -37,19 +41,28 @@ export function useSource(projectId: string, sourceId: string) {
 export function useSheet(projectId: string, sourceId: string, page: number, from = 1) {
   return useInfiniteQuery({
     queryKey: ["sheet", sourceId, page, from],
-    initialPageParam: from,
-    queryFn: async ({ pageParam }) =>
-      (await must(
+    initialPageParam: { start: from, count: ROWS } as Window,
+    queryFn: async ({ pageParam }): Promise<SheetView> => {
+      const view = await must(
         api.GET("/projects/{project_id}/sources/{source_id}/pages/{number}", {
           params: {
             path: { project_id: projectId, source_id: sourceId, number: page },
-            query: { start: pageParam, count: ROWS },
+            query: pageParam,
           },
         }),
-      )) as SheetView,
-    getNextPageParam: (last) => {
+      );
+      if (!("rows" in view)) throw new ApiError("unknown"); // a sheet page always answers with rows
+      return view;
+    },
+    getNextPageParam: (last): Window | undefined => {
       const next = last.first_row + last.rows.length;
-      return next <= last.total_rows ? next : undefined;
+      return next <= last.total_rows ? { start: next, count: ROWS } : undefined;
+    },
+    // A sheet opened at a marked row starts a few rows above it: the rows before are one step back.
+    getPreviousPageParam: (first): Window | undefined => {
+      if (first.first_row <= 1) return undefined;
+      const start = Math.max(1, first.first_row - ROWS);
+      return { start, count: first.first_row - start };
     },
   });
 }

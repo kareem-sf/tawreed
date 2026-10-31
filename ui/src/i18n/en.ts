@@ -80,6 +80,7 @@ export const en = {
   "preview.next": "Next page",
   "preview.rows": "Rows {first}–{last} of {count}",
   "preview.more": "Show more rows",
+  "preview.earlier": "Show earlier rows",
   "preview.emptySheet": "This sheet is empty.",
   "preview.fromImage": "No text on this page: it will be read from the image, and you’ll be asked to check those rows.",
   "preview.pageImage": "Page {page}",
@@ -155,6 +156,14 @@ export const en = {
     one: "{count} sheet or page states totals that differ from its items. Check it before publishing.",
     other: "{count} sheets or pages state totals that differ from their items. Check them before publishing.",
   },
+  "publish.setAside": {
+    one: "The AI set aside {count} page as listing no items. It is listed in the coverage check.",
+    other: "The AI set aside {count} pages as listing no items. They are listed in the coverage check.",
+  },
+  "publish.skipped": {
+    one: "{count} row was not read as an item (a heading, total or incomplete row). It is listed in the coverage check.",
+    other: "{count} rows were not read as items (headings, totals or incomplete rows). They are listed in the coverage check.",
+  },
   "publish.ask": "Publish…",
   "publish.again": "Publish again…",
   "publish.ready": "Every item is placed.",
@@ -193,6 +202,9 @@ export const en = {
   "packages.moveTo": "Move to…",
   "packages.move": "Move",
   "packages.emptyGroup": "No items in this package.",
+  "packages.showing": "Showing {shown} of {count}",
+  "packages.more": "Show more items",
+  "packages.removeConfirm": "Remove “{name}”? Its items wait to be placed again.",
   "packages.selectColumn": "Select",
   "packages.placeAgain": "Place again…",
   "packages.placeAllAgain": "Place everything again…",
@@ -311,6 +323,14 @@ export const en = {
   "error.codex_signed_out": "Codex isn’t signed in to ChatGPT. Sign in again in Settings.",
   "error.codex_failed": "Codex stopped with an error. Try again; if it keeps happening, check Codex on its own.",
   "error.not_ready_to_publish": "Not every item is placed yet, or something still waits for you, so the revision can’t be published yet.",
+  "error.invalid_request": "Tawreed couldn’t use what was sent (“{field}”). Try again, and if it keeps happening, restart Tawreed.",
+  "error.bad_request": "Tawreed couldn’t use that request. Try again.",
+  "error.upload_incomplete": "The files didn’t arrive in full. Drop them again.",
+  "error.publish_failed": "Tawreed couldn’t write the workbooks, so nothing was published. Try again.",
+  "error.too_many_files": "That is more files than Tawreed takes at once (the limit is {limit}). Drop fewer files.",
+  "error.drop_too_large": "Those files together are larger than {limit_mb} MB. Drop fewer files at a time.",
+  "error.address_missing": "The connection has no address. Add the address in Settings.",
+  "error.insecure_address": "The address must start with https:// (http:// is allowed only for this computer). Check it and try again.",
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof en;

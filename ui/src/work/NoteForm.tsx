@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useSettings } from "../app/settings";
 import { button, textArea } from "../app/ui";
 
@@ -13,18 +13,22 @@ export function NoteForm({
   busy: boolean;
 }) {
   const { t } = useSettings();
+  const id = useId();
   const [note, setNote] = useState("");
   return (
     <form
       className="flex flex-col gap-2 animate-enter"
       onSubmit={(event) => {
         event.preventDefault();
-        onRun(note.trim() || undefined);
+        if (!busy) onRun(note.trim() || undefined);
       }}
     >
+      {/* A label that stays once the engineer starts typing; a placeholder alone goes. */}
+      <label htmlFor={id} className="text-sm text-ink-2">
+        {t("redo.note")}
+      </label>
       <textarea
-        aria-label={t("redo.note")}
-        placeholder={t("redo.note")}
+        id={id}
         value={note}
         rows={2}
         dir="auto"

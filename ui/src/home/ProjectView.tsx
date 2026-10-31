@@ -8,7 +8,7 @@ import { DecisionCard } from "../work/DecisionCard";
 import { Packages } from "../work/Packages";
 import { Published, RevisionsButton } from "../work/Revisions";
 import { Status } from "../work/Status";
-import { useRun, useWork } from "../work/queries";
+import { useRun, useWorkPart, withoutProgress } from "../work/queries";
 import { DropRegion, PickFiles } from "./files";
 import { isReading, useAddFiles, useDeleteProject, useProject, useRename } from "./queries";
 import { SourcePreview } from "./SourcePreview";
@@ -26,9 +26,10 @@ export function ProjectView({
   onClose: () => void;
   onOpenSettings: () => void;
 }) {
-  const { t, ai } = useSettings();
-  const project = useProject(projectId);
-  const work = useWork(projectId);
+  const { t, ai, ready } = useSettings();
+  // The page follows the work, but not the running step's progress: only Status does that.
+  const work = useWorkPart(projectId, withoutProgress);
+  const project = useProject(projectId, work.data?.running);
   const add = useAddFiles(projectId);
   const [view, setView] = useState<"work" | "packages">("work");
   const [opened, setOpened] = useState<string>(); // the package to show open in the Packages view
@@ -48,11 +49,11 @@ export function ProjectView({
   const shown: View = tab ?? (work.data?.packages.length ? "packages" : "files");
 
   return (
-    <DropRegion onFiles={(files) => add.mutate(files)} className="relative min-h-full">
+    <DropRegion onFiles={(files) => add.mutate(files)} disabled={add.isPending} className="relative min-h-full">
       {(over) => (
         <Page className="gap-6">
           {over && (
-            <div className="pointer-events-none fixed inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-ink bg-page/80 backdrop-blur-[2px] animate-enter">
+            <div className="pointer-events-none fixed inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-ink bg-page/90 animate-enter">
               <p className="font-heading text-title font-light">{t("project.dropHere")}</p>
             </div>
           )}
@@ -61,13 +62,13 @@ export function ProjectView({
             <h1 className="sr-only">{data.name}</h1>
             <div className="flex items-start gap-2">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                <ProjectName project={data} />
+                <ProjectName key={data.name} project={data} />
                 <span className={pill}>{t("project.files", { count: data.sources.length })}</span>
               </div>
               <PickFiles
                 onFiles={(files) => add.mutate(files)}
                 disabled={add.isPending}
-                label={t("project.add")}
+                label={add.isPending ? t("drop.busy") : t("project.add")}
                 className={button("secondary", "sm")}
               >
                 <Icon name="plus" />
@@ -79,12 +80,12 @@ export function ProjectView({
             </div>
 
             <div className="flex flex-col gap-2">
-              <Steps stage={stage} working={work.data?.run.state === "running"} />
-              {work.data && <Status projectId={projectId} run={work.data.run} />}
+              <Steps stage={stage} working={work.data?.running === true} />
+              <Status projectId={projectId} />
             </div>
           </div>
 
-          {!ai && (
+          {ready && !ai && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-amber-line bg-amber-soft px-4 py-3 text-amber animate-enter">
               <p className="min-w-0 flex-1">{t("project.noAi")}</p>
               <button type="button" onClick={onOpenSettings} className="shrink-0 font-semibold underline underline-offset-[3px] hover:no-underline">
@@ -103,7 +104,7 @@ export function ProjectView({
               {decision && work.data && (
                 <DecisionCard key={decision.id} projectId={projectId} decision={decision} more={more.length} work={work.data} />
               )}
-              {stage === "check" && !decision && work.data?.run.state !== "running" && <ReadyToPublish projectId={projectId} />}
+              {stage === "check" && !decision && !work.data?.running && <ReadyToPublish projectId={projectId} />}
               {stage === "published" && work.data?.published && (
                 <Published projectId={projectId} projectName={data.name} revision={work.data.published} />
               )}
@@ -191,7 +192,7 @@ function Tabs({
             type="button"
             role="tab"
             aria-selected={shown === view}
-            aria-controls={`panel-${view}`}
+            aria-controls={shown === view ? `panel-${view}` : undefined}
             aria-label={`${label(view)}, ${counts[view]}`}
             tabIndex={shown === view ? 0 : -1}
             onClick={() => onShow(view)}
@@ -256,7 +257,7 @@ function Steps({ stage, working }: { stage: string | null; working: boolean }) {
 }
 
 /** The packages at a glance: each one's items and amount, computed by Tawreed, and the way into editing them. */
-function PackageSummary({ work, onOpen }: { work: Work; onOpen: (packageId?: string) => void }) {
+function PackageSummary({ work, onOpen }: { work: Pick<Work, "packages" | "coverage">; onOpen: (packageId?: string) => void }) {
   const { t } = useSettings();
   const { coverage } = work;
   const row = "grid grid-cols-[2rem_minmax(0,1fr)_auto] items-baseline gap-x-3 sm:grid-cols-[2rem_minmax(0,1fr)_6.5rem_9rem]";

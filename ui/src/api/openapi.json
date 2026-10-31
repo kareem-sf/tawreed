@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tawreed",
-    "version": "0.0.1"
+    "version": "0.0.2"
   },
   "paths": {
     "/health": {
@@ -96,7 +96,6 @@
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -315,7 +314,6 @@
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -2416,28 +2414,53 @@
       "Body_add_sources_projects__project_id__sources_post": {
         "properties": {
           "files": {
-            "items": {
-              "type": "string",
-              "contentMediaType": "application/octet-stream"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "contentMediaType": "application/octet-stream"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Files"
           }
         },
         "type": "object",
-        "required": [
-          "files"
-        ],
         "title": "Body_add_sources_projects__project_id__sources_post"
       },
       "Body_start_project_projects_post": {
         "properties": {
           "files": {
-            "items": {
-              "type": "string",
-              "contentMediaType": "application/octet-stream"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "contentMediaType": "application/octet-stream"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Files"
           },
           "name": {
@@ -2453,9 +2476,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "files"
-        ],
         "title": "Body_start_project_projects_post"
       },
       "CheckRequest": {
@@ -2660,6 +2680,24 @@
           "totals_differ": {
             "type": "integer",
             "title": "Totals Differ"
+          },
+          "set_aside": {
+            "items": {
+              "$ref": "#/components/schemas/SetAsideOut"
+            },
+            "type": "array",
+            "title": "Set Aside"
+          },
+          "skipped_rows": {
+            "type": "integer",
+            "title": "Skipped Rows"
+          },
+          "skipped_by_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Skipped By Reason"
           }
         },
         "type": "object",
@@ -2671,7 +2709,10 @@
           "pages_left",
           "pending_files",
           "amount",
-          "totals_differ"
+          "totals_differ",
+          "set_aside",
+          "skipped_rows",
+          "skipped_by_reason"
         ],
         "title": "CoverageOut"
       },
@@ -3784,6 +3825,44 @@
           "reason"
         ],
         "title": "SetAside"
+      },
+      "SetAsideOut": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "engineer"
+            ],
+            "title": "By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "page",
+          "name",
+          "reason",
+          "by"
+        ],
+        "title": "SetAsideOut",
+        "description": "A page the AI (or the engineer) set aside as listing no items."
       },
       "SettingsChange": {
         "properties": {

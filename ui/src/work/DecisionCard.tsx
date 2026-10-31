@@ -3,7 +3,7 @@ import { explain, type Answer, type Decision, type Item, type PackageRef, type W
 import { money } from "../app/format";
 import { useSettings } from "../app/settings";
 import { Alert, button, field, fieldSmall, Icon, link, textArea } from "../app/ui";
-import { SourcePreview } from "../home/SourcePreview";
+import { SourcePreview, type Focus } from "../home/SourcePreview";
 import type { Key } from "../i18n";
 import { NoteForm } from "./NoteForm";
 import { useAnswer } from "./queries";
@@ -21,14 +21,15 @@ export function DecisionCard({
   projectId: string;
   decision: Decision;
   more: number;
-  work: Work;
+  work: Totals;
 }) {
   const { t } = useSettings();
   const answer = useAnswer(projectId);
   const title = useRef<HTMLHeadingElement>(null);
   const send = (body: Answer) => {
     justAnswered = true;
-    answer.mutate({ id: decision.id, answer: body });
+    // If the answer is refused this card stays, so nothing is waiting to take the focus.
+    answer.mutate({ id: decision.id, answer: body }, { onError: () => (justAnswered = false) });
   };
   const busy = answer.isPending;
 
@@ -60,6 +61,9 @@ export function DecisionCard({
     </section>
   );
 }
+
+/** What the cards need of the work: the packages and the totals Tawreed computed. */
+type Totals = Pick<Work, "packages" | "coverage">;
 
 type Props = { decision: Decision; send: (answer: Answer) => void; busy: boolean };
 
@@ -136,7 +140,7 @@ function Overlap({ decision, send, busy }: Props) {
 function Suggested() {
   const { t } = useSettings();
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-subtle px-2 text-xs leading-5 font-normal text-ink">
+    <span className="inline-flex items-center gap-1 rounded-full bg-subtle px-2 text-sm leading-5 font-normal text-ink">
       <Icon name="check" size={12} />
       {t("decision.suggested")}
     </span>
@@ -310,10 +314,20 @@ function Plan({ decision, send, busy }: Props) {
 
 /** Where an item is in its file, in words: "Tower BOQ.xlsx, row 12" or "MEP.pdf, page 3". */
 export function whereIs(item: Item, t: ReturnType<typeof useSettings>["t"]): string {
-  const row = item.provenance.row as number | undefined;
+  const { row } = focusOf(item);
   return row
     ? t("source.atRow", { file: item.file, sheet: String(item.provenance.sheet ?? ""), row })
     : t("source.atPage", { file: item.file, page: item.page });
+}
+
+/** Where an item sits on its page, from the provenance the service keeps (a sheet row, or a box on a PDF page). */
+export function focusOf(item: Item): Focus {
+  const { row, box } = item.provenance;
+  return {
+    page: item.page,
+    row: typeof row === "number" ? row : undefined,
+    box: Array.isArray(box) && box.every((n) => typeof n === "number") ? (box as number[]) : undefined,
+  };
 }
 
 function Uncertain({ projectId, decision, send, busy }: Props & { projectId: string }) {
@@ -342,11 +356,7 @@ function Uncertain({ projectId, decision, send, busy }: Props & { projectId: str
               <SourcePreview
                 projectId={projectId}
                 sourceId={item.source_id}
-                focus={{
-                  page: item.page,
-                  row: item.provenance.row as number | undefined,
-                  box: item.provenance.box as number[] | undefined,
-                }}
+                focus={focusOf(item)}
               />
             </div>
           )}
@@ -382,9 +392,10 @@ function Uncertain({ projectId, decision, send, busy }: Props & { projectId: str
 }
 
 /** What the revision would hold, as Tawreed computed it, and whether the package workbooks show rates. */
-function Publish({ send, busy, work }: Props & { work: Work }) {
+function Publish({ send, busy, work }: Props & { work: Totals }) {
   const { t, locale } = useSettings();
   const [prices, setPrices] = useState(true);
+  const setAside = work.coverage.set_aside.filter((page) => page.by === "agent").length;
   return (
     <>
       <Title>{t("publish.title")}</Title>
@@ -393,6 +404,10 @@ function Publish({ send, busy, work }: Props & { work: Work }) {
       </p>
       {work.coverage.totals_differ > 0 && (
         <p className="text-sm text-amber">{t("publish.totalsDiffer", { count: work.coverage.totals_differ })}</p>
+      )}
+      {setAside > 0 && <p className="text-sm text-ink-2">{t("publish.setAside", { count: setAside })}</p>}
+      {work.coverage.skipped_rows > 0 && (
+        <p className="text-sm text-ink-2">{t("publish.skipped", { count: work.coverage.skipped_rows })}</p>
       )}
       <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line bg-page px-4 py-3 transition-colors hover:border-line-strong">
         <input type="checkbox" checked={prices} onChange={(e) => setPrices(e.target.checked)} className="mt-1 size-4" />

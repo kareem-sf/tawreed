@@ -15,7 +15,7 @@ export function Start({ onOpen, onOpenSettings }: { onOpen: (id: string) => void
   const recent = (projects.data ?? []).slice(0, 3);
 
   return (
-    <DropRegion onFiles={begin} className="flex min-h-full flex-col items-center justify-center gap-10 px-4 py-10 sm:px-6">
+    <DropRegion onFiles={begin} disabled={start.isPending} className="flex min-h-full flex-col items-center justify-center gap-10 px-4 py-10 sm:px-6">
       {(over) => (
         <>
           {(settings.isPending || settings.isError || (settings.isSuccess && !settings.data.ai) || projects.isError) && (
@@ -52,7 +52,7 @@ export function Start({ onOpen, onOpenSettings }: { onOpen: (id: string) => void
               <path d="M12 4v10M8 10l4 4 4-4" />
               <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
             </svg>
-            <h1 className="font-heading text-[30px] leading-9 font-light tracking-[-0.012em] text-balance">
+            <h1 className="font-heading text-title font-light text-balance">
               {start.isPending ? t("drop.busy") : t("drop.title")}
             </h1>
             <p className="text-balance text-ink-2">{t("drop.formats")}</p>

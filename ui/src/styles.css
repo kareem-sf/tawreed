@@ -2,10 +2,16 @@
 
 /* The approved minimal look: white (near-black in dark mode), hairlines, black buttons,
    and one amber accent that means "needs you". Kumbh Sans for Latin, as on the QS Mind site; Thmanyah Sans for
-   Arabic, with its swash letters on headings. */
+   Arabic, with its swash letters on headings. Shipped builds have no Thmanyah (its licence keeps the files out of the
+   repository), so IBM Plex Sans Arabic (open licence, bundled) is the Arabic face they fall back on. */
+/* Not inline: the Arabic override below has to change these variables. Kumbh Sans is first here so Latin text is in
+   it; Kumbh has no Arabic, so Arabic text in the English interface (BOQ rows) still gets an Arabic face. */
+@theme {
+  --font-sans: "Kumbh Sans Variable", "Thmanyah Sans", "IBM Plex Sans Arabic", "Segoe UI", system-ui, sans-serif;
+  --font-heading: "Kumbh Sans Variable", "Thmanyah Sans", "IBM Plex Sans Arabic", "Segoe UI", system-ui, sans-serif;
+}
+
 @theme inline {
-  --font-sans: "Kumbh Sans Variable", "Thmanyah Sans", "Segoe UI", system-ui, sans-serif;
-  --font-heading: "Kumbh Sans Variable", "Thmanyah Sans", "Segoe UI", system-ui, sans-serif;
   --color-page: var(--page);
   --color-soft: var(--soft);
   --color-subtle: var(--subtle);
@@ -33,7 +39,6 @@
   --text-sm--line-height: 1.25rem;
   --text-title: 1.75rem;
   --text-title--line-height: 2.125rem;
-  --text-title--letter-spacing: -0.012em;
   --animate-enter: enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-rise: rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
 
@@ -122,6 +127,42 @@
   }
 }
 
+/* In the Arabic interface the Arabic face leads, so spaces and joiners are set in it too: mixing faces within a line
+   puts words at different heights. Unlayered, so it beats the variables the theme layer sets. */
+:root:lang(ar) {
+  --font-sans: "Thmanyah Sans", "IBM Plex Sans Arabic", "Kumbh Sans Variable", system-ui, sans-serif;
+  --font-heading: "Thmanyah Sans", "IBM Plex Sans Arabic", "Kumbh Sans Variable", system-ui, sans-serif;
+}
+
+/* Arabic text in the English interface (BOQ rows, file and project names: dir="auto" resolves them right-to-left)
+   leads with the Arabic faces too, for the same reason. */
+:root:lang(en) :dir(rtl) {
+  font-family: "Thmanyah Sans", "IBM Plex Sans Arabic", "Kumbh Sans Variable", system-ui, sans-serif;
+}
+
+/* Arabic is never tracked (letter-spacing breaks the joining) and never faked bold or italic. */
+:lang(ar) {
+  font-synthesis: none;
+  letter-spacing: 0;
+}
+
+/* Thmanyah has no semibold: Medium reads as the same step up from its Regular. Unlayered, so it beats the utility. */
+:lang(ar) .font-semibold {
+  font-weight: 500;
+}
+
+/* The QS Mind rule: large Arabic headings turn on Thmanyah's swash letters; body text and small headings do not.
+   IBM Plex Sans Arabic has no swash letters, so the fallback is unchanged. */
+:lang(ar) .text-title,
+:lang(ar) .text-xl {
+  font-feature-settings: "swsh" 1;
+}
+
+/* English titles are set a little tight; the rule is for English only. */
+:lang(en) .text-title {
+  letter-spacing: -0.012em;
+}
+
 @layer base {
   html,
   body,
@@ -148,14 +189,6 @@
   }
   ::selection {
     background: color-mix(in srgb, var(--ink) 16%, transparent);
-  }
-  /* Thmanyah has no semibold: Medium reads as the same step up from its Regular. */
-  :lang(ar) .font-semibold {
-    font-weight: 500;
-  }
-  /* The QS Mind rule: Arabic headings turn on Thmanyah's swash letters; body text does not. */
-  :lang(ar) .font-heading {
-    font-feature-settings: "swsh" 1;
   }
 }
 

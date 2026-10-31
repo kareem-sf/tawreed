@@ -6,7 +6,9 @@ import { fakeService, json, project, renderApp, type Call } from "../testing";
 const boq = () => new File(["PK synthetic workbook"], "Architectural.xlsx");
 
 function sentFiles(call: Call | undefined): string[] {
-  return call?.body instanceof FormData ? call.body.getAll("files").map((f) => (f as File).name) : [];
+  // The files go up as one encoded form (see upload()); the fake service reads it back into a form.
+  const form = call?.body as FormData | undefined;
+  return typeof form?.getAll === "function" ? form.getAll("files").map((f) => (f as File).name) : [];
 }
 
 test("dropping files starts a project and opens it", async () => {
@@ -158,4 +160,14 @@ test("files dropped on an open project are added to it", async () => {
   expect(await screen.findByText("Civil.pdf")).toBeInTheDocument();
   expect(screen.getByText("3 files")).toBeInTheDocument();
   expect(sentFiles(calls.find((c) => c.path === "/projects/p1/sources"))).toEqual(["Civil.pdf"]);
+});
+
+test("a file dropped where nothing takes it is never opened by the window", async () => {
+  fakeService({});
+  renderApp();
+  await screen.findByRole("heading", { level: 1 });
+  const dropped = new Event("drop", { bubbles: true, cancelable: true });
+  Object.defineProperty(dropped, "dataTransfer", { value: { types: ["Files"], files: [] } });
+  document.body.dispatchEvent(dropped);
+  expect(dropped.defaultPrevented).toBe(true); // the webview does not leave Tawreed for the file
 });

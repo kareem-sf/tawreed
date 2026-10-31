@@ -2,13 +2,15 @@ import { explain, type Run } from "../api/client";
 import { useSettings } from "../app/settings";
 import { Alert, button } from "../app/ui";
 import type { Key, Translate } from "../i18n";
-import { useRun } from "./queries";
+import { useRun, useWorkPart } from "./queries";
 
 /** What runs on the project now, with Stop; or why it paused, with Continue. Always Tawreed's own words. */
-export function Status({ projectId, run }: { projectId: string; run: Run }) {
+export function Status({ projectId }: { projectId: string }) {
   const { t } = useSettings();
   const { stop, carryOn } = useRun(projectId);
-  if (run.state !== "running" && run.state !== "paused") return null;
+  // The run's progress changes every second: this is the part of the page that follows it.
+  const { data: run } = useWorkPart(projectId, ({ run: current }) => current);
+  if (!run || (run.state !== "running" && run.state !== "paused")) return null;
   const failed = stop.error ?? carryOn.error;
   const share = run.total ? Math.min(1, (run.done ?? 0) / run.total) : null;
   return (
@@ -28,7 +30,10 @@ export function Status({ projectId, run }: { projectId: string; run: Run }) {
           </div>
           {share !== null && (
             <div className="h-1 overflow-hidden rounded-full bg-line" aria-hidden="true">
-              <div className="h-full rounded-full bg-ink transition-[width] duration-700 ease-out" style={{ width: `${share * 100}%` }} />
+              <div
+                className="h-full origin-left rounded-full bg-ink transition-transform duration-700 ease-out rtl:origin-right"
+                style={{ transform: `scaleX(${share})` }}
+              />
             </div>
           )}
         </div>
@@ -55,7 +60,7 @@ function running(run: Run, t: Translate): string {
 
 /** Why the project paused, as a code said in the engineer's language. */
 export function pausedBecause(run: Run, t: Translate): string {
-  const problem = (run.problem ?? {}) as Record<string, string>;
+  const problem = Object.fromEntries(Object.entries(run.problem ?? {}).map(([name, value]) => [name, String(value)]));
   if (problem.code === "ai_failed") {
     const reason = `error.${problem.problem}` as Key;
     return t("paused.ai_failed", {

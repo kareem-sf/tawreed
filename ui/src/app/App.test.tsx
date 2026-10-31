@@ -11,7 +11,10 @@ test("four tabs, one page each", async () => {
   // The QS Mind sphere with Tawreed's Steel face sits beside the name; the name alone is what screen readers hear.
   const logo = screen.getByTestId("logo");
   expect(logo).toHaveAttribute("aria-hidden", "true");
-  expect(logo.querySelector("polygon")).toHaveAttribute("fill", "url(#logo-face)");
+  // Its gradient has an id of its own, so a second mark on the page doesn't share it.
+  const gradient = logo.querySelector("linearGradient")!.id;
+  expect(gradient).toMatch(/^logo-face-\w+$/);
+  expect(logo.querySelector("polygon")).toHaveAttribute("fill", `url(#${gradient})`);
   expect(logo.querySelector("stop")).toHaveAttribute("stop-color", "#98BBE2");
 
   const tabs = screen.getByRole("navigation", { name: "Sections" });

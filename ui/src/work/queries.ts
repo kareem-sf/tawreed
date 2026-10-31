@@ -1,29 +1,68 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, must, revisionZip, succeed, type Answer, type SheetLayout } from "../api/client";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, must, revisionZip, succeed, type Answer, type SheetLayout, type Work } from "../api/client";
 
 /** How often an open project's work is asked for: often while a step runs, calmly otherwise. */
 export const WORKING_POLL = 1000;
 export const IDLE_POLL = 3000;
 
-export function useWork(projectId: string) {
-  return useQuery({
+/** Whether the project's items may have moved between two answers: a step placed some, or finished. */
+const itemsMoved = (before: Work, now: Work) =>
+  before.run.state !== now.run.state ||
+  before.coverage.items !== now.coverage.items ||
+  before.coverage.placed !== now.coverage.placed ||
+  before.coverage.unplaced !== now.coverage.unplaced ||
+  before.coverage.waiting !== now.coverage.waiting;
+
+function workQuery(client: ReturnType<typeof useQueryClient>, projectId: string) {
+  return {
     queryKey: ["work", projectId],
-    queryFn: () => must(api.GET("/projects/{project_id}/work", { params: { path: { project_id: projectId } } })),
-    refetchInterval: (query) => (query.state.data?.run.state === "running" ? WORKING_POLL : IDLE_POLL),
-  });
+    queryFn: async () => {
+      const now = await must(api.GET("/projects/{project_id}/work", { params: { path: { project_id: projectId } } }));
+      // Open item lists follow the work as it happens, without polling the lists themselves.
+      const before = client.getQueryData<Work>(["work", projectId]);
+      if (before && itemsMoved(before, now)) void client.invalidateQueries({ queryKey: ["items", projectId] });
+      return now;
+    },
+    refetchInterval: (query: { state: { data?: Work } }) =>
+      query.state.data?.run.state === "running" ? WORKING_POLL : IDLE_POLL,
+  };
 }
+
+/** The whole work, progress included: it changes every second while a step runs, so only what shows that
+ *  progress should read it. */
+export function useWork(projectId: string) {
+  return useQuery(workQuery(useQueryClient(), projectId));
+}
+
+/** Only the part of the work that `select` returns: the screen re-renders when that part changes, not on every
+ *  poll. (Equal answers keep the same object, so a slice that did not change does not render again.) */
+export function useWorkPart<T>(projectId: string, select: (work: Work) => T) {
+  return useQuery({ ...workQuery(useQueryClient(), projectId), select });
+}
+
+/** What a project page needs apart from the running step's progress. */
+export const withoutProgress = ({ run, ...rest }: Work) => ({ ...rest, running: run.state === "running" });
+export type WorkPlan = ReturnType<typeof withoutProgress>;
 
 export type ItemFilter = { package_id?: string; unplaced?: boolean };
 
+const ITEMS = 200; // items fetched at a time
+
+/** A group's items, a window at a time: `fetchNextPage` brings the next window; `total` is how many there are. */
 export function useItems(projectId: string, filter: ItemFilter, enabled = true) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ["items", projectId, filter],
-    queryFn: () =>
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
       must(
         api.GET("/projects/{project_id}/items", {
-          params: { path: { project_id: projectId }, query: { ...filter, count: 1000 } },
+          params: { path: { project_id: projectId }, query: { ...filter, start: pageParam, count: ITEMS } },
         }),
       ),
+    getNextPageParam: (_last, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + page.items.length, 0);
+      return loaded < (pages.at(-1)?.total ?? 0) && pages.at(-1)?.items.length ? loaded : undefined;
+    },
     enabled,
   });
 }
@@ -35,6 +74,8 @@ function useRefresh(projectId: string) {
   return () =>
     Promise.all([
       client.invalidateQueries({ queryKey: ["work", projectId] }),
+      client.invalidateQueries({ queryKey: ["project", projectId] }),
+      client.invalidateQueries({ queryKey: ["projects"] }),
       client.invalidateQueries({ queryKey: ["items", projectId] }),
       client.invalidateQueries({ queryKey: ["source"] }),
     ]);
@@ -170,8 +211,11 @@ export function useExportRevision(projectId: string) {
       const link = document.createElement("a");
       link.href = url;
       link.download = filename;
+      // WebKitGTK and Firefox only follow a link that is in the page; the file is read once the click has been handled.
+      document.body.append(link);
       link.click();
-      URL.revokeObjectURL(url);
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     },
   });
 }

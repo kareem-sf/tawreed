@@ -7,6 +7,8 @@ type Context = {
   language: Language;
   theme: Settings["theme"];
   ai: Settings["ai"];
+  /** The service has answered with the settings: until then `ai` is only the default, not "no AI connected". */
+  ready: boolean;
   locale: string;
   t: Translate;
   /** Save settings at once; resolves to the error when the service refuses, after undoing the change. */
@@ -35,7 +37,7 @@ function remembered(): Settings {
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
   const [first] = useState(remembered);
-  const { data = first } = useQuery({ queryKey: ["settings"], queryFn: () => must(api.GET("/settings")) });
+  const { data = first, isSuccess } = useQuery({ queryKey: ["settings"], queryFn: () => must(api.GET("/settings")) });
   const { mutateAsync } = useMutation({
     mutationFn: (values: Partial<Settings>) => must(api.PATCH("/settings", { body: values })),
     onMutate: (values) => {
@@ -64,6 +66,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       language: data.language,
       theme: data.theme,
       ai: data.ai,
+      ready: isSuccess,
       locale: locale(data.language),
       t: translator(data.language),
       change: (values) => mutateAsync(values).then(
@@ -71,7 +74,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         (error: unknown) => error,
       ),
     }),
-    [data.language, data.theme, data.ai, mutateAsync],
+    [data.language, data.theme, data.ai, isSuccess, mutateAsync],
   );
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

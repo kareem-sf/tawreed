@@ -242,28 +242,29 @@ function AsideForm({ busy, onSave, onCancel }: { busy: boolean; onSave: (reason:
   const [reason, setReason] = useState("");
   return (
     <form
-      className="flex flex-wrap items-center gap-2 animate-enter"
+      className="flex flex-wrap items-end gap-2 animate-enter"
       onSubmit={(event) => {
         event.preventDefault();
         if (reason.trim()) onSave(reason.trim());
       }}
     >
-      <input
-        aria-label={t("layout.asideReason")}
-        placeholder={t("layout.asideReason")}
-        value={reason}
-        dir="auto"
-        maxLength={300}
-        autoFocus
-        onChange={(event) => setReason(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.stopPropagation();
-            onCancel();
-          }
-        }}
-        className={`${field} min-w-0 flex-1 basis-56`}
-      />
+      <label className="flex min-w-0 flex-1 basis-56 flex-col gap-1">
+        <span className="text-sm text-ink-2">{t("layout.asideReason")}</span>
+        <input
+          value={reason}
+          dir="auto"
+          maxLength={300}
+          autoFocus
+          onChange={(event) => setReason(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              onCancel();
+            }
+          }}
+          className={field}
+        />
+      </label>
       <button type="submit" disabled={busy || !reason.trim()} className={button("primary", "sm")}>
         {t("layout.aside")}
       </button>
@@ -390,8 +391,18 @@ function SheetGrid({
           </tbody>
         </table>
       </div>
-      <div className="flex items-center gap-3 text-sm text-ink-2">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-ink-2">
         <span>{t("preview.rows", { first, last: first + rows.length - 1, count: total })}</span>
+        {sheet.hasPreviousPage && (
+          <button
+            type="button"
+            disabled={sheet.isFetchingPreviousPage}
+            onClick={() => void sheet.fetchPreviousPage()}
+            className={button("secondary", "sm")}
+          >
+            {t("preview.earlier")}
+          </button>
+        )}
         {sheet.hasNextPage && (
           <button
             type="button"
@@ -423,11 +434,10 @@ function PageImage({
   const [url, setUrl] = useState<string>();
 
   useEffect(() => {
-    if (!image.data) return;
-    const made = URL.createObjectURL(image.data);
-    setUrl(made);
-    return () => URL.revokeObjectURL(made);
+    if (image.data) setUrl(URL.createObjectURL(image.data));
   }, [image.data]);
+  // The old address is let go only once the picture shows the new one (or the page is gone).
+  useEffect(() => () => (url ? URL.revokeObjectURL(url) : undefined), [url]);
 
   return (
     <div className="flex flex-col gap-2">

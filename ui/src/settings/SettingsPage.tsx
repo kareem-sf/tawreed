@@ -218,14 +218,13 @@ function ConnectionRow({ connection }: { connection: Connection }) {
           <span className="min-w-0 flex-1">{t("connection.removeConfirm", { name })}</span>
           <button
             type="button"
-            autoFocus
             onClick={() => remove.mutate(connection.id)}
             disabled={remove.isPending}
             className={button("danger", "sm")}
           >
             {t("connection.remove")}
           </button>
-          <button type="button" onClick={() => setRemoving(false)} className={button("quiet", "sm")}>
+          <button type="button" autoFocus onClick={() => setRemoving(false)} className={button("quiet", "sm")}>
             {t("ui.cancel")}
           </button>
         </div>

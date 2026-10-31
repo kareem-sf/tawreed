@@ -102,9 +102,9 @@ export function RevisionsButton({ projectId, projectName, latest }: { projectId:
   useEffect(() => {
     if (!open) return;
     panel.current?.focus(); // into the panel, so the keyboard carries on there
-    const away = (event: MouseEvent) => !here.current?.contains(event.target as Node) && setOpen(false);
-    window.addEventListener("mousedown", away);
-    return () => window.removeEventListener("mousedown", away);
+    const away = (event: PointerEvent) => !here.current?.contains(event.target as Node) && setOpen(false);
+    window.addEventListener("pointerdown", away); // touch and pen too, not only a mouse
+    return () => window.removeEventListener("pointerdown", away);
   }, [open]);
 
   const list = revisions.data ?? [];
@@ -133,7 +133,7 @@ export function RevisionsButton({ projectId, projectName, latest }: { projectId:
         className={`relative flex size-12 items-center justify-center rounded-full border bg-page text-ink shadow-float transition-[border-color,transform] duration-150 hover:-translate-y-px hover:border-ink/40 active:translate-y-0 ${open ? "border-ink" : "border-line"}`}
       >
         <Icon name="layers" size={20} />
-        <span className="absolute -end-1 -top-1 min-w-5 rounded-full bg-button px-1.5 text-xs leading-5 text-button-ink">{list.length}</span>
+        <span className="absolute -end-1 -top-1 min-w-5 rounded-full bg-button px-1.5 text-sm leading-5 text-button-ink">{list.length}</span>
       </button>
       {open && (
         <section

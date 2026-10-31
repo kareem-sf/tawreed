@@ -38,11 +38,11 @@ export const link =
 
 /** Text fields and selects: a visible edge, the shared focus ring, a calm hover. */
 export const field =
-  "h-9 rounded-lg border border-edge bg-page px-3 text-ink transition-colors duration-150 placeholder:text-ink-2/70 hover:border-ink/70 focus-visible:border-ink disabled:opacity-45 pointer-coarse:h-11";
+  "h-9 rounded-lg border border-edge bg-page px-3 text-ink transition-colors duration-150 placeholder:text-ink-2 hover:border-ink/70 focus-visible:border-ink disabled:opacity-45 pointer-coarse:h-11";
 export const fieldSmall =
   "h-8 rounded-md border border-edge bg-page px-2 text-sm text-ink transition-colors duration-150 hover:border-ink/70 focus-visible:border-ink pointer-coarse:h-10";
 export const textArea =
-  "min-h-[4.5rem] rounded-lg border border-edge bg-page px-3 py-2 text-ink transition-colors duration-150 placeholder:text-ink-2/70 hover:border-ink/70 focus-visible:border-ink";
+  "min-h-[4.5rem] rounded-lg border border-edge bg-page px-3 py-2 text-ink transition-colors duration-150 placeholder:text-ink-2 hover:border-ink/70 focus-visible:border-ink";
 
 /** A bordered surface that holds one thing: a decision, a published revision. */
 export const card = "rounded-xl border border-line bg-page px-5 py-4 animate-enter";

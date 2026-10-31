@@ -43,8 +43,9 @@ export class ApiError extends Error {
   }
 }
 
-function offline(): never {
-  // The browser only says "Failed to fetch" when the local service isn't there at all.
+function offline(cause?: unknown): never {
+  // The browser only says "Failed to fetch" when the local service isn't there at all. Keep what it did say for the log.
+  console.error(cause);
   throw new ApiError("offline");
 }
 
@@ -53,11 +54,20 @@ export const api = createClient<paths>({
   fetch: (request) => globalThis.fetch(request).catch(offline),
 });
 
-async function failure(response: Response, body?: unknown): Promise<ApiError> {
+/** @internal exported for its test */
+export async function failure(response: Response, body?: unknown): Promise<ApiError> {
   const detail = ((body ?? (await response.json().catch(() => ({})))) as { detail?: unknown }).detail;
+  if (Array.isArray(detail)) {
+    // FastAPI's own validation list: name the first field it refused, last part of its location.
+    const loc = (detail[0] as { loc?: unknown } | undefined)?.loc;
+    const field = Array.isArray(loc) ? String(loc[loc.length - 1] ?? "") : "";
+    return new ApiError("invalid_request", { field }, response.status);
+  }
+  if (typeof detail === "string") return new ApiError("bad_request", {}, response.status);
   if (detail && typeof detail === "object" && "code" in detail) {
-    const { code, ...params } = detail as { code: string } & Record<string, string>;
-    return new ApiError(code, params, response.status);
+    const { code, ...rest } = detail as { code: unknown } & Record<string, unknown>;
+    const params = Object.fromEntries(Object.entries(rest).map(([name, value]) => [name, String(value)]));
+    return new ApiError(String(code), params, response.status);
   }
   return new ApiError("unknown", {}, response.status);
 }
@@ -75,11 +85,16 @@ export async function succeed(pending: Promise<{ error?: unknown; response: Resp
   if (!result.response.ok) throw await failure(result.response, result.error);
 }
 
-/** Send dropped files as a multipart form (openapi-fetch types can't describe File lists). */
+/** Send dropped files as a multipart form (openapi-fetch types can't describe File lists). The form is encoded to one
+    in-memory buffer first: WebKitGTK streams a file-backed form in pieces, and the desktop's custom scheme reads only
+    the first piece, so the service would see no files. A buffer arrives whole in every webview. */
 export async function upload(path: string, files: File[]): Promise<Project> {
   const form = new FormData();
   for (const file of files) form.append("files", file, file.name);
-  const response = await globalThis.fetch(`${base}${path}`, { method: "POST", body: form }).catch(offline);
+  const encoded = new Response(form);
+  const body = await encoded.arrayBuffer();
+  const headers = { "Content-Type": encoded.headers.get("Content-Type") ?? "multipart/form-data" };
+  const response = await globalThis.fetch(`${base}${path}`, { method: "POST", body, headers }).catch(offline);
   if (!response.ok) throw await failure(response);
   return (await response.json()) as Project;
 }

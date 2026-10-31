@@ -30,7 +30,9 @@ export function fakeService(routes: Record<string, Handler>): Call[] {
         const text = await input.clone().text();
         call = { method: input.method, path: new URL(input.url).pathname, body: text ? JSON.parse(text) : undefined };
       } else {
-        call = { method: init?.method ?? "GET", path: new URL(String(input)).pathname, body: init?.body };
+        // Files go up as one buffer with the form's content type; read it back as the service would.
+        const sent = init?.body instanceof ArrayBuffer ? await new Response(init.body, { headers: init.headers }).formData() : init?.body;
+        call = { method: init?.method ?? "GET", path: new URL(String(input)).pathname, body: sent };
       }
       const search = new URL(input instanceof Request ? input.url : String(input)).searchParams;
       if (search.size) call.query = Object.fromEntries(search);
@@ -51,7 +53,7 @@ export function work(changes: Record<string, unknown> = {}) {
     stage: "read",
     run: { state: "idle" },
     decisions: [],
-    coverage: { items: 0, placed: 0, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "0", totals_differ: 0 },
+    coverage: { items: 0, placed: 0, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "0", totals_differ: 0, set_aside: [], skipped_rows: 0, skipped_by_reason: {} },
     packages: [],
     ...changes,
   };

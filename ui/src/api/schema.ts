@@ -724,12 +724,12 @@ export interface components {
         /** Body_add_sources_projects__project_id__sources_post */
         Body_add_sources_projects__project_id__sources_post: {
             /** Files */
-            files: string[];
+            files?: (string)[] | null;
         };
         /** Body_start_project_projects_post */
         Body_start_project_projects_post: {
             /** Files */
-            files: string[];
+            files?: (string)[] | null;
             /** Name */
             name?: string | null;
         };
@@ -814,6 +814,14 @@ export interface components {
             amount: string;
             /** Totals Differ */
             totals_differ: number;
+            /** Set Aside */
+            set_aside: components["schemas"]["SetAsideOut"][];
+            /** Skipped Rows */
+            skipped_rows: number;
+            /** Skipped By Reason */
+            skipped_by_reason: {
+                [key: string]: number;
+            };
         };
         /**
          * DecisionOut
@@ -1195,6 +1203,25 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * SetAsideOut
+         * @description A page the AI (or the engineer) set aside as listing no items.
+         */
+        SetAsideOut: {
+            /** File */
+            file: string;
+            /** Page */
+            page: number;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+            /**
+             * By
+             * @enum {string}
+             */
+            by: "agent" | "engineer";
+        };
         /** SettingsChange */
         SettingsChange: {
             /** Language */
@@ -1439,7 +1466,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_start_project_projects_post"];
             };
@@ -1577,7 +1604,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_add_sources_projects__project_id__sources_post"];
             };

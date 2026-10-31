@@ -308,7 +308,7 @@ test("the engineer moves, renames, merges and removes packages directly", async 
       work({
         stage: "check",
         packages,
-        coverage: { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "1465585.13", totals_differ: 0 },
+        coverage: { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "1465585.13", totals_differ: 0, set_aside: [{ file: "boq.pdf", page: 4, name: "Page 4", reason: "Internal rates", by: "agent" }], skipped_rows: 2, skipped_by_reason: { incomplete_row: 2 } },
       }),
     "GET /projects/p1/items": () => ({ items: concrete, total: 1 }),
     "POST /projects/p1/placements": ok,
@@ -365,6 +365,11 @@ test("the engineer moves, renames, merges and removes packages directly", async 
     expect(calls).toContainEqual({ method: "POST", path: "/projects/p1/packages/k1/merge", body: { package_ids: ["k2"] } }),
   );
   await user.click(screen.getAllByRole("button", { name: "Remove" })[1]!);
+  // Removing asks first, with Cancel under the keyboard; nothing is deleted until it is confirmed.
+  const confirm = screen.getByRole("group", { name: /^Remove “Formwork and joints”/ });
+  expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
+  expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  await user.click(within(confirm).getByRole("button", { name: "Remove" }));
   await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/projects/p1/packages/k2")).toBe(true));
 
   await user.click(screen.getAllByRole("button", { name: "Place again…" })[0]!);
@@ -398,7 +403,7 @@ test("a published revision shows what was written, and opens or exports its fold
     ],
   };
   const publishAsked = decision("publish", { raised_by: "tawreed" });
-  const coverage = { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "1465585.13", totals_differ: 1 };
+  const coverage = { items: 3, placed: 3, unplaced: 0, waiting: 0, pages_left: 0, pending_files: 0, amount: "1465585.13", totals_differ: 1, set_aside: [{ file: "boq.pdf", page: 4, name: "Page 4", reason: "Internal rates", by: "agent" as const }], skipped_rows: 2, skipped_by_reason: { incomplete_row: 2 } };
   let published = false;
   const { calls, user } = await openProject({
     "GET /projects/p1/work": () =>
@@ -419,6 +424,8 @@ test("a published revision shows what was written, and opens or exports its fold
   expect(card).toHaveTextContent("Ready to publish");
   expect(card).toHaveTextContent("Packages: 2 · Items: 3 · Amounts: 1,465,585.13"); // computed by Tawreed
   expect(card).toHaveTextContent("1 sheet or page states totals that differ from its items. Check it before publishing.");
+  expect(card).toHaveTextContent("The AI set aside 1 page as listing no items. It is listed in the coverage check.");
+  expect(card).toHaveTextContent("2 rows were not read as items (headings, totals or incomplete rows). They are listed in the coverage check.");
   const prices = within(card).getByRole("checkbox", { name: /Show rates and amounts in the package workbooks/ });
   expect(prices).toBeChecked();
   await user.click(prices);
@@ -510,4 +517,37 @@ test("a package on the project page opens straight to its items", async () => {
   expect(group).toHaveFocus();
   expect(screen.getByRole("button", { name: /Concrete works/, expanded: false })).toBeInTheDocument();
   expect(await screen.findByText("No items in this package.")).toBeInTheDocument();
+});
+
+test("a package with more items than one window shows how many, and brings the rest on request", async () => {
+  const row = (n: number) => ({
+    id: `i${n}`, ref: n, code: `C.${n}`, description: `Item number ${n}`, unit: "m3", quantity_text: "1", rate_text: "1", amount_text: "1",
+    comment: "", headings: [], source_id: "s1", file: "Architectural.xlsx", page: 1, provenance: { sheet: "Div.03", row: n },
+    origin: "cell", verify: false, package_id: "k1", decided_by: "agent",
+  });
+  const { calls, user } = await openProject({
+    "GET /projects/p1/work": () => work({ stage: "check", packages }),
+    "GET /projects/p1/items": (call) => {
+      const start = Number(call.query?.start ?? 0);
+      return { items: start === 0 ? [row(1), row(2)] : [row(3)], total: 3 };
+    },
+  });
+
+  await user.click(within(await screen.findByRole("region", { name: "Packages" })).getByRole("button", { name: "View and edit" }));
+  await user.click(await screen.findByRole("button", { name: /Concrete works/ }));
+  expect(await screen.findByText("Showing 2 of 3")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Show more items" }));
+  expect(await screen.findByText("Item number 3")).toBeInTheDocument();
+  expect(screen.getByText("Showing 3 of 3")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Show more items" })).not.toBeInTheDocument();
+  expect(calls.filter((c) => c.path === "/projects/p1/items").map((c) => c.query?.start)).toEqual(["0", "2"]);
+});
+
+test("the notice that no AI is connected waits for the settings to arrive, and stays quiet if they never do", async () => {
+  const { calls } = await openProject({
+    "GET /settings": () => new Response(JSON.stringify({ detail: { code: "boom" } }), { status: 500 }),
+    "GET /projects/p1/work": () => work(),
+  });
+  expect(calls.some((c) => c.path === "/settings")).toBe(true);
+  expect(screen.queryByText(/connect|No AI/i)).not.toBeInTheDocument();
 });

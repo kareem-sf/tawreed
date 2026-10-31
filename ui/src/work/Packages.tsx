@@ -1,18 +1,22 @@
-import { Fragment, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { explain, type Item, type PackageSummary } from "../api/client";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { explain, type Item, type PackageSummary, type Work } from "../api/client";
 import { figure } from "../app/format";
 import { useSettings } from "../app/settings";
 import { Alert, Amount, button, Empty, field, fieldSmall, Icon, link, Skeleton, SkeletonRows, useNarrow } from "../app/ui";
 import { SourcePreview } from "../home/SourcePreview";
-import { whereIs } from "./DecisionCard";
+import { focusOf, whereIs } from "./DecisionCard";
 import { NoteForm } from "./NoteForm";
-import { useEdits, useItems, useRedo, useWork, type ItemFilter } from "./queries";
+import { useEdits, useItems, useRedo, useWorkPart, type ItemFilter } from "./queries";
+
+/** The packages and how much is placed: the part of the work that changes when the engineer or a step changes it,
+ *  not with a running step's progress. */
+const overview = ({ packages, coverage }: Work) => ({ packages, coverage });
 
 /** The packages and their items, to look at and change directly, with the same checked operations the AI's
  *  steps use; or to have the AI place them again, with a note. */
 export function Packages({ projectId, opened, onBack }: { projectId: string; opened?: string; onBack: () => void }) {
   const { t } = useSettings();
-  const work = useWork(projectId);
+  const work = useWorkPart(projectId, overview);
   const edits = useEdits(projectId);
   const redo = useRedo(projectId);
   const [adding, setAdding] = useState(false);
@@ -71,7 +75,6 @@ export function Packages({ projectId, opened, onBack }: { projectId: string; ope
             <Group
               projectId={projectId}
               edits={edits}
-              filter={{ unplaced: true }}
               title={t("packages.unplaced")}
               count={coverage.unplaced}
               packages={packages}
@@ -83,7 +86,6 @@ export function Packages({ projectId, opened, onBack }: { projectId: string; ope
               projectId={projectId}
               edits={edits}
               redo={redo}
-              filter={{ package_id: pkg.id }}
               initiallyOpen={pkg.id === opened}
               package_={pkg}
               title={pkg.name}
@@ -116,28 +118,29 @@ function NameForm({
   const [name, setName] = useState(initial);
   return (
     <form
-      className="flex flex-wrap items-center gap-2 animate-enter"
+      className="flex flex-wrap items-end gap-2 animate-enter"
       onSubmit={(event) => {
         event.preventDefault();
         if (name.trim() && !busy) onSave(name.trim());
       }}
     >
-      <input
-        aria-label={label}
-        placeholder={label}
-        value={name}
-        dir="auto"
-        maxLength={120}
-        autoFocus
-        onChange={(event) => setName(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.stopPropagation();
-            onCancel();
-          }
-        }}
-        className={`${field} min-w-0 flex-1 basis-56`}
-      />
+      <label className="flex min-w-0 flex-1 basis-56 flex-col gap-1">
+        <span className="text-sm text-ink-2">{label}</span>
+        <input
+          value={name}
+          dir="auto"
+          maxLength={120}
+          autoFocus
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              onCancel();
+            }
+          }}
+          className={field}
+        />
+      </label>
       <button type="submit" disabled={!name.trim() || busy} className={button("primary")}>
         {submit}
       </button>
@@ -155,7 +158,6 @@ function Group({
   projectId,
   edits,
   redo,
-  filter,
   package_,
   title,
   count,
@@ -165,7 +167,6 @@ function Group({
   projectId: string;
   edits: Edits;
   redo?: ReturnType<typeof useRedo>;
-  filter: ItemFilter;
   package_?: PackageSummary;
   title: string;
   count: number;
@@ -174,6 +175,8 @@ function Group({
 }) {
   const { t } = useSettings();
   const [open, setOpen] = useState(initiallyOpen);
+  const packageId = package_?.id;
+  const filter = useMemo<ItemFilter>(() => (packageId ? { package_id: packageId } : { unplaced: true }), [packageId]);
   // A package opened from the project page comes into view, its heading taking the focus.
   const heading = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
@@ -183,6 +186,7 @@ function Group({
   }, [initiallyOpen]);
   const [renaming, setRenaming] = useState(false);
   const [placing, setPlacing] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [into, setInto] = useState("");
   const others = packages.filter((p) => p.id !== package_?.id);
   // After an inline form closes, the keyboard goes back to where it was.
@@ -264,15 +268,32 @@ function Group({
                 {t("packages.placeAgain")}
               </button>
             )}
-            <button
-              type="button"
-              disabled={edits.remove.isPending}
-              onClick={() => edits.remove.mutate(package_.id)}
-              className={button("danger", "sm")}
-            >
-              {t("packages.remove")}
-            </button>
+            {!removing && (
+              <button type="button" onClick={() => setRemoving(true)} className={button("danger", "sm")}>
+                {t("packages.remove")}
+              </button>
+            )}
           </div>
+          {removing && (
+            <div
+              role="group"
+              aria-label={t("packages.removeConfirm", { name: package_.name })}
+              className="flex flex-wrap items-center gap-3 rounded-lg bg-subtle px-3 py-2.5 text-sm animate-enter"
+            >
+              <span className="min-w-0 flex-1 [unicode-bidi:plaintext]">{t("packages.removeConfirm", { name: package_.name })}</span>
+              <button
+                type="button"
+                disabled={edits.remove.isPending}
+                onClick={() => edits.remove.mutate(package_.id)}
+                className={button("danger", "sm")}
+              >
+                {t("packages.remove")}
+              </button>
+              <button type="button" autoFocus onClick={() => setRemoving(false)} className={button("quiet", "sm")}>
+                {t("packages.cancel")}
+              </button>
+            </div>
+          )}
           {redo && placing && (
             <NoteForm
               busy={redo.isPending}
@@ -286,42 +307,56 @@ function Group({
       )}
       {open && (
         <div className={package_ ? "ps-7 pb-4" : "pb-4"}>
-          <Items projectId={projectId} edits={edits} filter={filter} packages={packages} />
+          <Items projectId={projectId} filter={filter} packages={packages} />
         </div>
       )}
     </li>
   );
 }
 
-function Items({
+const Items = memo(function Items({
   projectId,
-  edits,
   filter,
   packages,
 }: {
   projectId: string;
-  edits: Edits;
   filter: ItemFilter;
   packages: PackageSummary[];
 }) {
   const { t } = useSettings();
+  const edits = useEdits(projectId);
   const items = useItems(projectId, filter);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [target, setTarget] = useState("");
   const [showing, setShowing] = useState<string | null>(null);
   const narrow = useNarrow();
-  const { frame, table, fits } = useFits();
+  const pages = items.data?.pages;
+  const list = useMemo(() => pages?.flatMap((page) => page.items) ?? [], [pages]);
+  const total = pages?.at(-1)?.total ?? 0;
+  const { frame, table, fits } = useFits(list);
 
-  if (items.isError) return <Alert onRetry={() => void items.refetch()}>{explain(items.error, t)}</Alert>;
-  if (!items.data) return <Skeleton className="h-32 w-full" />;
-  const list = items.data.items;
+  // Items that left the list (placed elsewhere by a step, or removed) are no longer selected.
+  useEffect(() => {
+    if (!pages) return;
+    const here = new Set(list.map((item) => item.id));
+    setSelected((now) => (now.size === 0 || [...now].every((id) => here.has(id)) ? now : new Set([...now].filter((id) => here.has(id)))));
+  }, [pages, list]);
+
+  const toggle = useCallback(
+    (id: string) =>
+      setSelected((now) => {
+        const next = new Set(now);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
+  const show = useCallback((id: string) => setShowing((now) => (now === id ? null : id)), []);
+
+  if (items.isError && !pages) return <Alert onRetry={() => void items.refetch()}>{explain(items.error, t)}</Alert>;
+  if (!pages) return <Skeleton className="h-32 w-full" />;
   if (list.length === 0) return <Empty>{t("packages.emptyGroup")}</Empty>;
-  const toggle = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  };
   const choices = packages.filter((p) => p.id !== filter.package_id);
   const head = "sticky top-0 z-10 bg-page px-2 py-2 font-normal shadow-[inset_0_-1px_0_var(--line)]";
 
@@ -355,15 +390,9 @@ function Items({
           </button>
         </div>
       )}
+      {edits.place.isError && <Alert>{explain(edits.place.error, t)}</Alert>}
       {narrow || !fits ? (
-        <ItemCards
-          projectId={projectId}
-          list={list}
-          selected={selected}
-          toggle={toggle}
-          showing={showing}
-          setShowing={setShowing}
-        />
+        <ItemCards projectId={projectId} list={list} selected={selected} toggle={toggle} showing={showing} show={show} />
       ) : (
       <div className="max-h-[70vh] overflow-auto rounded-lg border border-line">
         <table ref={table} className="w-full border-collapse text-sm">
@@ -383,62 +412,104 @@ function Items({
           </thead>
           <tbody>
             {list.map((item) => (
-              <Fragment key={item.id}>
-                <tr
-                  className={`border-t border-line-soft align-top transition-colors duration-100 hover:bg-soft ${selected.has(item.id) ? "bg-subtle" : ""}`}
-                >
-                  <td className="sticky start-0 bg-page px-2 py-2">
-                    <input
-                      type="checkbox"
-                      aria-label={t("packages.select", { code: item.code || String(item.ref) })}
-                      checked={selected.has(item.id)}
-                      onChange={() => toggle(item.id)}
-                      className="size-4 pointer-coarse:size-5"
-                    />
-                  </td>
-                  <td className="px-2 py-2 whitespace-nowrap">{item.code}</td>
-                  <td className="px-2 py-2" dir="auto">
-                    {item.description}
-                    {item.verify && <span className="ms-2 text-xs text-amber">{t("item.verify")}</span>}
-                    {item.decided_by === "engineer" && <span className="ms-2 text-xs text-ink-2">{t("item.byYou")}</span>}
-                  </td>
-                  <td className="px-2 py-2 whitespace-nowrap" dir="auto">
-                    {item.unit}
-                  </td>
-                  <Figure text={item.quantity_text} />
-                  <Figure text={item.rate_text} />
-                  <Figure text={item.amount_text} />
-                  <td className="w-40 min-w-40 px-2 py-2">
-                    <button
-                      type="button"
-                      aria-expanded={showing === item.id}
-                      onClick={() => setShowing(showing === item.id ? null : item.id)}
-                      className={`text-start [overflow-wrap:anywhere] ${link}`}
-                    >
-                      {whereIs(item, t)}
-                    </button>
-                  </td>
-                </tr>
-                {showing === item.id && (
-                  <tr>
-                    <td colSpan={8} className="px-2 pb-3">
-                      <Source projectId={projectId} item={item} />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
+              <ItemRow
+                key={item.id}
+                projectId={projectId}
+                item={item}
+                selected={selected.has(item.id)}
+                toggle={toggle}
+                showing={showing === item.id}
+                show={show}
+              />
             ))}
           </tbody>
         </table>
       </div>
       )}
+      <div className="flex items-center gap-3 text-sm text-ink-2">
+        <span>{t("packages.showing", { shown: list.length, count: total })}</span>
+        {items.hasNextPage && (
+          <button
+            type="button"
+            disabled={items.isFetchingNextPage}
+            onClick={() => void items.fetchNextPage()}
+            className={button("secondary", "sm")}
+          >
+            {t("packages.more")}
+          </button>
+        )}
+      </div>
+      {items.isError && <Alert onRetry={() => void items.refetch()}>{explain(items.error, t)}</Alert>}
     </div>
   );
-}
+});
+
+/** One item as a table row (and, opened, the place it was read from). Rendered again only when it changes. */
+const ItemRow = memo(function ItemRow({
+  projectId,
+  item,
+  selected,
+  toggle,
+  showing,
+  show,
+}: {
+  projectId: string;
+  item: Item;
+  selected: boolean;
+  toggle: (id: string) => void;
+  showing: boolean;
+  show: (id: string) => void;
+}) {
+  const { t } = useSettings();
+  return (
+    <Fragment>
+      <tr className={`border-t border-line-soft align-top transition-colors duration-100 hover:bg-soft ${selected ? "bg-subtle" : ""}`}>
+        <td className="sticky start-0 bg-page px-2 py-2">
+          <input
+            type="checkbox"
+            aria-label={t("packages.select", { code: item.code || String(item.ref) })}
+            checked={selected}
+            onChange={() => toggle(item.id)}
+            className="size-4 pointer-coarse:size-5"
+          />
+        </td>
+        <td className="px-2 py-2 whitespace-nowrap">{item.code}</td>
+        <td className="px-2 py-2" dir="auto">
+          {item.description}
+          {item.verify && <span className="ms-2 text-sm text-amber">{t("item.verify")}</span>}
+          {item.decided_by === "engineer" && <span className="ms-2 text-sm text-ink-2">{t("item.byYou")}</span>}
+        </td>
+        <td className="px-2 py-2 whitespace-nowrap" dir="auto">
+          {item.unit}
+        </td>
+        <Figure text={item.quantity_text} />
+        <Figure text={item.rate_text} />
+        <Figure text={item.amount_text} />
+        <td className="w-40 min-w-40 px-2 py-2">
+          <button
+            type="button"
+            aria-expanded={showing}
+            onClick={() => show(item.id)}
+            className={`text-start [overflow-wrap:anywhere] ${link}`}
+          >
+            {whereIs(item, t)}
+          </button>
+        </td>
+      </tr>
+      {showing && (
+        <tr>
+          <td colSpan={8} className="px-2 pb-3">
+            <Source projectId={projectId} item={item} />
+          </td>
+        </tr>
+      )}
+    </Fragment>
+  );
+});
 
 /** Whether the items table fits its frame. Measured while the table shows and kept while the cards do, so a window
  *  that grows wide enough brings the table back. With no layout to measure (tests), the table shows. */
-function useFits() {
+function useFits(list: Item[]) {
   const [element, frame] = useState<HTMLDivElement | null>(null);
   const table = useRef<HTMLTableElement>(null);
   const [needed, setNeeded] = useState(0);
@@ -454,7 +525,7 @@ function useFits() {
   }, [element]);
   useLayoutEffect(() => {
     if (table.current) setNeeded(table.current.scrollWidth);
-  });
+  }, [list]);
   return { frame, table, fits: !(needed > width + 1) };
 }
 
@@ -465,72 +536,101 @@ function ItemCards({
   selected,
   toggle,
   showing,
-  setShowing,
+  show,
 }: {
   projectId: string;
   list: Item[];
   selected: Set<string>;
   toggle: (id: string) => void;
   showing: string | null;
-  setShowing: (id: string | null) => void;
+  show: (id: string) => void;
 }) {
-  const { t } = useSettings();
-  const fields = [
-    ["item.unit", "unit"],
-    ["item.quantity", "quantity_text"],
-    ["item.rate", "rate_text"],
-    ["item.amount", "amount_text"],
-  ] as const;
   return (
     <ul className="flex flex-col rounded-lg border border-line">
       {list.map((item) => (
-        <li key={item.id} className={`flex gap-3 border-t border-line-soft px-3 py-3 first:border-t-0 ${selected.has(item.id) ? "bg-subtle" : ""}`}>
-          <input
-            type="checkbox"
-            aria-label={t("packages.select", { code: item.code || String(item.ref) })}
-            checked={selected.has(item.id)}
-            onChange={() => toggle(item.id)}
-            className="mt-1 size-5 shrink-0"
-          />
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <p className="[overflow-wrap:anywhere]" dir="auto">
-              {item.code && <span className="me-2 font-semibold">{item.code}</span>}
-              {item.description}
-              {item.verify && <span className="ms-2 text-xs text-amber">{t("item.verify")}</span>}
-              {item.decided_by === "engineer" && <span className="ms-2 text-xs text-ink-2">{t("item.byYou")}</span>}
-            </p>
-            {/* Side by side where there is room; each pair moves to the next line whole, so a figure never breaks. */}
-            <dl className="flex flex-wrap gap-x-6 gap-y-0.5 text-sm">
-              {fields.map(([label, key]) =>
-                item[key] ? (
-                  <div key={key} className="flex min-w-0 gap-1.5">
-                    <dt className="text-ink-2">{t(label)}</dt>
-                    <dd className="min-w-0 break-words" dir="auto" title={figure(item[key]).exact}>
-                      {figure(item[key]).shown}
-                    </dd>
-                  </div>
-                ) : null,
-              )}
-            </dl>
-            <button
-              type="button"
-              aria-expanded={showing === item.id}
-              onClick={() => setShowing(showing === item.id ? null : item.id)}
-              className={`self-start text-start text-sm ${link}`}
-            >
-              {whereIs(item, t)}
-            </button>
-            {showing === item.id && (
-              <div className="animate-enter">
-                <Source projectId={projectId} item={item} />
-              </div>
-            )}
-          </div>
-        </li>
+        <ItemCard
+          key={item.id}
+          projectId={projectId}
+          item={item}
+          selected={selected.has(item.id)}
+          toggle={toggle}
+          showing={showing === item.id}
+          show={show}
+        />
       ))}
     </ul>
   );
 }
+
+const CARD_FIELDS = [
+  ["item.unit", "unit"],
+  ["item.quantity", "quantity_text"],
+  ["item.rate", "rate_text"],
+  ["item.amount", "amount_text"],
+] as const;
+
+const ItemCard = memo(function ItemCard({
+  projectId,
+  item,
+  selected,
+  toggle,
+  showing,
+  show,
+}: {
+  projectId: string;
+  item: Item;
+  selected: boolean;
+  toggle: (id: string) => void;
+  showing: boolean;
+  show: (id: string) => void;
+}) {
+  const { t } = useSettings();
+  return (
+    <li className={`flex gap-3 border-t border-line-soft px-3 py-3 first:border-t-0 ${selected ? "bg-subtle" : ""}`}>
+      <input
+        type="checkbox"
+        aria-label={t("packages.select", { code: item.code || String(item.ref) })}
+        checked={selected}
+        onChange={() => toggle(item.id)}
+        className="mt-1 size-5 shrink-0"
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <p className="[overflow-wrap:anywhere]" dir="auto">
+          {item.code && <span className="me-2 font-semibold">{item.code}</span>}
+          {item.description}
+          {item.verify && <span className="ms-2 text-sm text-amber">{t("item.verify")}</span>}
+          {item.decided_by === "engineer" && <span className="ms-2 text-sm text-ink-2">{t("item.byYou")}</span>}
+        </p>
+        {/* Side by side where there is room; each pair moves to the next line whole, so a figure never breaks. */}
+        <dl className="flex flex-wrap gap-x-6 gap-y-0.5 text-sm">
+          {CARD_FIELDS.map(([label, key]) =>
+            item[key] ? (
+              <div key={key} className="flex min-w-0 gap-1.5">
+                <dt className="text-ink-2">{t(label)}</dt>
+                <dd className="min-w-0 break-words" dir="auto" title={figure(item[key]).exact}>
+                  {figure(item[key]).shown}
+                </dd>
+              </div>
+            ) : null,
+          )}
+        </dl>
+        <button
+          type="button"
+          aria-expanded={showing}
+          onClick={() => show(item.id)}
+          className={`self-start text-start text-sm ${link}`}
+        >
+          {whereIs(item, t)}
+        </button>
+        {showing && (
+          <div className="animate-enter">
+            <Source projectId={projectId} item={item} />
+          </div>
+        )}
+      </div>
+    </li>
+  );
+});
 
 /** A table cell holding a figure: as the source wrote it, float noise shown to the cent (the exact value on hover). */
 function Figure({ text }: { text: string }) {
@@ -547,7 +647,7 @@ function Source({ projectId, item }: { projectId: string; item: Item }) {
     <SourcePreview
       projectId={projectId}
       sourceId={item.source_id}
-      focus={{ page: item.page, row: item.provenance.row as number | undefined, box: item.provenance.box as number[] | undefined }}
+      focus={focusOf(item)}
     />
   );
 }
