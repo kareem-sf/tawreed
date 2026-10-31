@@ -184,7 +184,7 @@ def test_the_workflow_runs_a_project_through_every_gate(client, ai):
         "problem": None,
     }
     assert work["packages"] == []  # the plan waits for the engineer: nothing is created before they approve
-    assert "Tower BOQ.xlsx" in brain.prompts[0] and "page 3: sheet “Rates”" in brain.prompts[0]
+    assert "Tower BOQ.xlsx" in brain.prompts[0] and "page 3: sheet <boq-data>Rates</boq-data>" in brain.prompts[0]
     assert brain.tools[0] == {t.__name__ for t in tools.STEP_TOOLS["read"]}  # each step, only its own tools
     assert brain.tools[1] == {"list_items", "propose_plan"}
     plan = work["decisions"][0]
@@ -277,8 +277,10 @@ def test_the_engineers_layout_replaces_a_pages_items_and_the_ai_leaves_it(client
             tools.lay_out_sheet(SimpleNamespace(deps=step), source_id, 1, SheetLayout(**DIV03))
         with pytest.raises(ModelRetry, match="isn't this step's file"):
             tools.read_sheet(SimpleNamespace(deps=tools.Step(**{**step.__dict__, "source_id": "other"})), source_id, 1)
-        assert "page 1: sheet “Div.03”, 14 rows × 6 columns · laid out: 1 items (by the engineer: leave it)" in (
-            tools.files_overview(session, project_id, detailed=True, source_id=source_id)
+        assert (
+            "page 1: sheet <boq-data>Div.03</boq-data>, 14 rows × 6 columns · laid out: 1 items "
+            "(by the engineer: leave it)"
+            in (tools.files_overview(session, project_id, detailed=True, source_id=source_id))
         )
 
     aside = client.post(f"/projects/{project_id}/sources/{source_id}/pages/3/set-aside", json={"reason": "Rates"})
@@ -297,8 +299,8 @@ def test_read_again_clears_the_page_and_reads_it_with_the_note(client, ai):
     assert client.post(f"/projects/{project_id}/redo", json=body).status_code == 204
 
     settle(client, project_id, lambda w: "The items start on row 9." in brain.prompts[-1])
-    assert "page 1: sheet “Div.03”, 14 rows × 6 columns · not handled yet" in brain.prompts[-1]
-    assert "page 2: sheet “الملخص”" in brain.prompts[-1] and "laid out: 1 items" in brain.prompts[-1]
+    assert "page 1: sheet <boq-data>Div.03</boq-data>, 14 rows × 6 columns · not handled yet" in brain.prompts[-1]
+    assert "page 2: sheet <boq-data>الملخص</boq-data>" in brain.prompts[-1] and "laid out: 1 items" in brain.prompts[-1]
 
 
 def test_stop_holds_the_work_until_the_engineer_continues(client, ai):

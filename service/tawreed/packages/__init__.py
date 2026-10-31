@@ -4,6 +4,7 @@ An item has at most one assignment row (the item is its key), so it can never si
 proposes a plan and placements; the engineer's direct edits and answers go through the same checked operations
 here. Every count and total is computed from the ledger, never taken from the model."""
 
+import re
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from tawreed.ledger import Item, Layout, handled_pages
 from tawreed.ledger.numbers import parse_number
 from tawreed.projects import Project
 from tawreed.sources import Source
+from tawreed.sources.arabic import normalised
 
 NAME_LIMIT = 120
 PACKAGES_MOST = 60
@@ -251,15 +253,18 @@ def carry_over(session: Session, project: Project, source: Source) -> int:
     if source.relation != "revision" or not source.replaces_id:
         return 0
     placed = assignments(session, project.id)
-    earlier = {
-        _key(item): placed[item.id]
-        for item in session.scalars(select(Item).where(Item.source_id == source.replaces_id))
-        if item.id in placed
-    }
+    earlier: dict[tuple, list[Assignment]] = {}  # in order, so repeated items match one to one
+    for item in session.scalars(
+        select(Item).where(Item.source_id == source.replaces_id).order_by(Item.page, Item.position)
+    ):
+        if item.id in placed:
+            earlier.setdefault(_carry_key(item), []).append(placed[item.id])
     carried = 0
-    for item in session.scalars(select(Item).where(Item.source_id == source.id)):
-        match = earlier.get(_key(item))
-        if match and item.id not in placed:
+    query = select(Item).where(Item.source_id == source.id).order_by(Item.page, Item.position)
+    for item in session.scalars(query):
+        matches = earlier.get(_carry_key(item))
+        if matches and item.id not in placed:
+            match = matches.pop(0)
             by = "engineer" if match.decided_by == "engineer" else "revision"  # the engineer's word carries over too
             session.add(Assignment(item_id=item.id, package_id=match.package_id, decided_by=by, reason=match.reason))
             carried += 1
@@ -305,6 +310,11 @@ def _key(item: Item) -> tuple[str, str, str]:
     return item.code.strip().casefold(), " ".join(item.description.split()).casefold(), item.unit.strip().casefold()
 
 
+def _carry_key(item: Item) -> tuple:
+    """What makes an item the same one in a revision: its code, description and unit, under the same headings."""
+    return (*_key(item), tuple(" ".join(h.split()).casefold() for h in item.headings))
+
+
 def _next_number(project: Project) -> int:
     project.package_numbers += 1
     return project.package_numbers
@@ -342,6 +352,10 @@ class Coverage:
     pending_files: int = 0  # files waiting for the engineer's overlap decision
     packages: list[PackageCount] = field(default_factory=list)
     totals: list[dict[str, Any]] = field(default_factory=list)  # per layout: its stated totals added up, its items' sum
+    set_aside: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # pages a layout set aside: file, page, name, reason, by
+    skipped: dict[str, int] = field(default_factory=dict)  # rows no item was made of, by reason
 
     @property
     def complete(self) -> bool:
@@ -380,7 +394,30 @@ def coverage(session: Session, project_id: str, waiting_items: set[str]) -> Cove
         for layout in session.scalars(select(Layout).where(Layout.source_id == source.id)):
             if layout.report.get("totals"):
                 result.totals.append(reconcile(source.filename, layout, names))
+            if "skip" in layout.spec:
+                for number in layout.pages:
+                    result.set_aside.append(
+                        {
+                            "file": source.filename,
+                            "page": number,
+                            "name": names.get(number, ""),
+                            "reason": layout.spec["skip"],
+                            "by": layout.decided_by,
+                        }
+                    )
+            for reason, count in skipped_reasons(layout.report).items():
+                result.skipped[reason] = result.skipped.get(reason, 0) + count
     return result
+
+
+def skipped_reasons(report: dict[str, Any]) -> dict[str, int]:
+    """The rows a layout skipped, by reason. A layout saved before the counts were kept has only its listed rows."""
+    if "skipped_reasons" in report:
+        return dict(report["skipped_reasons"])
+    counts: dict[str, int] = {}
+    for row in report.get("skipped", []):
+        counts[row["reason"]] = counts.get(row["reason"], 0) + 1
+    return counts
 
 
 def money(amount: Decimal) -> Decimal:
@@ -388,10 +425,26 @@ def money(amount: Decimal) -> Decimal:
     return amount.quantize(Decimal("0.01")) + 0  # + 0: a difference of a trillionth shows as 0.00, not -0.00
 
 
+_GRAND = re.compile(r"\bgrand total\b|to (collection|summary)\b|الاجمالي العام|اجمالي عام|المجموع العام|الاجمالي الكلي")
+_RUNNING = re.compile(r"carried (forward|over)|brought forward|sub[- ]?total|المرحل|مرحل|منقول|مجموع جزئي|اجمالي جزئي")
+
+
+def outermost(totals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The totals that stand for the whole of a layout's pages, so a subtotal, a "carried forward" line and the grand
+    total below them are not added up together: a grand total if the page states one; else the section totals
+    (without running lines); else the last total stated."""
+    counted = [t for t in totals if parse_number(t.get("amount")) is not None]
+    grand = [t for t in counted if _GRAND.search(normalised(t["text"]))]
+    if grand:
+        return grand
+    sections = [t for t in counted if not _RUNNING.search(normalised(t["text"]))]
+    return sections or counted[-1:]
+
+
 def reconcile(file: str, layout: Layout, names: dict[int, str]) -> dict[str, Any]:
-    """The totals one layout's pages state, added up, beside its items' own sum. A sheet with a total per section
-    reconciles when the section totals together equal its items."""
-    stated = [parse_number(t.get("amount")) for t in layout.report["totals"]]
+    """The totals one layout's pages state (the outermost, not every line), beside its items' own sum. A sheet with a
+    total per section reconciles when the section totals together equal its items."""
+    stated = [parse_number(t["amount"]) for t in outermost(layout.report["totals"])]
     stated_sum = sum((s for s in stated if s is not None), Decimal(0))
     items_sum = Decimal(layout.report["amount_sum"]) if layout.report.get("amount_sum") else Decimal(0)
     pages = layout.pages

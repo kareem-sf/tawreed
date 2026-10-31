@@ -12,7 +12,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, ForeignKey, String, select
+from sqlalchemy import JSON, ForeignKey, String, select, update
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from tawreed import packages
@@ -168,7 +168,9 @@ def ask_consent(session: Session, project_id: str, connection: dict[str, Any]) -
 
 def answer(session: Session, project: Project, decision: Decision, body: Answer) -> None:
     """Carry out the engineer's answer. Raises Unanswerable when the answer doesn't fit the decision."""
-    if decision.status != "waiting":
+    # One statement, so two answers at once can't both be carried out: only the one that finds it waiting wins
+    claim = update(Decision).where(Decision.id == decision.id, Decision.status == "waiting").values(status="answered")
+    if not session.execute(claim).rowcount:
         raise Unanswerable("decision_closed")
     kind, payload = decision.kind, decision.payload
     if kind in ("consent", "plan", "publish") and body.approve is None:

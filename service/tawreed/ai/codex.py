@@ -15,6 +15,7 @@ import json
 import os
 import secrets
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from tawreed.ai.check import number_image
+from tawreed.core.env import child_env
 from tawreed.workflow.mcp_endpoint import Check, Runs
 
 LABEL = "ChatGPT (Codex)"
@@ -44,11 +46,27 @@ FEATURES_OFF = (
     "sleep_tool",
 )
 NO_WINDOW = 0x0800_0000 if os.name == "nt" else 0  # CREATE_NO_WINDOW: no console flashes up for a run
+NEW_GROUP = 0x0000_0200 if os.name == "nt" else 0  # CREATE_NEW_PROCESS_GROUP: a run and what it starts end together
+
+
+def _usual_places() -> list[Path]:
+    """Where Codex is installed that a desktop launcher's PATH leaves out (macOS and Linux apps started from the
+    desktop don't get the shell's PATH)."""
+    places = [Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path.home() / ".local/bin"]
+    places.append(Path.home() / ".npm-global/bin")
+    if os.environ.get("APPDATA"):
+        places.append(Path(os.environ["APPDATA"]) / "npm")
+    return places
 
 
 def executable() -> list[str] | None:
     """How to start Codex, if it is installed."""
     path = shutil.which("codex")
+    if not path:
+        for place in _usual_places():
+            path = shutil.which("codex", path=str(place))
+            if path:
+                break
     return [path] if path else None
 
 
@@ -64,6 +82,7 @@ def _quick(arguments: list[str]) -> subprocess.CompletedProcess | None:
         encoding="utf-8",
         timeout=60,
         creationflags=NO_WINDOW,
+        env=child_env(drop=("TAWREED_TOKEN",)),
     )
 
 
@@ -86,7 +105,7 @@ def sign_in() -> None:
     if program is None:
         raise FileNotFoundError("codex")
     flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
-    subprocess.Popen([*program, "login"], creationflags=flags)  # noqa: S603
+    subprocess.Popen([*program, "login"], creationflags=flags, env=child_env(drop=("TAWREED_TOKEN",)))  # noqa: S603
 
 
 def models() -> list[str]:
@@ -94,8 +113,15 @@ def models() -> list[str]:
     listed = _quick(["debug", "models"])
     if listed is None or listed.returncode != 0:
         return []
-    catalogue = json.loads(listed.stdout)
-    return [m["slug"] for m in catalogue.get("models", []) if m.get("visibility") == "list"]
+    try:
+        catalogue = json.loads(listed.stdout)
+        return [m["slug"] for m in catalogue.get("models", []) if m.get("visibility") == "list"]
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise CodexAnswer("Codex gave a list of models Tawreed can't read.") from error
+
+
+class CodexAnswer(Exception):
+    """Codex answered with something Tawreed can't read."""
 
 
 def command(model: str | None, folder: Path, url: str, images: list[Path]) -> list[str]:
@@ -160,15 +186,17 @@ async def run(
     """One Codex run in a fresh empty folder. Stop and the time limit end it between events."""
     outcome = Outcome()
     folder = Path(tempfile.mkdtemp(prefix="tawreed-codex-"))
+    process = None
     try:
         process = await asyncio.create_subprocess_exec(
             *command(model, folder, url, images or []),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
-            env={**os.environ, TOKEN_VARIABLE: token},
+            env=child_env({TOKEN_VARIABLE: token}, drop=("TAWREED_TOKEN",)),
             cwd=folder,
-            creationflags=NO_WINDOW,
+            creationflags=NO_WINDOW | NEW_GROUP,
+            start_new_session=os.name != "nt",
             limit=16 * 1024 * 1024,  # a single event can be long
         )
         process.stdin.write(prompt.encode("utf-8"))
@@ -178,7 +206,7 @@ async def run(
         while True:
             if stop.is_set() or time.monotonic() > deadline:
                 outcome.ended = "stopped" if stop.is_set() else "out_of_time"
-                process.kill()
+                _kill_tree(process)
                 break
             try:
                 line = await asyncio.wait_for(process.stdout.readline(), timeout=0.5)
@@ -191,8 +219,31 @@ async def run(
         if outcome.ended == "done" and process.returncode != 0 and not outcome.problem:
             outcome.ended, outcome.problem = "failed", "codex_failed"
     finally:
+        if process is not None and process.returncode is None:
+            _kill_tree(process)  # an error or a cancelled run leaves nothing behind
         shutil.rmtree(folder, ignore_errors=True)
     return outcome
+
+
+def _kill_tree(process: asyncio.subprocess.Process) -> None:
+    """End Codex and everything it started (its own MCP and helper programs), not just Codex itself."""
+    try:
+        if os.name == "nt":
+            subprocess.run(  # noqa: S603
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],  # noqa: S607
+                capture_output=True,
+                creationflags=NO_WINDOW,
+                timeout=15,
+                check=False,
+            )
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        process.kill()
+    except ProcessLookupError:
+        pass
 
 
 def _read(line: bytes, outcome: Outcome) -> None:

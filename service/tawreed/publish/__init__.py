@@ -13,6 +13,7 @@ import shutil
 import uuid
 import zipfile
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from tawreed import decisions, ledger, packages
 from tawreed.core.db import Base, UTCDateTime, now
+from tawreed.core.env import child_env
 from tawreed.core.home import long_path
 from tawreed.projects import Project, folder
 from tawreed.publish import workbooks
@@ -124,15 +126,17 @@ def publish(session: Session, home: Path, project: Project, prices: bool = True)
         title = workbooks.file_name(project.name)
         # In the order the engineer reads them: the master, each package, then the log and the check.
         written = {f"{title} - Master - {name}.xlsx": workbooks.master(book)}
+        package_files = {}
         for package in book.packages:
-            written[f"Packages/{workbooks.package_file(book, package)}"] = workbooks.package_workbook(book, package)
+            package_files[package.id] = f"Packages/{workbooks.package_file(book, package)}"
+            written[package_files[package.id]] = workbooks.package_workbook(book, package)
         written[f"Decision log - {name}.xlsx"] = workbooks.decision_log(book)
         written[f"Coverage check - {name}.xlsx"] = workbooks.coverage_check(book)
         for relative, workbook in written.items():
             path = staging / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             workbook.save(path)
-        _check(staging, book, f"{title} - Master - {name}.xlsx")
+        _check(staging, book, f"{title} - Master - {name}.xlsx", package_files)
         manifest = {
             "project": project.name,
             "revision": name,
@@ -169,21 +173,57 @@ def _entry(staging: Path, relative: str) -> dict[str, Any]:
     return {"path": relative, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def _check(staging: Path, book: workbooks.Book, master: str) -> None:
-    """Open the master again and read each package's items back: the same items, in the same order, as the ledger
-    holds. Only item rows have a source, so headings and totals are passed over. A mismatch stops the publish."""
-    workbook = openpyxl.load_workbook(staging / master, read_only=True)
-    try:
-        source = workbooks.source_column(book)
-        for package in book.packages:
-            sheet = workbook[workbooks.sheet_name(workbooks.package_title(package))]
-            rows = sheet.iter_rows(min_row=workbooks.FIRST_ITEM_ROW, max_col=source, values_only=True)
-            written = [row[1] for row in rows if row[source - 1] is not None]
-            expected = [item.description for item in book.items.get(package.id, [])]
-            if written != expected:
-                raise RuntimeError(f"{package.name}: the workbook doesn't hold the ledger's items")
-    finally:
-        workbook.close()
+def _same_number(cell: Any, parsed: str | None, text: str) -> bool:
+    """A cell holds the number the source wrote as a number, or else its text."""
+    if parsed is None:
+        return cell == (workbooks.cell_text(text) or None)
+    if isinstance(cell, bool) or not isinstance(cell, int | float):
+        return False
+    return float(cell) == float(Decimal(parsed))  # Excel keeps numbers as doubles
+
+
+def _check_sheet(sheet, book: workbooks.Book, package, prices: bool, where: str) -> None:
+    """Every item row of a package sheet, read back: code, description, unit, quantity, rate and amount are what the
+    ledger holds, in the ledger's order. Only item rows have a source, so headings and totals are passed over."""
+    source = workbooks.source_column(book)
+    items = book.items.get(package.id, [])
+    rows = [
+        r for r in sheet.iter_rows(min_row=workbooks.FIRST_ITEM_ROW, max_col=source, values_only=True) if r[source - 1]
+    ]
+    if len(rows) != len(items):
+        raise RuntimeError(f"{where}: the workbook doesn't hold the ledger's items")
+    for row, item in zip(rows, items, strict=True):
+        text = workbooks.cell_text
+        formula = (not prices and workbooks._for_supplier(item)) or (prices and workbooks._reproduces(item))
+        if prices and not formula:
+            amount_ok = _same_number(row[5], item.amount, item.amount_text)
+        elif formula:
+            amount_ok = isinstance(row[5], str) and row[5].startswith("=")
+        else:
+            amount_ok = row[5] is None
+        rate_ok = _same_number(row[4], item.rate, item.rate_text) if prices else row[4] is None
+        if not (
+            row[0] == (text(item.code) or None)
+            and row[1] == text(item.description)
+            and row[2] == (text(item.unit) or None)
+            and _same_number(row[3], item.quantity, item.quantity_text)
+            and rate_ok
+            and amount_ok
+        ):
+            raise RuntimeError(f"{where}: item {item.ref} isn't written as the ledger holds it")
+
+
+def _check(staging: Path, book: workbooks.Book, master: str, package_files: dict[str, str]) -> None:
+    """Open the master and every package workbook again and read each package's items back against the ledger. A
+    mismatch stops the publish."""
+    for package in book.packages:
+        name = workbooks.sheet_name(workbooks.package_title(package))
+        for relative, prices in ((master, True), (package_files[package.id], book.prices)):
+            workbook = openpyxl.load_workbook(staging / relative, read_only=True)
+            try:
+                _check_sheet(workbook[name], book, package, prices, f"{package.name} ({relative})")
+            finally:
+                workbook.close()
 
 
 def open_folder(home: Path, revision: Revision) -> None:
@@ -194,7 +234,8 @@ def open_folder(home: Path, revision: Revision) -> None:
     else:
         import subprocess
 
-        subprocess.Popen(["open" if os.uname().sysname == "Darwin" else "xdg-open", str(path)])  # noqa: S603
+        program = "open" if os.uname().sysname == "Darwin" else "xdg-open"
+        subprocess.Popen([program, str(path)], env=child_env())  # noqa: S603
 
 
 def zipped(home: Path, revision: Revision) -> bytes:

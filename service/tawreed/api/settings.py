@@ -1,4 +1,3 @@
-import webbrowser
 from typing import Literal
 
 from fastapi import APIRouter, Response
@@ -7,6 +6,7 @@ from pydantic import BaseModel
 from tawreed import __version__, settings
 from tawreed.ai import connections
 from tawreed.api.common import Home, problem
+from tawreed.core import env
 
 router = APIRouter(tags=["settings"])
 
@@ -67,5 +67,5 @@ WEBSITE = "https://qsmind.app"
 @router.post("/about/website", status_code=204)
 def open_website() -> Response:
     """Show the QS Mind website in the engineer's browser."""
-    webbrowser.open(WEBSITE)
+    env.open_url(WEBSITE)
     return Response(status_code=204)

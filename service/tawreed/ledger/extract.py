@@ -110,11 +110,13 @@ class Report:
     without_quantity: int = 0
     skipped: list[dict[str, Any]] = field(default_factory=list)
     skipped_count: int = 0
+    reasons: dict[str, int] = field(default_factory=dict)  # every skipped row by reason, listed or not
     totals: list[dict[str, Any]] = field(default_factory=list)
     amount_sum: Decimal | None = None
 
     def skip(self, where: dict[str, Any], reason: str, text: str) -> None:
         self.skipped_count += 1
+        self.reasons[reason] = self.reasons.get(reason, 0) + 1
         if len(self.skipped) < SKIPPED_LISTED:
             self.skipped.append({**where, "reason": reason, "text": text[:120]})
 
@@ -127,6 +129,7 @@ class Report:
             "without_quantity": self.without_quantity,
             "skipped": self.skipped,
             "skipped_count": self.skipped_count,
+            "skipped_reasons": self.reasons,
             "totals": self.totals,
             "amount_sum": str(self.amount_sum) if self.amount_sum is not None else None,
         }
@@ -159,6 +162,7 @@ def column_index(letter: str) -> int:
 
 def extract_sheet(content: dict[str, Any], page: int, layout: SheetLayout) -> tuple[list[Draft], Report]:
     rows = content["rows"]
+    shown = content.get("shown", {})  # numbers as the sheet displays them (2.10), by "row:column" from 0
     last = min(layout.last_row or len(rows), len(rows))
     report, drafts = Report(), []
     headings: deque[str] = deque(maxlen=HEADINGS_KEPT)
@@ -176,6 +180,8 @@ def extract_sheet(content: dict[str, Any], page: int, layout: SheetLayout) -> tu
             return f"{col}{number}" if col else None
 
         code = text_of(value(layout.code))
+        if layout.code and f"{number - 1}:{column_index(layout.code)}" in shown:
+            code = shown[f"{number - 1}:{column_index(layout.code)}"]
         description = " ".join(t for t in (text_of(value(c)) for c in layout.description) if t)
         unit = text_of(value(layout.unit))
         raw_quantity = value(layout.quantity)

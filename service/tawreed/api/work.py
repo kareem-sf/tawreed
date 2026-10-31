@@ -1,24 +1,27 @@
 """The work on a project as the engineer sees it: the step and what runs now, what waits for them, and the packages;
 and what the engineer does about it: stop, continue, answer, redo a step with a note, and edit the packages."""
 
+import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query, Request, Response
+from openpyxl.utils.exceptions import IllegalCharacterError
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tawreed import decisions, ledger, packages, publish
 from tawreed import projects as project_records
-from tawreed.api.common import DB, Home, problem
+from tawreed.api.common import DB, Home, idle, problem
 from tawreed.api.revisions import RevisionOut, revision_out
 from tawreed.ledger import Item
 from tawreed.projects import Project
 from tawreed.sources import Source
 from tawreed.workflow.runner import ask_to_publish, chosen
 
+log = logging.getLogger("tawreed.work")
 router = APIRouter(prefix="/projects/{project_id}", tags=["work"])
 rules_router = APIRouter(prefix="/rules", tags=["work"])
 
@@ -90,6 +93,16 @@ class DecisionOut(BaseModel):
     reason: str | None = None  # uncertain
 
 
+class SetAsideOut(BaseModel):
+    """A page the AI (or the engineer) set aside as listing no items."""
+
+    file: str
+    page: int
+    name: str
+    reason: str
+    by: Literal["agent", "engineer"]
+
+
 class CoverageOut(BaseModel):
     items: int
     placed: int
@@ -99,6 +112,9 @@ class CoverageOut(BaseModel):
     pending_files: int
     amount: str  # all packages' amounts, computed by Tawreed
     totals_differ: int  # sheets or pages whose stated totals differ from their items' own amounts
+    set_aside: list[SetAsideOut]  # pages set aside, for the engineer to see before publishing
+    skipped_rows: int  # rows no item was made of
+    skipped_by_reason: dict[str, int]
 
 
 class RunOut(BaseModel):
@@ -297,6 +313,9 @@ def get_work(project_id: str, request: Request, session: DB, home: Home) -> Work
             pending_files=coverage.pending_files,
             amount=str(packages.money(sum((c.amount for c in coverage.packages), Decimal(0)))),
             totals_differ=sum(1 for t in coverage.totals if packages.money(t["difference"]) != 0),
+            set_aside=[SetAsideOut(**entry) for entry in coverage.set_aside],
+            skipped_rows=sum(coverage.skipped.values()),
+            skipped_by_reason=coverage.skipped,
         ),
         packages=[
             PackageOut(
@@ -316,6 +335,7 @@ def get_work(project_id: str, request: Request, session: DB, home: Home) -> Work
 def stop(project_id: str, request: Request, session: DB) -> Response:
     """Stop the running step; the project waits until the engineer continues."""
     _project(session, project_id)
+    session.rollback()  # stopping writes through a session of its own: this one must not hold the database
     request.app.state.worker.stop(project_id)
     return Response(status_code=204)
 
@@ -395,6 +415,10 @@ def answer(
     except publish.NotReady as error:
         session.rollback()
         raise problem(409, error.code) from error
+    except (IllegalCharacterError, RuntimeError) as error:  # nothing was published: all or none
+        session.rollback()
+        log.exception("Publishing %s failed", project_id)
+        raise problem(500, "publish_failed") from error
     if revision:
         decision.answer = {**decision.answer, "revision": revision.name, "prices": revision.manifest["prices"]}
     session.commit()
@@ -433,6 +457,7 @@ def _refused(session: Session, error: packages.Refused):
 @router.post("/packages", status_code=201)
 def create_package(project_id: str, body: PackageIn, request: Request, session: DB) -> PackageRef:
     project = _project(session, project_id)
+    idle(request, project_id)
     try:
         package = packages.create_package(session, project, body.name, body.scope)
     except packages.Refused as error:
@@ -445,6 +470,7 @@ def create_package(project_id: str, body: PackageIn, request: Request, session: 
 @router.patch("/packages/{package_id}")
 def change_package(project_id: str, package_id: str, body: PackageChange, request: Request, session: DB) -> PackageRef:
     project = _project(session, project_id)
+    idle(request, project_id)
     try:
         package = packages.get_package(session, project_id, package_id)
         packages.change_package(session, project, package, body.name, body.scope)
@@ -459,6 +485,7 @@ def change_package(project_id: str, package_id: str, body: PackageChange, reques
 def remove_package(project_id: str, package_id: str, request: Request, session: DB) -> Response:
     """Remove a package; its items wait to be placed again."""
     project = _project(session, project_id)
+    idle(request, project_id)
     try:
         packages.remove_package(session, project, packages.get_package(session, project_id, package_id))
     except packages.Refused as error:
@@ -472,6 +499,7 @@ def remove_package(project_id: str, package_id: str, request: Request, session: 
 def merge_packages(project_id: str, package_id: str, body: Merge, request: Request, session: DB) -> Response:
     """Merge other packages into this one; their items keep their placement reasons."""
     project = _project(session, project_id)
+    idle(request, project_id)
     try:
         into = packages.get_package(session, project_id, package_id)
         merged = [packages.get_package(session, project_id, i) for i in body.package_ids]
@@ -487,6 +515,7 @@ def merge_packages(project_id: str, package_id: str, body: Merge, request: Reque
 def place(project_id: str, body: Placement, request: Request, session: DB) -> Response:
     """The engineer puts items in a package. It settles any question raised about them."""
     project = _project(session, project_id)
+    idle(request, project_id)
     try:
         package = packages.get_package(session, project_id, body.package_id)
         items = [session.get(Item, i) for i in dict.fromkeys(body.item_ids)]

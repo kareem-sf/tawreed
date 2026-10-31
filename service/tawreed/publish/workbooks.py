@@ -15,6 +15,7 @@ from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.cell import Cell
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
@@ -89,6 +90,13 @@ LABELS: dict[str, dict[str, str]] = {
         "how": "How it was read",
         "by": "By",
         "skipped": "Rows skipped",
+        "aside_sheet": "Set aside and skipped",
+        "pages_aside": "Pages set aside (no items were read from them)",
+        "rows_skipped": "Rows skipped, by reason",
+        "rows_listed": "Skipped rows (the first of each page, as the layout reported them)",
+        "text": "Text",
+        "count": "Count",
+        "cleaned": "Texts with control characters changed to spaces (the source files are untouched)",
         "agent": "Tawreed (AI)",
         "engineer": "The engineer",
         "revision_carry": "Carried over from the earlier file",
@@ -168,6 +176,13 @@ LABELS: dict[str, dict[str, str]] = {
         "how": "طريقة القراءة",
         "by": "بواسطة",
         "skipped": "الصفوف المتروكة",
+        "aside_sheet": "المستبعد والمتروك",
+        "pages_aside": "صفحات مستبعدة (لم تُقرأ منها بنود)",
+        "rows_skipped": "الصفوف المتروكة حسب السبب",
+        "rows_listed": "الصفوف المتروكة (الأولى في كل صفحة كما أبلغ بها التخطيط)",
+        "text": "النص",
+        "count": "العدد",
+        "cleaned": "نصوص استُبدلت فيها محارف التحكم بمسافات (الملفات الأصلية لم تتغير)",
         "agent": "توريد (الذكاء الاصطناعي)",
         "engineer": "المهندس",
         "revision_carry": "منقول من الملف الأقدم",
@@ -229,9 +244,43 @@ def language_of(items: list[Item]) -> str:
     return "ar" if arabic * 2 > len(items) else "en"
 
 
+def cell_text(value: Any) -> Any:
+    """Text as a workbook can hold it. Excel cannot store control characters (a stray \x00 or \x0b in a
+    description copied from a PDF); each becomes a space, here, at write time. The source ledger keeps its text
+    untouched, and the coverage check says how many texts were changed."""
+    return ILLEGAL_CHARACTERS_RE.sub(" ", value) if isinstance(value, str) else value
+
+
+def _strings(value: Any):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for part in value.values():
+            yield from _strings(part)
+    elif isinstance(value, list | tuple):
+        for part in value:
+            yield from _strings(part)
+
+
+def cleaned_count(book: "Book") -> int:
+    """How many distinct texts in this revision hold characters that cell_text changes."""
+    texts: set[str] = {book.project.name}
+    for package in book.packages:
+        texts.update((package.name, package.scope or "", package.reason or ""))
+    for items in book.items.values():
+        for item in items:
+            texts.update((item.code, item.description, item.unit, item.comment, *item.headings))
+    texts.update(source.filename for source in book.files.values())
+    texts.update(rule.text for rule in book.rules)
+    texts.update(a.reason or "" for a in book.placed.values())
+    for decision in book.decisions:
+        texts.update(_strings([decision.payload, decision.answer or {}]))
+    return sum(1 for text in texts if ILLEGAL_CHARACTERS_RE.search(text))
+
+
 def sheet_name(text: str) -> str:
     """Excel allows 31 characters and none of []:*?/\\ in a sheet's name."""
-    return re.sub(r"[\[\]:*?/\\]", " ", text).strip()[:31] or "Sheet"
+    return re.sub(r"[\[\]:*?/\\]", " ", cell_text(text)).strip()[:31] or "Sheet"
 
 
 def package_title(package: Package) -> str:
@@ -273,15 +322,15 @@ def _value(cell, parsed: str | None, text: str) -> None:
         cell.value = Decimal(parsed)
         cell.number_format = _number_format(parsed)
     else:
-        cell.value = text or None
+        cell.value = cell_text(text) or None
 
 
 def where(item: Item, files: dict[str, Source], labels: dict[str, str]) -> str:
     """Where the item is in its file, in words: "Tower.xlsx › Div.03 › row 10"."""
     provenance = item.provenance
-    file = files[item.source_id].filename
+    file = cell_text(files[item.source_id].filename)
     if "row" in provenance:
-        return f"{file} › {provenance.get('sheet', '')} › {labels['row']} {provenance['row']}"
+        return f"{file} › {cell_text(provenance.get('sheet', ''))} › {labels['row']} {provenance['row']}"
     lines = provenance.get("lines")
     if lines:
         span = f"{lines[0]}–{lines[-1]}" if len(lines) > 1 else str(lines[0])
@@ -346,11 +395,11 @@ def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool =
     columns = ["item", "description", "unit", "quantity", "rate", "amount"] + (["comment"] if book.comments else [])
     columns.append("source")
     _prepare(sheet, book, [12, 60, 9, 13, 13, 16] + ([30] if book.comments else []) + [40])
-    sheet["A1"] = package_title(package)
+    sheet["A1"] = cell_text(package_title(package))
     sheet["A1"].font = TITLE
-    sheet["A2"] = f"{labels['project']}: {book.project.name} · {labels['revision']}: {book.name}"
+    sheet["A2"] = cell_text(f"{labels['project']}: {book.project.name} · {labels['revision']}: {book.name}")
     if package.scope:
-        sheet["A3"] = f"{labels['scope']}: {package.scope}"
+        sheet["A3"] = cell_text(f"{labels['scope']}: {package.scope}")
     sheet["A4"] = labels["limits"]
     numbers = tuple(columns.index(c) + 1 for c in ("quantity", "rate", "amount"))
     _header(sheet, HEADER_ROW, [labels[c] for c in columns], numbers)
@@ -360,14 +409,14 @@ def write_package(sheet: Worksheet, book: Book, package: Package, prices: bool =
     for item in book.items.get(package.id, []):
         heading = " › ".join(item.headings)
         if heading and heading != under:
-            sheet.cell(row=row, column=2, value=heading).font = BOLD
+            sheet.cell(row=row, column=2, value=cell_text(heading)).font = BOLD
             row += 1
         under = heading
         values = {
-            "item": item.code or None,
-            "description": item.description,
-            "unit": item.unit or None,
-            "comment": item.comment or None,
+            "item": cell_text(item.code) or None,
+            "description": cell_text(item.description),
+            "unit": cell_text(item.unit) or None,
+            "comment": cell_text(item.comment) or None,
             "source": where(item, book.files, labels) + (f" ({labels['check']})" if item.verify else ""),
         }
         for column, key in enumerate(columns, start=1):
@@ -413,7 +462,7 @@ def master(book: Book) -> Workbook:
     cover = workbook.active
     cover.title = sheet_name(labels["cover"])
     _prepare(cover, book, [34, 70])
-    cover["A1"] = book.project.name
+    cover["A1"] = cell_text(book.project.name)
     cover["A1"].font = TITLE
     cover["A2"] = labels["limits"]
     cover["A2"].font = BOLD
@@ -437,7 +486,7 @@ def master(book: Book) -> Workbook:
     row = 3 + len(rows)
     for source in sorted(book.files.values(), key=lambda s: s.added_at):
         note = "" if source.active else f" ({labels['set_aside']})"
-        cover.cell(row=row, column=2, value=source.filename + note)
+        cover.cell(row=row, column=2, value=cell_text(source.filename + note))
         row += 1
     cover.cell(row=row + 1, column=1, value=labels["assumptions"]).font = BOLD
     for offset, key in enumerate(("assume_source", "assume_amounts", "assume_packages", "assume_pictures"), start=1):
@@ -451,12 +500,12 @@ def master(book: Book) -> Workbook:
         name = sheet_name(package_title(package))
         _, total = write_package(workbook.create_sheet(name), book, package)
         index.cell(row=row, column=1, value=code(package))
-        index.cell(row=row, column=2, value=package.name)
-        index.cell(row=row, column=3, value=package.scope or None).alignment = WRAP
+        index.cell(row=row, column=2, value=cell_text(package.name))
+        index.cell(row=row, column=3, value=cell_text(package.scope) or None).alignment = WRAP
         index.cell(row=row, column=4, value=counts[package.id].items)
         if total:  # the package sheet's own total
             _formula(index.cell(row=row, column=5, value=f"={_sheet_ref(name)}!{total}")).number_format = "#,##0.00"
-        index.cell(row=row, column=6, value=package_file(book, package))
+        index.cell(row=row, column=6, value=cell_text(package_file(book, package)))
     if priced:
         amounts = f"=SUM({_sheet_ref(index.title)}!E2:E{len(book.packages) + 1})"
         _formula(cover.cell(row=total_row, column=2, value=amounts)).number_format = "#,##0.00"
@@ -500,6 +549,7 @@ def coverage_check(book: Book) -> Workbook:
         (labels["amounts_packages"], money(in_packages)),
         (labels["difference"], "=B4-B5"),
         ("", labels["all_placed"]),
+        (labels["cleaned"], cleaned_count(book)),
     ]
     for row, (label, value) in enumerate(rows, start=1):
         summary.cell(row=row, column=1, value=label).font = BOLD
@@ -512,11 +562,12 @@ def coverage_check(book: Book) -> Workbook:
     _header(summary, row, [labels["file"], labels["stated"], labels["items_sum"], labels["difference"]], (2, 3, 4))
     for total in coverage.totals:
         row += 1
-        summary.cell(row=row, column=1, value=f"{total['file']} › {total['where']}")
+        summary.cell(row=row, column=1, value=cell_text(f"{total['file']} › {total['where']}"))
         for column, value in ((2, money(total["stated_sum"])), (3, money(total["items_sum"])), (4, f"=B{row}-C{row}")):
             summary.cell(row=row, column=column, value=value).number_format = "#,##0.00"
         _formula(summary.cell(row=row, column=4))
 
+    _set_aside_sheet(workbook, book)
     items = workbook.create_sheet(sheet_name(labels["items"]))
     _prepare(items, book, [12, 60, 9, 13, 16, 8, 34, 40])
     _header(
@@ -528,15 +579,57 @@ def coverage_check(book: Book) -> Workbook:
     for package in book.packages:
         for item in book.items.get(package.id, []):
             row += 1
-            items.cell(row=row, column=1, value=item.code or None)
-            items.cell(row=row, column=2, value=item.description).alignment = WRAP
-            items.cell(row=row, column=3, value=item.unit or None)
+            items.cell(row=row, column=1, value=cell_text(item.code) or None)
+            items.cell(row=row, column=2, value=cell_text(item.description)).alignment = WRAP
+            items.cell(row=row, column=3, value=cell_text(item.unit) or None)
             _value(items.cell(row=row, column=4), item.quantity, item.quantity_text)
             _value(items.cell(row=row, column=5), item.amount, item.amount_text)
             items.cell(row=row, column=6, value=code(package))
-            items.cell(row=row, column=7, value=package.name)
+            items.cell(row=row, column=7, value=cell_text(package.name))
             items.cell(row=row, column=8, value=where(item, book.files, labels))
     return _as_text(workbook)
+
+
+def _set_aside_sheet(workbook: Workbook, book: Book) -> None:
+    """What was left out and why: pages set aside, rows skipped by reason, and the skipped rows themselves."""
+    labels, coverage = book.labels, book.coverage
+    sheet = workbook.create_sheet(sheet_name(labels["aside_sheet"]))
+    _prepare(sheet, book, [40, 14, 50, 14])
+    sheet["A1"] = labels["pages_aside"]
+    sheet["A1"].font = BOLD
+    _header(sheet, 2, [labels["file"], labels["page"], labels["reason"], labels["by"]])
+    row = 2
+    for entry in coverage.set_aside:
+        row += 1
+        sheet.cell(row=row, column=1, value=cell_text(entry["file"]))
+        sheet.cell(row=row, column=2, value=cell_text(entry["name"] or str(entry["page"])))
+        sheet.cell(row=row, column=3, value=cell_text(entry["reason"])).alignment = WRAP
+        sheet.cell(row=row, column=4, value=labels["agent"] if entry["by"] == "agent" else labels["engineer"])
+    row += 2
+    sheet.cell(row=row, column=1, value=labels["rows_skipped"]).font = BOLD
+    for reason, count in sorted(coverage.skipped.items()):
+        row += 1
+        sheet.cell(row=row, column=1, value=cell_text(reason))
+        sheet.cell(row=row, column=2, value=count)
+    row += 2
+    sheet.cell(row=row, column=1, value=labels["rows_listed"]).font = BOLD
+    row += 1
+    for column, label in enumerate((labels["file"], labels["row"], labels["reason"], labels["text"]), start=1):
+        cell = sheet.cell(row=row, column=column, value=label)
+        cell.font, cell.fill = BOLD, HEADING
+    for layout in book.layouts:
+        file = book.files[layout.source_id].filename
+        for skipped in layout.report.get("skipped", []):
+            row += 1
+            position = (
+                f"{labels['row']} {skipped['row']}"
+                if "row" in skipped
+                else (f"{labels['page']} {skipped.get('page')}, {labels['lines']} {skipped.get('line')}")
+            )
+            sheet.cell(row=row, column=1, value=cell_text(file))
+            sheet.cell(row=row, column=2, value=position)
+            sheet.cell(row=row, column=3, value=cell_text(skipped["reason"]))
+            sheet.cell(row=row, column=4, value=cell_text(skipped.get("text", ""))).alignment = WRAP
 
 
 def decision_log(book: Book) -> Workbook:
@@ -550,8 +643,8 @@ def decision_log(book: Book) -> Workbook:
         asked, answered = _described(decision, book)
         log.cell(row=row, column=1, value=(decision.answered_at or decision.created_at).strftime("%Y-%m-%d %H:%M"))
         log.cell(row=row, column=2, value=labels[decision.kind])
-        log.cell(row=row, column=3, value=asked).alignment = WRAP
-        log.cell(row=row, column=4, value=answered).alignment = WRAP
+        log.cell(row=row, column=3, value=cell_text(asked)).alignment = WRAP
+        log.cell(row=row, column=4, value=cell_text(answered)).alignment = WRAP
 
     placements = workbook.create_sheet(sheet_name(labels["placements"]))
     _prepare(placements, book, [12, 60, 8, 34, 22, 50])
@@ -566,18 +659,18 @@ def decision_log(book: Book) -> Workbook:
         for item in book.items.get(package.id, []):
             row += 1
             assignment = book.placed[item.id]
-            placements.cell(row=row, column=1, value=item.code or None)
-            placements.cell(row=row, column=2, value=item.description).alignment = WRAP
+            placements.cell(row=row, column=1, value=cell_text(item.code) or None)
+            placements.cell(row=row, column=2, value=cell_text(item.description)).alignment = WRAP
             placements.cell(row=row, column=3, value=code(package))
-            placements.cell(row=row, column=4, value=package.name)
+            placements.cell(row=row, column=4, value=cell_text(package.name))
             placements.cell(row=row, column=5, value=by.get(assignment.decided_by, assignment.decided_by))
-            placements.cell(row=row, column=6, value=assignment.reason or None).alignment = WRAP
+            placements.cell(row=row, column=6, value=cell_text(assignment.reason) or None).alignment = WRAP
 
     rules = workbook.create_sheet(sheet_name(labels["rules"]))
     _prepare(rules, book, [80, 20])
     _header(rules, 1, [labels["rule"], labels["applies"]])
     for row, rule in enumerate(book.rules, start=2):
-        rules.cell(row=row, column=1, value=rule.text).alignment = WRAP
+        rules.cell(row=row, column=1, value=cell_text(rule.text)).alignment = WRAP
         rules.cell(row=row, column=2, value=labels["this_project"] if rule.project_id else labels["all_projects"])
 
     reading = workbook.create_sheet(sheet_name(labels["reading"]))
@@ -588,9 +681,9 @@ def decision_log(book: Book) -> Workbook:
         [labels["file"], labels["pages"], labels["how"], labels["by"], labels["items"], labels["skipped"]],
     )
     for row, layout in enumerate(book.layouts, start=2):
-        reading.cell(row=row, column=1, value=book.files[layout.source_id].filename)
+        reading.cell(row=row, column=1, value=cell_text(book.files[layout.source_id].filename))
         reading.cell(row=row, column=2, value=", ".join(str(p) for p in layout.pages))
-        reading.cell(row=row, column=3, value=_how(layout, labels)).alignment = WRAP
+        reading.cell(row=row, column=3, value=cell_text(_how(layout, labels))).alignment = WRAP
         reading.cell(row=row, column=4, value=labels["agent"] if layout.decided_by == "agent" else labels["engineer"])
         reading.cell(row=row, column=5, value=layout.report.get("items", 0))
         reading.cell(row=row, column=6, value=layout.report.get("skipped_count", 0))

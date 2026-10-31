@@ -2,7 +2,10 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tawreed import __version__, decisions
 from tawreed.api import ai, projects, revisions, settings, sources, work
@@ -52,6 +55,21 @@ def create_app(home: Path, token: str, port: int | None = None) -> FastAPI:
     for path, server in (("/mcp", step_tools), ("/mcp-check", check_tools)):
         served = server.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)
         app.mount(path, mcp_endpoint.guarded(served, runs))
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_request: Request, error: RequestValidationError) -> JSONResponse:
+        """Every request the shape of which is wrong, in the one form the interface maps: the field that is wrong."""
+        location = error.errors()[0]["loc"] if error.errors() else ()
+        field = ".".join(str(part) for part in location if part != "body")
+        return JSONResponse(status_code=422, content={"detail": {"code": "invalid_request", "field": field}})
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_problem(_request: Request, error: StarletteHTTPException) -> JSONResponse:
+        """A problem with a code passes through; Starlette's own plain-text ones (an unparsable body) get one."""
+        detail = error.detail
+        if not isinstance(detail, dict):
+            detail = {"code": "wrong_token" if error.status_code == 401 else "bad_request"}
+        return JSONResponse(status_code=error.status_code, content={"detail": detail}, headers=error.headers)
 
     @app.get("/health", tags=["service"])
     def health() -> dict[str, str]:

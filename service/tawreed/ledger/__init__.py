@@ -157,7 +157,8 @@ def _replace(
     report: Report,
     by: str,
 ) -> dict[str, Any]:
-    """Put the new items in place of whatever an earlier layout found on the same pages."""
+    """Put the new items in place of whatever an earlier layout found on the same pages. The next item number is read
+    inside the transaction, which holds the database's write lock from its start, so no one else can take it."""
     last = session.scalar(select(func.max(Item.ref)).where(Item.project_id == source.project_id)) or 0
     session.execute(delete(Item).where(Item.source_id == source.id, Item.page.in_(pages)))
     for old in session.scalars(select(Layout).where(Layout.source_id == source.id)):

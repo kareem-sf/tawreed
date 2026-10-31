@@ -3,11 +3,13 @@ into pages: one per sheet, PDF page or image frame."""
 
 import hashlib
 import json
+import os
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PureWindowsPath
+from typing import Any, BinaryIO
 
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, UniqueConstraint, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
@@ -31,6 +33,10 @@ KINDS = {
     ".webp": "image",
 }
 SIZE_LIMIT = 100 * 1024 * 1024  # bytes per file
+FILES_MOST = 50  # files in one drop
+DROP_LIMIT_MB = 500  # megabytes in one drop
+NAME_MOST = 260  # characters of a file name kept
+CHUNK = 1024 * 1024
 
 
 class Source(Base):
@@ -78,32 +84,88 @@ class SourcePage(Base):
     height: Mapped[float | None] = mapped_column(Float)
 
 
+def safe_name(filename: str) -> str:
+    """A file name as Tawreed keeps it: the part after any folder (Windows or not), without control characters,
+    at most NAME_MOST characters with its extension kept."""
+    name = re.sub(r"[\x00-\x1f]", "", PureWindowsPath(filename).name).strip()
+    if len(name) > NAME_MOST:
+        suffix = Path(name).suffix[:20]
+        name = name[: NAME_MOST - len(suffix)] + suffix
+    return name
+
+
 @dataclass(frozen=True)
 class Incoming:
+    """A dropped file: its name and its bytes, read in chunks from `file` (an upload already spooled to disk) or
+    given whole as `data`."""
+
     filename: str
-    data: bytes
+    data: bytes = b""
+    file: BinaryIO | None = None
+
+    @property
+    def size(self) -> int:
+        if self.file is None:
+            return len(self.data)
+        here = self.file.tell()
+        end = self.file.seek(0, os.SEEK_END)
+        self.file.seek(here)
+        return end
+
+    def chunks(self):
+        if self.file is None:
+            yield self.data
+            return
+        self.file.seek(0)
+        while chunk := self.file.read(CHUNK):
+            yield chunk
 
 
 class Rejected(Exception):
     """A file Tawreed won't take, with the reason as a stable code the interface translates."""
 
-    def __init__(self, code: str, filename: str):
+    def __init__(self, code: str, filename: str, **params: int):
         super().__init__(f"{code}: {filename}")
         self.code = code
         self.filename = filename
+        self.params = params
 
 
 def check(files: list[Incoming]) -> None:
     """Refuse the whole batch if any file is unusable, so a drop never half-succeeds."""
     if not files:
         raise Rejected("no_files", "")
+    if len(files) > FILES_MOST:
+        raise Rejected("too_many_files", "", limit=FILES_MOST)
+    if sum(f.size for f in files) > DROP_LIMIT_MB * 1024 * 1024:
+        raise Rejected("drop_too_large", "", limit_mb=DROP_LIMIT_MB)
     for file in files:
         if Path(file.filename).suffix.lower() not in KINDS:
             raise Rejected("unsupported_file", file.filename)
-        if not file.data:
+        if not file.size:
             raise Rejected("empty_file", file.filename)
-        if len(file.data) > SIZE_LIMIT:
+        if file.size > SIZE_LIMIT:
             raise Rejected("file_too_large", file.filename)
+
+
+def _hash_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(CHUNK):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_atomically(path: Path, write) -> None:
+    """Write through a temporary file in the same folder, then rename it into place: a crash or a full disk never
+    leaves half a file under the real name. `write` gets the open temporary file."""
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("wb") as handle:
+            write(handle)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def add_files(session: Session, home: Path, project: Project, files: list[Incoming]) -> list[Source]:
@@ -114,22 +176,25 @@ def add_files(session: Session, home: Path, project: Project, files: list[Incomi
     store.mkdir(parents=True, exist_ok=True)
     added = []
     for file in files:
-        digest = hashlib.sha256(file.data).hexdigest()
-        if digest in known:
+        digest = hashlib.sha256()
+        for chunk in file.chunks():
+            digest.update(chunk)
+        sha = digest.hexdigest()
+        if sha in known:
             continue
         suffix = Path(file.filename).suffix.lower()
-        copy = store / f"{digest}{suffix}"
-        if not copy.exists():
-            copy.write_bytes(file.data)
+        copy = store / f"{sha}{suffix}"
+        if not copy.exists() or _hash_of(copy) != sha:  # a copy that was damaged is written again
+            write_atomically(copy, lambda handle, file=file: [handle.write(c) for c in file.chunks()])
         source = Source(
             project_id=project.id,
-            filename=Path(file.filename).name,
-            sha256=digest,
-            size=len(file.data),
+            filename=safe_name(file.filename),
+            sha256=sha,
+            size=file.size,
             kind=KINDS[suffix],
         )
         session.add(source)
-        known.add(digest)
+        known.add(sha)
         added.append(source)
     project.updated_at = now()
     return added
@@ -152,7 +217,9 @@ def page_image(home: Path, source: Source, number: int) -> bytes:
     """A PNG of a PDF page or an image; drawn once, then kept beside the page's content."""
     cached = pages_folder(home, source) / f"{number}.png"
     if not cached.exists():
-        cached.write_bytes(readers.render(copy_of(home, source), source.kind, number))
+        png = readers.render(copy_of(home, source), source.kind, number)
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        write_atomically(cached, lambda handle: handle.write(png))
     return cached.read_bytes()
 
 

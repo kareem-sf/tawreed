@@ -9,10 +9,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 from pydantic_ai import BinaryContent, ModelRetry, RunContext, ToolReturn
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tawreed import decisions, ledger, packages
@@ -66,6 +68,9 @@ def _session(ctx: RunContext[Step]) -> Iterator[Session]:
         except ValueError as error:  # packages.Refused and the checks below
             session.rollback()
             raise ModelRetry(str(error)) from error
+        except (OperationalError, IntegrityError) as error:  # the database was busy, or the work changed under it
+            session.rollback()
+            raise ModelRetry("Tawreed couldn't save that just now because the project changed. Try again.") from error
         session.commit()
 
 
@@ -73,9 +78,19 @@ def plural(count: int, word: str, words: str | None = None) -> str:
     return f"{count} {word if count == 1 else words or word + 's'}"
 
 
+def _escaped(text: str) -> str:
+    """Angle brackets can't open or close a fence: text from a file can't end the data it sits in."""
+    return text.replace("<", "&lt;").replace(">", "&gt;")
+
+
 def data(text: str) -> str:
     """Content from the engineer's files, fenced so the model reads it as data and never as instructions."""
-    return f"<boq-data>\n{text.replace('</boq-data', '</ boq-data')}\n</boq-data>"
+    return f"<boq-data>\n{_escaped(text)}\n</boq-data>"
+
+
+def quoted(text: str) -> str:
+    """A name from the files or the plan (a file, a sheet, a package), fenced on one line."""
+    return f"<boq-data>{_escaped(' '.join(str(text).split()))}</boq-data>"
 
 
 def _project(session: Session, ctx: RunContext[Step]) -> Project:
@@ -148,7 +163,7 @@ def files_overview(session: Session, project_id: str, detailed: bool, source_id:
             "reading": "being read",
             "failed": f"couldn't be read ({source.problem})",
         }
-        head = f"- {source.id} · {source.filename} · {source.kind}"
+        head = f"- {source.id} · {quoted(source.filename)} · {source.kind}"
         if source.status != "read":
             lines.append(f"{head} · {state[source.status]}")
             continue
@@ -158,7 +173,7 @@ def files_overview(session: Session, project_id: str, detailed: bool, source_id:
         if source.relation == "pending":
             head += " · waiting for the engineer to say how it relates to an earlier file"
         elif source.relation in ("replacement", "revision"):
-            head += f" · a {source.relation} of {names.get(source.replaces_id, 'an earlier file')}"
+            head += f" · a {source.relation} of {quoted(names.get(source.replaces_id, 'an earlier file'))}"
         elif source.relation == "addition":
             head += " · an addition alongside the earlier files"
         lines.append(head)
@@ -175,7 +190,7 @@ def files_overview(session: Session, project_id: str, detailed: bool, source_id:
             continue
         for page in source.pages:
             size = f"{plural(page.rows or 0, 'row')} × {plural(page.cols or 0, 'column')}"
-            kind = f"sheet “{page.name}”, {size}" if page.kind == "sheet" else page.kind
+            kind = f"sheet {quoted(page.name)}, {size}" if page.kind == "sheet" else page.kind
             notes = []
             if page.hidden:
                 notes.append("hidden")
@@ -195,7 +210,7 @@ def files_overview(session: Session, project_id: str, detailed: bool, source_id:
     return "\n".join(lines) or "No files yet."
 
 
-def read_sheet(ctx: RunContext[Step], file_id: str, page: int, first_row: int = 1) -> str:
+def read_sheet(ctx: RunContext[Step], file_id: str, page: int, first_row: Annotated[int, Field(ge=1)] = 1) -> str:
     """Read a sheet's cells, about 120 rows at a time, with Excel's row numbers and column letters. Empty rows and
     cells are left out.
 
@@ -216,8 +231,9 @@ def read_sheet(ctx: RunContext[Step], file_id: str, page: int, first_row: int = 
             lines.append(f"{first_row + offset} | " + " | ".join(cells))
     last = first_row + len(shown) - 1
     more = f" Rows {last + 1}–{len(rows)} follow: read_sheet with first_row={last + 1}." if last < len(rows) else ""
-    head = f"Sheet “{content['name']}”, rows {first_row}–{last} of {len(rows)}.{more}"
-    return f"{head}\n{data(chr(10).join(lines) or '(these rows are empty)')}"
+    head = f"Rows {first_row}–{last} of {len(rows)}.{more}"
+    body = chr(10).join(lines) or "(these rows are empty)"
+    return f"{head}\n{data(f'Sheet “{content["name"]}”' + chr(10) + body)}"
 
 
 def read_pdf_page(ctx: RunContext[Step], file_id: str, page: int) -> str:
@@ -398,7 +414,7 @@ def list_items(
     unplaced_only: bool = False,
     package: int | None = None,
     search: str | None = None,
-    start: int = 1,
+    start: int | None = None,
 ) -> str:
     """List the project's items in file order, grouped under their headings: number · code · description · unit ·
     quantity, and the package each is in.
@@ -426,7 +442,11 @@ def list_items(
             if search and search.casefold() not in f"{item.code} {item.description}".casefold():
                 continue
             found.append((item, assignment))
-    first = next((index for index, pair in enumerate(found) if pair[0].ref == start), 0)
+    first = 0
+    if start is not None:
+        first = next((index for index, pair in enumerate(found) if pair[0].ref == start), -1)
+        if first < 0:
+            raise ModelRetry(f"There is no item {start} in this list. Leave start out to begin at the top.")
     shown = found[first : first + ITEMS_LISTED]
     lines, where, under = [], None, None
     for item, assignment in shown:

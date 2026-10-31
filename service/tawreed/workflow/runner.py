@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpx
 from pydantic_ai import Agent, UsageLimitExceeded, UsageLimits
 from pydantic_ai.exceptions import ModelAPIError, ToolRetryError, UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessage, RetryPromptPart, ToolCallPart
@@ -261,6 +262,12 @@ class Worker:
         )
         self._working = (project_id, step)  # until what the run did is recorded, so it never looks finished early
         try:
+            # Stop or delete may have come between choosing the step and marking it running: look again now
+            if self._stop(project_id).is_set() or self._closing.is_set():
+                return False
+            with self.sessions() as session:
+                if session.get(Project, project_id) is None:
+                    return False
             if codex_run:
                 ended = await self._codex_run(found[1], run, prompt)
             else:
@@ -326,7 +333,7 @@ class Worker:
         except tools.Stopped:
             trace.ended = "stopped"
             return "stopped"
-        except ModelAPIError as error:
+        except (ModelAPIError, httpx.TransportError, TimeoutError, OSError) as error:
             code, params = providers.explain(error)
             trace.ended, trace.note = "ai_failed", code
             failures = self._failures[run.project_id] = self._failures.get(run.project_id, 0) + 1
@@ -342,6 +349,7 @@ class Worker:
             self._pause(run.project_id, "step_failed")
             return "failed"
         finally:
+            await providers.close_model(model)
             with self.sessions() as session:
                 record = session.get(StepRecord, record_id)
                 record.ended, record.note, record.calls = trace.ended, trace.note, trace.calls
@@ -388,11 +396,13 @@ def calls_in(messages: list[ModelMessage]) -> list[dict[str, Any]]:
     ]
 
 
-def passing(error: ModelAPIError) -> bool:
+def passing(error: BaseException) -> bool:
     """A failure that usually clears on its own: a timeout, a dropped connection, rate limiting, a server error."""
     status = getattr(error, "status_code", None)
     if isinstance(status, int):
         return status == 429 or status >= 500
+    if isinstance(error, httpx.TransportError | TimeoutError | ConnectionError):
+        return True
     cause = type(error.__cause__).__name__.lower() if error.__cause__ else ""
     return "timeout" in cause or "connect" in cause
 

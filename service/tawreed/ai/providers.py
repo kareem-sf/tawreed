@@ -44,6 +44,20 @@ def build_model(provider: Provider, model: str, key: str, base_url: str | None) 
     return OpenAIChatModel(model, provider=OpenAIProvider(base_url=base_url, api_key=key))
 
 
+async def close_model(model: Model) -> None:
+    """Close the HTTP client a built model holds, so connections aren't left open for each step that was run."""
+    client = getattr(getattr(model, "_provider", None), "client", None)
+    closer = getattr(client, "close", None) or getattr(client, "aclose", None)
+    if closer is None:
+        return
+    try:
+        result = closer()
+        if hasattr(result, "__await__"):
+            await result
+    except Exception:  # noqa: BLE001  (closing is a courtesy: it must not hide how the step went)
+        pass
+
+
 async def list_models(provider: Provider, key: str, base_url: str | None) -> list[str]:
     """The account's chat models, newest names first where the service orders them."""
     if provider == "anthropic":

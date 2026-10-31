@@ -51,19 +51,26 @@ class ProjectChange(BaseModel):
     name: Name
 
 
-def _incoming(files: list[UploadFile]) -> list[sources.Incoming]:
+def _incoming(files: list[UploadFile | str] | None) -> list[sources.Incoming]:
+    """The dropped files, still on disk where the upload was spooled. A file part with no name and no bytes is how a
+    browser sends a form with nothing chosen: it is not a file."""
     incoming = []
-    for upload in files:
-        data = upload.file.read(sources.SIZE_LIMIT + 1)  # one byte over is enough to know it's too large
-        incoming.append(sources.Incoming(filename=upload.filename or "", data=data))
+    for upload in files or []:
+        if isinstance(upload, str):  # a part with no file name is a plain form field: nothing was chosen
+            continue
+        if not upload.filename and not upload.size:
+            continue
+        incoming.append(sources.Incoming(filename=sources.safe_name(upload.filename or ""), file=upload.file))
     return incoming
 
 
-def _checked(files: list[UploadFile]) -> list[sources.Incoming]:
+def _checked(files: list[UploadFile | str] | None) -> list[sources.Incoming]:
     incoming = _incoming(files)
     try:
         sources.check(incoming)
     except sources.Rejected as rejected:
+        if rejected.code in ("too_many_files", "drop_too_large"):
+            raise problem(413, rejected.code, **rejected.params) from rejected
         raise problem(422, rejected.code, file=rejected.filename) from rejected
     return incoming
 
@@ -86,7 +93,7 @@ def start_project(
     request: Request,
     session: DB,
     home: Home,
-    files: Annotated[list[UploadFile], File()],
+    files: Annotated[list[UploadFile | str] | None, File()] = None,
     name: Annotated[str | None, Form()] = None,
 ) -> ProjectOut:
     """Start a project from dropped BOQ files. Without a name, it is named after the first file."""
@@ -126,6 +133,7 @@ def delete_project(project_id: str, request: Request, session: DB, home: Home) -
     if project is None:
         raise problem(404, "project_not_found")
     worker = request.app.state.worker
+    session.rollback()  # stopping writes through a session of its own: this one must not hold the database
     worker.stop(project_id)
     if worker.running(project_id):
         raise problem(409, "project_busy")
@@ -141,7 +149,11 @@ def delete_project(project_id: str, request: Request, session: DB, home: Home) -
 
 @router.post("/{project_id}/sources")
 def add_sources(
-    project_id: str, request: Request, session: DB, home: Home, files: Annotated[list[UploadFile], File()]
+    project_id: str,
+    request: Request,
+    session: DB,
+    home: Home,
+    files: Annotated[list[UploadFile | str] | None, File()] = None,
 ) -> ProjectOut:
     """Add more BOQ files to a project. A file the project already has is ignored."""
     project = service.get_project(session, project_id)

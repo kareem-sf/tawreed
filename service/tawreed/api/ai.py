@@ -1,9 +1,10 @@
+import ipaddress
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
 import anyio
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel, StringConstraints, model_validator
+from pydantic import BaseModel, StringConstraints
 
 from tawreed import settings
 from tawreed.ai import check, codex, connections, providers
@@ -34,15 +35,6 @@ class ConnectionCreate(BaseModel):
     api_key: str = ""  # every provider but Codex, which signs in through its own client
     base_url: str | None = None
 
-    @model_validator(mode="after")
-    def needs_key_and_address(self) -> "ConnectionCreate":
-        self.api_key = self.api_key.strip()
-        if self.provider != "codex" and not self.api_key:
-            raise ValueError("An API key is needed.")
-        if self.provider == "openai_compatible" and not (self.base_url or "").startswith(("http://", "https://")):
-            raise ValueError("An OpenAI-compatible service needs its address, starting with https://")
-        return self
-
 
 class CodexStatus(BaseModel):
     installed: bool
@@ -58,6 +50,32 @@ class ConnectionTest(BaseModel):
 
 class CheckRequest(BaseModel):
     model: Text
+
+
+def _private_address(host: str) -> bool:
+    """Whether plain http is acceptable to this host: this computer or a private network."""
+    if host == "localhost" or host.endswith((".localhost", ".local")):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
+def _checked(body: ConnectionCreate) -> None:
+    """What a new connection needs: a key (every provider but Codex) and, for a compatible service, an address that
+    isn't sent in the clear over the internet."""
+    body.api_key = body.api_key.strip()
+    if body.provider != "codex" and not body.api_key:
+        raise problem(422, "key_missing")
+    if body.provider == "openai_compatible":
+        address = (body.base_url or "").strip()
+        if not address.startswith(("http://", "https://")) or not urlparse(address).hostname:
+            raise problem(422, "address_missing")
+        if address.startswith("http://") and not _private_address(urlparse(address).hostname or ""):
+            raise problem(422, "insecure_address")
+        body.base_url = address
 
 
 def _out(connection: dict[str, Any]) -> ConnectionOut:
@@ -85,6 +103,7 @@ def list_connections(home: Home) -> list[ConnectionOut]:
 async def add_connection(body: ConnectionCreate, home: Home) -> ConnectionOut:
     """Keep a key only once it works. An OpenAI-compatible service may not list its models; for those, the model
     check proves the key. Codex is kept once it is installed and signed in; there is only ever one."""
+    _checked(body)
     if body.provider == "codex":
         state = await anyio.to_thread.run_sync(codex.status)
         if not state["installed"]:
@@ -115,7 +134,10 @@ def remove_connection(connection_id: str, home: Home) -> None:
 async def list_models(connection_id: str, home: Home) -> list[str]:
     c = _connection(home, connection_id)
     if c["provider"] == "codex":
-        return await anyio.to_thread.run_sync(codex.models)
+        try:
+            return await anyio.to_thread.run_sync(codex.models)
+        except codex.CodexAnswer as error:
+            raise problem(400, "codex_failed") from error
     try:
         return await providers.list_models(c["provider"], c["api_key"], c["base_url"])
     except Exception as error:
@@ -152,7 +174,10 @@ async def check_model(connection_id: str, body: CheckRequest, request: Request, 
         ok, issue, sees_images = await codex.check(body.model, url, request.app.state.runs)
     else:
         model = providers.build_model(c["provider"], body.model, c["api_key"], c["base_url"])
-        ok, issue, sees_images = await check.check_model(model)
+        try:
+            ok, issue, sees_images = await check.check_model(model)
+        finally:
+            await providers.close_model(model)
     connections.record_check(home, connection_id, body.model, ok, issue, sees_images)
     return _out(_connection(home, connection_id))
 

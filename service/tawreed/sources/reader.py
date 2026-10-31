@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from tawreed.sources import Source, SourcePage, copy_of, overlap, pages_folder, readers
+from tawreed.sources import Source, SourcePage, copy_of, overlap, pages_folder, readers, write_atomically
 
 log = logging.getLogger("tawreed.sources")
 
@@ -61,6 +61,7 @@ class Reader:
             if source is None:
                 return False
             source_id, filename = source.id, source.filename
+            session.rollback()  # only a look so far: the next step takes the database's write lock itself
             # Only a file still waiting: its project may have been deleted since it was found
             claim = update(Source).where(Source.id == source_id, Source.status == "added").values(status="reading")
             claimed = session.execute(claim).rowcount
@@ -88,6 +89,7 @@ class Reader:
 def read_source(session: Session, home: Path, source: Source) -> None:
     """Read the file into pages, keep each page's content as JSON beside the copy, and note how it went."""
     folder = pages_folder(home, source)
+    session.commit()  # reading can take minutes: the database must not be held while it does
     try:
         pages = readers.read_apart(copy_of(home, source), source.kind)
     except readers.Unreadable as error:
@@ -104,7 +106,8 @@ def read_source(session: Session, home: Path, source: Source) -> None:
     folder.mkdir(parents=True)
     session.execute(delete(SourcePage).where(SourcePage.source_id == source.id))  # before the new pages go in
     for page in pages:
-        (folder / f"{page.number}.json").write_text(json.dumps(page.content, ensure_ascii=False), encoding="utf-8")
+        text = json.dumps(page.content, ensure_ascii=False).encode("utf-8")
+        write_atomically(folder / f"{page.number}.json", lambda handle, text=text: handle.write(text))
         session.add(
             SourcePage(
                 source_id=source.id,
@@ -119,5 +122,6 @@ def read_source(session: Session, home: Path, source: Source) -> None:
                 height=page.height,
             )
         )
-    (folder / "fingerprints.json").write_text(json.dumps(overlap.fingerprints(pages)), encoding="utf-8")
+    prints = json.dumps(overlap.fingerprints(pages)).encode("utf-8")
+    write_atomically(folder / "fingerprints.json", lambda handle: handle.write(prints))
     source.status, source.problem = "read", None

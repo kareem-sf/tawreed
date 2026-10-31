@@ -2,6 +2,7 @@ import pytest
 from conftest import TOKEN
 from fastapi.testclient import TestClient
 
+from tawreed import __version__
 from tawreed.api.app import create_app
 from tawreed.core.home import data_home
 
@@ -47,7 +48,7 @@ def test_settings_refuse_unknown_values(client, body):
 
 def test_about_names_the_version_and_data_folder(client, tmp_path):
     about = client.get("/about").json()
-    assert about["version"] == "0.0.1"
+    assert about["version"] == __version__
     assert about["data_folder"] == str(tmp_path)
 
 

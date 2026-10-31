@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
 from tawreed import decisions, ledger, packages, sources
-from tawreed.api.common import DB, Home, problem
+from tawreed.api.common import DB, Home, idle, problem
 from tawreed.api.projects import SourceOut
 from tawreed.ledger.extract import SheetLayout
 from tawreed.projects import Project
@@ -135,6 +135,7 @@ def lay_out_sheet(
     project_id: str, source_id: str, number: int, body: SheetLayout, request: Request, session: DB, home: Home
 ) -> Response:
     """The engineer sets a sheet's columns. Its items are read again from the cells; the AI leaves it as it is."""
+    idle(request, project_id)
     source = _source(session, project_id, source_id)
     kept = packages.placed_on(session, source.id, [number])
     try:
@@ -150,6 +151,7 @@ def lay_out_sheet(
 @router.post("/{source_id}/pages/{number}/set-aside", status_code=204)
 def set_aside(project_id: str, source_id: str, number: int, body: SetAside, request: Request, session: DB) -> Response:
     """The engineer says a page lists no items."""
+    idle(request, project_id)
     source = _source(session, project_id, source_id)
     try:
         ledger.skip_pages(session, source, [number], body.reason, "engineer")
@@ -201,4 +203,7 @@ def page_image(project_id: str, source_id: str, number: int, session: DB, home: 
     page = _page(source, number)
     if page.kind == "sheet":
         raise problem(404, "no_page_image")
+    # Drawing a large page takes a while: let go of the database first, so other requests aren't kept waiting.
+    session.expunge(source)
+    session.rollback()
     return Response(sources.page_image(home, source, number), media_type="image/png")
