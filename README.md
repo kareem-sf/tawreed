@@ -23,18 +23,31 @@ suppliers and subcontractors for pricing. You approve at every gate, and nothing
 <p>
   <a href="https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_x64-setup.exe"><img src="docs/media/download-windows.svg" alt="Download for Windows" height="48"></a>
   &nbsp;
+  <a href="https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_aarch64.dmg"><img src="docs/media/download-macos.svg" alt="Download for Mac (Apple silicon)" height="48"></a>
+  &nbsp;
+  <a href="https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_x64.dmg"><img src="docs/media/download-macos-intel.svg" alt="Download for Mac (Intel)" height="48"></a>
+  &nbsp;
   <a href="https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_amd64.AppImage"><img src="docs/media/download-linux.svg" alt="Download for Linux" height="48"></a>
 </p>
 
 | System | File |
 | --- | --- |
 | Windows 10 and 11, 64-bit | [`Tawreed_x64-setup.exe`](https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_x64-setup.exe): installs for your user, no administrator rights needed |
+| Mac with Apple silicon (M1 or newer), macOS 13 or newer | [`Tawreed_aarch64.dmg`](https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_aarch64.dmg): open it and drag Tawreed to Applications first |
+| Mac with an Intel chip, macOS 13 or newer | [`Tawreed_x64.dmg`](https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_x64.dmg): open it and drag Tawreed to Applications first |
 | Linux, 64-bit | [`Tawreed_amd64.AppImage`](https://github.com/qs-mind/tawreed/releases/latest/download/Tawreed_amd64.AppImage): make it executable (`chmod +x Tawreed_amd64.AppImage`), then open it |
 
 All versions, checksums (`SHA256SUMS.txt`) and release notes are on the [Releases page](https://github.com/qs-mind/tawreed/releases).
 
 > **Windows SmartScreen.** The Windows installer is not code-signed yet, so Windows may show "Windows protected your
 > PC" the first time you run it. Choose **More info**, then **Run anyway**.
+
+> **Mac first run.** The Mac app is not signed with an Apple developer certificate, so macOS will not open it
+> straight away. Drag Tawreed to **Applications** first and open it from there. When macOS says it cannot verify
+> Tawreed, open **System Settings**, **Privacy & Security**, scroll down and click **Open Anyway** next to
+> Tawreed, then confirm. If that button does not appear, run `xattr -dr com.apple.quarantine /Applications/Tawreed.app`
+> in Terminal and open Tawreed again. To check your download first, compare `shasum -a 256 Tawreed_aarch64.dmg`
+> (or `Tawreed_x64.dmg`) with the line in `SHA256SUMS.txt` on the Releases page.
 
 Tawreed checks for a new version once when it opens. When one is out it offers it, and installs it only when you
 press **Update and restart**. Updates are signed, and the app installs only an update whose signature matches the
@@ -191,7 +204,7 @@ On macOS or Linux, create the environment with `python3.12 -m venv service/.venv
 `service/.venv/bin/python -m pip install -e "./service[dev]"`.
 
 **Arabic font.** Tawreed's Arabic typeface, Thmanyah Sans, may only ship inside the compiled app, so it is not in
-this repository. Put the `-Light`, `-Regular`, `-Medium` and `-Bold` `.woff2` files of `thmanyahsans` from the
+this repository. The GitHub builds use the open IBM Plex Sans Arabic instead. Put the `-Light`, `-Regular`, `-Medium` and `-Bold` `.woff2` files of `thmanyahsans` from the
 official download into `ui/src/fonts/thmanyah/` (ignored by git). Without them Arabic uses the system font. Never
 commit, upload or host these files.
 
@@ -215,33 +228,38 @@ when started by hand (Actions → CI → Run workflow).
 The specification is [docs/spec.md](docs/spec.md), the architecture [docs/architecture.md](docs/architecture.md)
 and the record of the work [docs/progress.md](docs/progress.md).
 
-## Windows and Linux packages
+## Windows, Mac and Linux packages
 
 `npm run package` freezes the service with PyInstaller into `service/dist/tawreed-service/` and builds the NSIS
 installer into `desktop/target/release/bundle/nsis/`. The installed app starts that service itself on a free local
 port with a fresh token, forwards the interface's requests to it, and the service stops when the app does. Its log
-is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.qsmind.tawreed\logs`).
+is `service.log` in the app's log folder (`%LOCALAPPDATA%\com.qsmind.tawreed\logs` on Windows,
+`~/Library/Logs/com.qsmind.tawreed/service.log` on macOS).
 
 On Linux x64 the same command builds an AppImage in `desktop/target/release/bundle/appimage/`. Build each platform
-on its own operating system. Native builds made with the licensed Thmanyah files present embed them in the app;
-builds without them, such as the **Release build** workflow on GitHub, use the system Arabic font.
+on its own operating system. On a Mac, `npm run package` builds the app and the `.dmg` (Apple silicon or Intel,
+whichever the Mac is); the app is signed ad hoc, with no Apple developer account and no notarization. Builds made
+with the licensed Thmanyah files present embed them in the app; builds without them, such as the **Release build**
+workflow on GitHub, use the bundled IBM Plex Sans Arabic.
 
 ## Releases
 
 Releases are GitHub releases of this repo. Each carries `Tawreed_x64-setup.exe`, `Tawreed_amd64.AppImage`,
-`SHA256SUMS.txt` and the update feed `latest.json`; the download links above and the app's updater always point
+`Tawreed_aarch64.dmg`, `Tawreed_x64.dmg`, the two macOS update archives (`Tawreed_aarch64.app.tar.gz`,
+`Tawreed_x64.app.tar.gz`), `SHA256SUMS.txt` and the update feed `latest.json`; the download links above and the app's updater always point
 at the latest one. Release notes are in `docs/releases/<version>.md`.
 
-1. **Release build** (Actions, started by hand) builds the Windows installer and the Linux AppImage for the version
-   in `package.json` and keeps them as workflow artifacts.
-2. **Publish release**, first run (with that run's id): a draft release holds the two installers. They are signed
-   for the updater outside GitHub, with the private key, which never goes to GitHub.
-3. **Publish release**, second run (with the two signatures): adds the checksums and `latest.json` from
+1. **Release build** (Actions, started by hand) tests and builds the Windows installer, the Linux AppImage and the
+   two Mac apps for the version in `package.json` and keeps them as workflow artifacts.
+2. **Publish release**, first run (with that run's id): a draft release, tagged on the commit that was built, holds
+   the files. The four update files (Windows, Linux and the two Mac archives) are signed for the updater outside
+   GitHub, with the private key, which never goes to GitHub.
+3. **Publish release**, second run (with the four signatures): adds the checksums and `latest.json` from
    `scripts/release.mjs`, checks them against the draft's files, and publishes the release as the latest.
 
-Locally, `npm run release -- <folder>` writes the same checksums and `latest.json` for a folder of signed Windows
-and Linux packages of one version; it refuses a partial or unsigned feed and does not publish. The updater key,
-release inputs and clean Windows and Linux test steps are in
+Locally, `npm run release -- <folder>` writes the same checksums and `latest.json` for a folder of signed packages of
+all four platforms and one version; it refuses a partial, unsigned or wrongly versioned feed, and a version that
+differs between files, and does not publish. The updater key, release inputs and clean-install test steps are in
 [docs/2026-10-10-updater-and-installer.md](docs/2026-10-10-updater-and-installer.md).
 
 ## License

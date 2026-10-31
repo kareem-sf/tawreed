@@ -12,7 +12,7 @@ Tauri updater signatures remain mandatory. Hosting belongs to Platform (QSM-24).
 ## 1. How the updater works
 
 - The desktop app uses Tauri's updater (`tauri-plugin-updater`). An update is the same Windows NSIS installer or Linux AppImage people
-  download, with a signature file beside it. The app only installs a file whose signature matches the public key
+  download, or, on a Mac, the zipped app (`.app.tar.gz`), with a signature file beside it. The app only installs a file whose signature matches the public key
   built into it.
 - **One address.** `plugins.updater.endpoints` in `desktop/tauri.release.conf.json`. Since 2026-10-18 (founder's
   choice) downloads and updates come from GitHub releases of this repo, `qs-mind/tawreed`, not a QS Mind server:
@@ -20,7 +20,8 @@ Tauri updater signatures remain mandatory. Hosting belongs to Platform (QSM-24).
   only from a public repo; while the repo is private these links ask for a GitHub sign-in. It is built into
   every package. `npm run release` works out each installer's address from it
   (`releases/download/v<version>/<installer>`).
-- **Fixed file names.** Each release carries `Tawreed_x64-setup.exe` and `Tawreed_amd64.AppImage`, without the
+- **Fixed file names.** Each release carries `Tawreed_x64-setup.exe`, `Tawreed_amd64.AppImage`, `Tawreed_aarch64.app.tar.gz`,
+  `Tawreed_x64.app.tar.gz` and the download-only `Tawreed_aarch64.dmg` and `Tawreed_x64.dmg`, without the
   version, so the download buttons on qsmind.app link to
   `https://github.com/qs-mind/tawreed/releases/latest/download/<file>` and start the download directly;
   nobody has to open GitHub.
@@ -82,30 +83,51 @@ What must be true before a build can be released:
 | Private key and password | Environment variables on the release machine | In the project's `.secrets/tawreed-updater/` |
 | App ID | `identifier` in `desktop/tauri.conf.json` | `com.qsmind.tawreed`; selected launch identity |
 | Publisher, copyright | `desktop/tauri.release.conf.json` | "QS Mind"; "© 2026 QS Mind. All rights reserved." |
-| Version | `package.json`, `desktop/Cargo.toml`, `desktop/tauri.conf.json`, `service/pyproject.toml`, `service/tawreed/__init__.py` | Same number in all five |
+| Version | `package.json`, `package-lock.json` (twice), `desktop/Cargo.toml`, `desktop/Cargo.lock` (the `tawreed-desktop` entry), `desktop/tauri.conf.json`, `service/pyproject.toml`, `service/tawreed/__init__.py` | Same number in all seven files. `npm run release` refuses to continue if one differs |
 | Thmanyah font files | `ui/src/fonts/thmanyah/` on the release machine | Not in the repo (licence) |
 
-Build natively on **both** Windows x64 and Linux x64: `npm run verify`, then `npm run package`.
-Linux uses AppImage, the package supported by Tauri's Linux updater; no DEB/RPM update promise is made.
-With `createUpdaterArtifacts: true`, Tauri creates `.exe.sig` and `.AppImage.sig` beside the native artifacts.
+Build natively on every platform. The **Release build** workflow does it on GitHub runners (Windows, Ubuntu 22.04,
+macOS 15 on Apple silicon and macOS 15 on Intel); by hand it is `npm run verify`, then `npm run package` on each
+system. Linux uses AppImage, the package supported by Tauri's Linux updater; no DEB/RPM update promise is made.
+The Mac app is signed ad hoc (`signingIdentity: "-"`): there is no Apple developer account and no notarization,
+so macOS asks the user to confirm the first launch (see the README). Apple's updater needs the app itself, so the
+workflow zips `Tawreed.app` by hand (`Tawreed_<version>_<aarch64|x64>.app.tar.gz`) after checking it with
+`codesign --verify`; the DMG is only for a first install and is not in the update feed.
 
-Collect the same version from both machines into a clean staging directory:
+GitHub builds are never signed for the updater, because the private key must not go there. They are built with
+`createUpdaterArtifacts: false`, and the key signs four files afterwards, on the founder's machine, each with the
+version bound to the signature:
 
 ```
-<staging>/nsis/Tawreed_<version>_x64-setup.exe
-<staging>/nsis/Tawreed_<version>_x64-setup.exe.sig
-<staging>/appimage/Tawreed_<version>_amd64.AppImage
-<staging>/appimage/Tawreed_<version>_amd64.AppImage.sig
+npx tauri signer sign --app-version <version> -f ~/.tauri/tawreed-updater.key <file>
+```
+
+for `Tawreed_<version>_x64-setup.exe`, `Tawreed_<version>_amd64.AppImage`, `Tawreed_<version>_aarch64.app.tar.gz`
+and `Tawreed_<version>_x64.app.tar.gz`. `npm run release` decodes every `.sig` and refuses one that does not carry
+`version:<version>`, so an old signature cannot be reused for a new release.
+
+Collect the same version from all builds into a clean staging directory:
+
+```
+<staging>/nsis/Tawreed_<version>_x64-setup.exe(.sig)
+<staging>/appimage/Tawreed_<version>_amd64.AppImage(.sig)
+<staging>/macos-aarch64/Tawreed_<version>_aarch64.app.tar.gz(.sig)
+<staging>/macos-aarch64/Tawreed_<version>_aarch64.dmg
+<staging>/macos-x64/Tawreed_<version>_x64.app.tar.gz(.sig)
+<staging>/macos-x64/Tawreed_<version>_x64.dmg
 npm run release -- <staging>
 ```
 
-The script writes `<staging>/SHA256SUMS.txt` and `<staging>/latest.json` with **both** platform entries.
-It refuses to replace a feed if either platform or a non-empty signature is absent. Synthetic tests prove this;
-the script checks signature presence, while the updater verifies cryptographic validity.
+The script writes `<staging>/SHA256SUMS.txt` (all six files) and `<staging>/latest.json` with the **four** update
+entries (`windows-x86_64`, `linux-x86_64`, `darwin-aarch64`, `darwin-x86_64`). It refuses to replace a feed if any
+file, any signature, or the version in a signature is wrong, or if the version differs between files. Synthetic
+tests prove this; the updater itself verifies that a signature is cryptographically valid.
 Without a public key, it writes checksums for available native packages but no feed, and prints NOT FOR RELEASE.
-It also copies each installer to the staging folder under its fixed name. Never upload an old feed left in a
-staging folder. Upload the two fixed-name installers, `SHA256SUMS.txt` and `latest.json` to one GitHub release
-`v<version>` of `qs-mind/tawreed`, only with the founder's approval. Nothing publishes here.
+It also copies each file to the staging folder under its fixed name. Never upload an old feed left in a
+staging folder. Upload the six fixed-name files, `SHA256SUMS.txt` and `latest.json` to one GitHub release
+`v<version>` of `qs-mind/tawreed`, only with the founder's approval. Nothing publishes here; the **Publish
+release** workflow does the upload in two runs (a draft to sign, then the four signatures), and tags the exact
+commit the build ran on.
 
 ## 4. Installer identity and the app ID
 
@@ -183,7 +205,7 @@ and, in a scratch copy of the repo that is never committed, sets in `desktop/tau
 public key, `createUpdaterArtifacts: true`, and a test address (ask the Platform Engineer for an HTTPS test folder,
 for example the latest release of a separate public test repo; the address must be HTTPS).
 
-The builder makes build **N** (for example 0.1.0) and build **N+1** (0.1.1: change the version in the five places
+The builder makes build **N** (for example 0.1.0) and build **N+1** (0.1.1: change the version in the seven files
 in section 3), each with `npm run package` and `npm run release`. Nothing is uploaded yet.
 
 1. Install build N on the clean PC. Open it. Expect: no line about updates (the test folder is empty).
@@ -290,3 +312,11 @@ An install error no longer restarts Tawreed. After the signed download, the desk
 Focused Rust tests cover install failure, stop failure, success, and a stopped synthetic service process that answers requests after recovery. Run `cargo test --manifest-path desktop/Cargo.toml` alongside `npm run verify`.
 
 Fresh QA: use a throwaway signed Linux update with the existing test feed. Make the installed AppImage location unwritable to the test user, then select Update and restart. Expected: Tawreed stays open, shows the EN/AR installation error, and local service requests still work. Also repeat a successful update. Windows installer failures and native AppImage replacement still require packaged testing; the synthetic process test does not prove either platform installer.
+
+## Update, 2026-10-31: macOS and version 0.0.2
+
+macOS (Apple silicon and Intel) joins Windows and Linux in 0.0.2. Not yet checked on a real Mac: the DMG install,
+the Gatekeeper first-run steps, a signed update from one version to the next, and whether the ad hoc signature
+survives the update archive. The release build checks the signature with `codesign --verify` and starts the service
+from the unpacked archive, which is a build check, not an install test. Clean-install steps for all three systems
+are in `docs/clean-install-qa.md`.

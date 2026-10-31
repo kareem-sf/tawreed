@@ -1,6 +1,6 @@
 [project]
 name = "tawreed"
-version = "0.0.1"
+version = "0.0.2"
 license = "LicenseRef-Proprietary"
 license-files = ["LICENSE"]
 description = "Tawreed service: BOQs in, procurement packages out"

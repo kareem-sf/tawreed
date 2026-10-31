@@ -1,0 +1,5 @@
+# The Rust version every build uses, here and on GitHub. Change it on purpose, not by drift.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

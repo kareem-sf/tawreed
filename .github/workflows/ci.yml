@@ -1,7 +1,7 @@
 name: CI
 
-# Runs only when started by hand (Actions > CI > Run workflow). Run `npm run verify`
-# locally before pushing: private repos share 2,000 free Actions minutes a month.
+# Runs only when started by hand (Actions > CI > Run workflow). Run `npm run verify` locally before pushing.
+# The repo is public, so these jobs cost nothing; they are not set to run on every push.
 on:
   workflow_dispatch:
 
@@ -12,49 +12,75 @@ jobs:
   service:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
-      - run: pip install -e "./service[dev]"
+      # The locked, hashed packages (service/requirements.lock), then the service itself.
+      - run: pip install --require-hashes -r service/requirements.lock && pip install --no-deps -e ./service
       - run: ruff check service && ruff format --check service
       - run: pytest service
 
   interface:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
           cache: npm
-      - run: python -m venv service/.venv && service/.venv/bin/pip install -e ./service
+      - run: python -m venv service/.venv && service/.venv/bin/pip install --require-hashes -r service/requirements.lock && service/.venv/bin/pip install --no-deps -e ./service
       - run: npm ci
       - name: API types match the service
         run: npm run bindings && git diff --exit-code ui/src/api
       - run: npm run typecheck
       - run: npm run test:ui
-      # Thmanyah is not in the repository (licence); the build falls back to the system Arabic font.
+      - run: npm run test:release
+      # Thmanyah is not in the repository (licence); the build uses the bundled IBM Plex Sans Arabic.
       - run: npx vite build
 
   desktop:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The version is in rust-toolchain.toml too; keep the two the same.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          toolchain: "1.99.1"
           components: clippy
-      - run: cargo clippy --manifest-path desktop/Cargo.toml -- -D warnings
+      - run: cargo clippy --manifest-path desktop/Cargo.toml --locked -- -D warnings
 
-  # The check main's branch protection requires. It runs whatever happened above and passes only when every job
-  # passed: a failed, cancelled or skipped job fails it (a skipped required check would otherwise count as passing).
-  release-gate:
-    name: Release gate
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+          components: clippy
+      - run: python -m venv service/.venv && service/.venv/bin/pip install --require-hashes -r service/requirements.lock && service/.venv/bin/pip install --no-deps -e ./service
+      - run: npm ci
+      - run: service/.venv/bin/python -m pytest service
+      - run: npm run test:ui
+      - run: npx vite build
+      - run: cargo check --manifest-path desktop/Cargo.toml --locked
+      - run: cargo clippy --manifest-path desktop/Cargo.toml --locked -- -D warnings
+
+  # One check that passes only when every job above passed: a failed, cancelled or skipped job fails it.
+  all-checks:
+    name: All checks
     if: always()
-    needs: [service, interface, desktop]
+    needs: [service, interface, desktop, macos]
     runs-on: ubuntu-latest
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')

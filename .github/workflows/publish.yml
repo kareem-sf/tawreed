@@ -1,11 +1,12 @@
 name: Publish release
 
 # Publishes the installers from one "Release build" run as a GitHub release of this repo, in two runs:
-# 1. Without signatures: a draft release (hidden from the public) holds the two installers, so they can be signed
-#    for the updater with the private key, which never goes to GitHub.
-# 2. With the signatures (public text): the same installers get the checksums and the update feed (latest.json)
+# 1. Without signatures: a draft release (hidden from the public) holds the installers and the macOS update
+#    archives, so the four update files can be signed with the updater private key, which never goes to GitHub.
+# 2. With all four signatures (public text): the same files get the checksums and the update feed (latest.json)
 #    from `scripts/release.mjs`, and the release is published as the latest. The download buttons on qsmind.app
 #    and the app's updater always point at the latest release. Started by hand.
+# The release is tagged on the exact commit that "Release build" built, whatever main is by now.
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +19,12 @@ on:
       linux_signature:
         description: Contents of Tawreed_<version>_amd64.AppImage.sig (empty for the draft run)
         required: false
+      macos_aarch64_signature:
+        description: Contents of Tawreed_<version>_aarch64.app.tar.gz.sig (empty for the draft run)
+        required: false
+      macos_x64_signature:
+        description: Contents of Tawreed_<version>_x64.app.tar.gz.sig (empty for the draft run)
+        required: false
 
 permissions:
   contents: write
@@ -28,39 +35,97 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+      WINDOWS_SIGNATURE: ${{ inputs.windows_signature }}
+      LINUX_SIGNATURE: ${{ inputs.linux_signature }}
+      MACOS_AARCH64_SIGNATURE: ${{ inputs.macos_aarch64_signature }}
+      MACOS_X64_SIGNATURE: ${{ inputs.macos_x64_signature }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - name: Check the build run, and find the commit it built
+        id: build
+        run: |
+          set -euo pipefail
+          case "$RUN_ID" in ''|*[!0-9]*) echo "run_id must be a number."; exit 1;; esac
+          run=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha,workflowName,conclusion)
+          echo "$run"
+          [ "$(jq -r .workflowName <<<"$run")" = "Release build" ] || { echo "Run $RUN_ID is not a Release build run."; exit 1; }
+          [ "$(jq -r .conclusion <<<"$run")" = "success" ] || { echo "Run $RUN_ID did not succeed."; exit 1; }
+          echo "sha=$(jq -r .headSha <<<"$run")" >> "$GITHUB_OUTPUT"
+      - name: Signatures are all given or all empty
+        id: mode
+        run: |
+          set -euo pipefail
+          given=0
+          for value in "$WINDOWS_SIGNATURE" "$LINUX_SIGNATURE" "$MACOS_AARCH64_SIGNATURE" "$MACOS_X64_SIGNATURE"; do
+            if [ -n "$value" ]; then given=$((given + 1)); fi
+          done
+          case "$given" in
+            0) echo "signed=false" >> "$GITHUB_OUTPUT" ;;
+            4) echo "signed=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Give all four signatures (Windows, Linux, macOS Apple Silicon, macOS Intel) or none. Got $given."; exit 1 ;;
+          esac
+      # The version and the notes come from the built commit, not from whatever main is now.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.build.outputs.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: nsis
           path: bundle/nsis
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: appimage
           path: bundle/appimage
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: macos-aarch64
+          path: bundle/macos-aarch64
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: macos-x64
+          path: bundle/macos-x64
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
       - run: echo "VERSION=$(node -p 'require("./package.json").version')" >> "$GITHUB_ENV"
       - name: Draft with the installers, to sign
-        if: inputs.windows_signature == ''
+        if: steps.mode.outputs.signed == 'false'
+        env:
+          SHA: ${{ steps.build.outputs.sha }}
         run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" >/dev/null 2>&1; then echo "Release v$VERSION already exists. Delete the draft first."; exit 1; fi
           cp "bundle/nsis/Tawreed_${VERSION}_x64-setup.exe" bundle/Tawreed_x64-setup.exe
           cp "bundle/appimage/Tawreed_${VERSION}_amd64.AppImage" bundle/Tawreed_amd64.AppImage
-          gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "Tawreed $VERSION" \
-            --notes-file "docs/releases/$VERSION.md" bundle/Tawreed_x64-setup.exe bundle/Tawreed_amd64.AppImage
+          for arch in aarch64 x64; do
+            cp "bundle/macos-$arch/Tawreed_${VERSION}_$arch.app.tar.gz" "bundle/Tawreed_$arch.app.tar.gz"
+            cp "bundle/macos-$arch/Tawreed_${VERSION}_$arch.dmg" "bundle/Tawreed_$arch.dmg"
+          done
+          gh release create "v$VERSION" --draft --target "$SHA" --title "Tawreed $VERSION" \
+            --notes-file "docs/releases/$VERSION.md" \
+            bundle/Tawreed_x64-setup.exe bundle/Tawreed_amd64.AppImage \
+            bundle/Tawreed_aarch64.app.tar.gz bundle/Tawreed_x64.app.tar.gz bundle/Tawreed_aarch64.dmg bundle/Tawreed_x64.dmg
       - name: Signatures, checksums, update feed, and publish
-        if: inputs.windows_signature != ''
+        if: steps.mode.outputs.signed == 'true'
         env:
-          WINDOWS_SIGNATURE: ${{ inputs.windows_signature }}
-          LINUX_SIGNATURE: ${{ inputs.linux_signature }}
+          SHA: ${{ steps.build.outputs.sha }}
         run: |
+          set -euo pipefail
+          # The draft must be the one made from this very build.
+          [ "$(gh release view "v$VERSION" --json isDraft,targetCommitish --jq 'select(.isDraft) | .targetCommitish')" = "$SHA" ] \
+            || { echo "No draft v$VERSION for commit $SHA. Run the draft step first, with this run_id."; exit 1; }
           printf '%s' "$WINDOWS_SIGNATURE" > "bundle/nsis/Tawreed_${VERSION}_x64-setup.exe.sig"
           printf '%s' "$LINUX_SIGNATURE" > "bundle/appimage/Tawreed_${VERSION}_amd64.AppImage.sig"
+          printf '%s' "$MACOS_AARCH64_SIGNATURE" > "bundle/macos-aarch64/Tawreed_${VERSION}_aarch64.app.tar.gz.sig"
+          printf '%s' "$MACOS_X64_SIGNATURE" > "bundle/macos-x64/Tawreed_${VERSION}_x64.app.tar.gz.sig"
           node scripts/release.mjs bundle
           # The draft holds the same bytes the signatures were made over; the checksums must agree.
           gh release download "v$VERSION" --dir drafted --pattern 'Tawreed_*'

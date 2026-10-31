@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="270" height="48" viewBox="0 0 270 48" role="img" aria-label="Download for Mac (Intel)">
+  <rect x="0.75" y="0.75" width="268.5" height="46.5" rx="10" fill="#ffffff" stroke="#111111" stroke-width="1.5"/>
+  <g transform="translate(22 13)" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 2v13M6 10l5 5 5-5M3 20h16"/>
+  </g>
+  <text x="54" y="30" fill="#111111" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="600">Download for Mac (Intel)</text>
+</svg>
