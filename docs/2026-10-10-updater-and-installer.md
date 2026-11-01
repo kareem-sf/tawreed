@@ -47,10 +47,10 @@ on About too), a check while the app stays open for days, release notes in the a
 ## 2. The updater signing key
 
 The first key, made on 2026-10-18 in a cloud session, was lost with that session: 0.0.1 can't update itself.
-The current key was made on 2026-10-31 on the founder's laptop, by the steps below: the private key is
-`~/.tauri/tawreed-updater.key`, its password `~/.tauri/tawreed-updater.key.password` (both readable by the owner
-only); the public key is committed. Copy both to the password manager and one offline copy: without them no
-installed Tawreed can be updated again. The steps stay for a future key.
+The key made on 2026-10-31 (key ID 5DD41B87BB23B378), which 0.0.2 carries, is lost as well: 0.0.2 can't update
+itself. The current key was made on 2026-11-01. Its key ID is E0E5D54399DB82CD, and the public key is committed.
+The private key lives in the team's box key store, plus an age-encrypted backup. Without it, no installed
+Tawreed can be updated again. The steps below stay for a future key.
 
 1. On the founder's own machine, in the repo folder:
 
@@ -80,9 +80,9 @@ What must be true before a build can be released:
 | Input | Where | State |
 |---|---|---|
 | Update address | `plugins.updater.endpoints` in `desktop/tauri.release.conf.json` | Selected in QSM-7; deployment separate |
-| Updater public key | `plugins.updater.pubkey`, same file | Set 2026-10-18 |
+| Updater public key | `plugins.updater.pubkey`, same file | Set 2026-11-01, key ID E0E5D54399DB82CD |
 | `createUpdaterArtifacts` | `bundle`, same file | `true` |
-| Private key and password | Environment variables on the release machine | In the project's `.secrets/tawreed-updater/` |
+| Private key and password | Environment variables on the release machine | Team's box key store, plus an age-encrypted backup |
 | App ID | `identifier` in `desktop/tauri.conf.json` | `com.qsmind.tawreed`; selected launch identity |
 | Publisher, copyright | `desktop/tauri.release.conf.json` | "QS Mind"; "© 2026 QS Mind. All rights reserved." |
 | Version | `package.json`, `package-lock.json` (twice), `desktop/Cargo.toml`, `desktop/Cargo.lock` (the `tawreed-desktop` entry), `desktop/tauri.conf.json`, `service/pyproject.toml`, `service/tawreed/__init__.py` | Same number in all seven files. `npm run release` refuses to continue if one differs |
@@ -98,10 +98,11 @@ workflow zips `Tawreed.app` by hand (`Tawreed_<version>_<aarch64|x64>.app.tar.gz
 
 GitHub builds are never signed for the updater, because the private key must not go there. They are built with
 `createUpdaterArtifacts: false`, and the key signs four files afterwards, on the founder's machine, each with the
-version bound to the signature:
+version bound to the signature. The command reads `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` for that terminal:
 
 ```
-npx tauri signer sign --app-version <version> -f ~/.tauri/tawreed-updater.key <file>
+npx tauri signer sign --app-version <version> <file>
 ```
 
 for `Tawreed_<version>_x64-setup.exe`, `Tawreed_<version>_amd64.AppImage`, `Tawreed_<version>_aarch64.app.tar.gz`
