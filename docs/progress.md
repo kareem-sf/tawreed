@@ -342,3 +342,12 @@ machine.
 - Kumbh Sans kerns "/." so tightly that the dot disappears; the data-folder path turns kerning off.
 - No support email: support will be a form in the app that saves to the QS Mind database. Not built yet.
 - Not done here: the repository is still private on GitHub; the launch-gaps items on logs and updates in About.
+
+## 1 November 2026: a new updater signing key
+
+- The updater key made on 2026-10-31 was lost, as the 2026-10-18 key was. Installed copies of 0.0.2 cannot update
+  themselves. The public key in `desktop/tauri.release.conf.json` is now the key made on 2026-11-01, ID
+  E0E5D54399DB82CD.
+- The private key lives in the team's box key store, plus an age-encrypted backup.
+- Notes for the next version, 0.0.3, are in `docs/releases/0.0.3.md`, in English and Arabic: download that version
+  from the download page and install it by hand. The app version stays 0.0.2. No release is published here.
